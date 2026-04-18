@@ -26,7 +26,7 @@ Browse the full catalog of interactive visualizations on the **[live website](ht
 Traditional machine learning algorithms, evaluation metrics, and clustering methods
 
 - Classification Metrics Explorer (Accuracy, Precision, Recall, F1, ROC, PR curves)
-- Decision Trees, KNN, Logistic Regression, SVM
+- Decision Trees, KNN, Logistic Regression, Naive Bayes, SVM
 - Neural Network Classification
 - K-Means & Hierarchical Clustering
 
