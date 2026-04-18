@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LoRA Deep Dive Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Fade-in animation for tab transitions */
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 font-sans min-h-screen p-4 md:p-8">
+
+    <div class="max-w-6xl mx-auto space-y-6">
+        
+        <!-- Header & Navigation -->
+        <div class="flex flex-col md:flex-row justify-between items-center gap-6 mb-8 border-b border-slate-800 pb-6">
+            <div>
+                <h1 class="text-3xl font-extrabold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400">
+                    LoRA Visualizer
+                </h1>
+                <p class="text-slate-400 text-sm mt-1">Low-Rank Adaptation Matrix Operations</p>
+            </div>
+
+            <div class="flex gap-2 p-1 bg-slate-900 rounded-lg border border-slate-800">
+                <button id="tab-btn-interactive" onclick="switchTab('interactive')" class="flex items-center gap-2 px-6 py-2.5 rounded-md font-medium transition-all text-sm bg-blue-600 text-white shadow-md">
+                    <i data-lucide="settings-2" class="w-4 h-4"></i> Dimensions & Math
+                </button>
+                <button id="tab-btn-equations" onclick="switchTab('equations')" class="flex items-center gap-2 px-6 py-2.5 rounded-md font-medium transition-all text-sm text-slate-400 hover:text-white hover:bg-slate-800">
+                    <i data-lucide="sigma" class="w-4 h-4"></i> Training & Extraction
+                </button>
+            </div>
+        </div>
+
+        <!-- TAB 1: INTERACTIVE ARCHITECTURE -->
+        <div id="tab-content-interactive" class="grid lg:grid-cols-12 gap-6 fade-in block">
+            
+            <!-- Controls sidebar -->
+            <div class="bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden lg:col-span-4 p-6 flex flex-col gap-8">
+                <div class="space-y-6">
+                    <div>
+                        <div class="flex justify-between mb-2">
+                            <label class="text-sm font-bold text-slate-300">Dimension (<span class="font-serif italic text-lg px-1">d</span>)</label>
+                            <span id="dim-display" class="font-mono text-blue-400 bg-blue-950/50 px-2 py-0.5 rounded border border-blue-900">1024</span>
+                        </div>
+                        <input type="range" id="dim-input" min="256" max="4096" step="256" value="1024" class="w-full accent-blue-500" />
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-2">
+                            <label class="text-sm font-bold text-slate-300">Rank (<span class="font-serif italic text-lg px-1">r</span>)</label>
+                            <span id="rank-display" class="font-mono text-emerald-400 bg-emerald-950/50 px-2 py-0.5 rounded border border-emerald-900">16</span>
+                        </div>
+                        <input type="range" id="rank-input" min="4" max="256" step="4" value="16" class="w-full accent-emerald-500" />
+                    </div>
+
+                    <div>
+                        <div class="flex justify-between mb-2">
+                            <label class="text-sm font-bold text-slate-300">Alpha (<span class="font-serif italic text-lg px-1">α</span>)</label>
+                            <span id="alpha-display" class="font-mono text-amber-400 bg-amber-950/50 px-2 py-0.5 rounded border border-amber-900">32</span>
+                        </div>
+                        <input type="range" id="alpha-input" min="8" max="512" step="8" value="32" class="w-full accent-amber-500" />
+                    </div>
+                </div>
+
+                <div class="mt-auto space-y-4">
+                    <div class="p-4 bg-slate-950 rounded-lg border border-slate-800 flex flex-col gap-3">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-slate-400 font-medium">Original Parameters</span>
+                            <span id="params-original-display" class="text-sm font-mono text-slate-500 line-through">1,048,576</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm text-emerald-400 font-bold">New Trainable Parameters</span>
+                            <span id="params-lora-display" class="text-xl font-mono text-emerald-400 font-bold">32,768</span>
+                        </div>
+                        <div class="text-xs text-emerald-500 font-bold bg-emerald-950/30 px-2 py-1.5 rounded text-center border border-emerald-900/50 mt-1">
+                            ↓ <span id="reduction-display">96.88</span>% reduction in trainable parameters
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Matrix Visualization -->
+            <div class="bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden lg:col-span-8 p-8 flex flex-col justify-center min-h-[500px]">
+                <div class="flex items-center gap-6 flex-wrap justify-center overflow-x-auto pb-4 w-full">
+                    
+                    <!-- W0 Matrix -->
+                    <div class="flex flex-col items-center">
+                        <div id="matrix-w0-visual" class="relative flex items-center justify-center rounded-lg border shadow-inner transition-all duration-300 bg-blue-950 border-2 border-blue-600 opacity-80" style="width: 156px; height: 156px;">
+                            <div class="absolute inset-0 bg-[url('data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSI4IiBoZWlnaHQ9IjgiPgo8cmVjdCB3aWR0aD0iOCIgaGVpZ2h0PSI4IiBmaWxsPSIjZmZmIiBmaWxsLW9wYWNpdHk9IjAiLz4KPHBhdGggZD0iTTAgMEw4IDhaTTEwIC0yTDEwIDhaTS0yIDEwTDEwIC0yWiIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utb3BhY2l0eT0iMC4xIiBzdHJva2Utd2lkdGg9IjIiLz4KPC9zdmc+')] opacity-20 pointer-events-none rounded-lg"></div>
+                            <span class="font-serif italic font-bold text-xl text-white z-10 drop-shadow-md">W₀</span>
+                        </div>
+                        <div id="matrix-w0-text" class="mt-2 text-sm text-slate-400 font-mono font-semibold">1024 × 1024</div>
+                        <div class="mt-1 text-xs px-2 py-1 bg-slate-950 rounded text-slate-300 font-mono border border-slate-800">Frozen Base</div>
+                    </div>
+                    
+                    <div class="text-3xl font-bold text-slate-500">+</div>
+                    
+                    <div class="flex flex-col items-center">
+                        <div class="flex items-center gap-3 p-4 bg-slate-950/50 rounded-xl border border-slate-800">
+                            <!-- Matrix B -->
+                            <div class="flex flex-col items-center">
+                                <div id="matrix-b-visual" class="relative flex items-center justify-center rounded-lg border shadow-inner transition-all duration-300 bg-emerald-950 border-2 border-emerald-500" style="width: 72px; height: 156px;">
+                                    <span class="font-serif italic font-bold text-xl text-white z-10 drop-shadow-md">B</span>
+                                </div>
+                                <div id="matrix-b-text" class="mt-2 text-sm text-slate-400 font-mono font-semibold">1024 × 16</div>
+                                <div class="mt-1 text-xs px-2 py-1 bg-slate-950 rounded text-slate-300 font-mono border border-slate-800">Trainable</div>
+                            </div>
+                            
+                            <div class="text-xl text-slate-500 font-mono">×</div>
+                            
+                            <!-- Matrix A -->
+                            <div class="flex flex-col items-center">
+                                <div id="matrix-a-visual" class="relative flex items-center justify-center rounded-lg border shadow-inner transition-all duration-300 bg-amber-950 border-2 border-amber-500" style="width: 156px; height: 72px;">
+                                    <span class="font-serif italic font-bold text-xl text-white z-10 drop-shadow-md">A</span>
+                                </div>
+                                <div id="matrix-a-text" class="mt-2 text-sm text-slate-400 font-mono font-semibold">16 × 1024</div>
+                                <div class="mt-1 text-xs px-2 py-1 bg-slate-950 rounded text-slate-300 font-mono border border-slate-800">Trainable</div>
+                            </div>
+                        </div>
+                        <div class="mt-3 text-sm font-mono text-slate-400 font-bold tracking-widest uppercase">ΔW Update Matrix</div>
+                    </div>
+
+                    <div class="text-3xl font-bold text-slate-500">×</div>
+
+                    <div class="flex flex-col items-center">
+                        <div id="scale-factor-display" class="w-16 h-16 rounded-full border-2 border-purple-500 bg-purple-950 flex items-center justify-center font-mono text-purple-300 font-bold shadow-[0_0_15px_rgba(168,85,247,0.2)] text-lg">
+                            2.00
+                        </div>
+                        <div class="mt-2 text-sm text-slate-400 font-mono font-bold">
+                            α / r
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Formula Footer -->
+                <div class="mt-12 w-full bg-slate-950 border border-slate-800 rounded-lg p-5 flex items-center justify-center gap-2 text-xl font-serif flex-wrap">
+                    <span class="text-white italic">h</span>
+                    <span class="text-slate-500">=</span>
+                    <span class="text-white italic">W<sub class="text-xs">0</sub></span>
+                    <span class="text-slate-400 mx-1">·</span>
+                    <span class="text-white italic">x</span>
+                    <span class="text-emerald-500 font-bold mx-1">+</span>
+                    <span class="text-purple-400">ΔW</span>
+                    <span class="text-slate-400 mx-1">·</span>
+                    <span class="text-white italic">x</span>
+                    
+                    <span class="text-slate-600 mx-4 text-2xl">→</span>
+                    
+                    <span class="text-white italic">h</span>
+                    <span class="text-slate-500">=</span>
+                    <span class="text-white italic">W<sub class="text-xs">0</sub></span>
+                    <span class="text-slate-400 mx-1">·</span>
+                    <span class="text-white italic">x</span>
+                    <span class="text-emerald-500 font-bold mx-1">+</span>
+                    
+                    <!-- Custom Fraction Display -->
+                    <span class="flex flex-col items-center justify-center mx-1">
+                        <span class="alpha-display-math text-sm text-purple-400 border-b border-purple-500/50 px-1 leading-tight pb-0.5">32</span>
+                        <span class="rank-display-math text-sm text-purple-400 leading-tight pt-0.5">16</span>
+                    </span>
+                    
+                    <span class="text-emerald-400 italic font-bold ml-1">B</span>
+                    <span class="text-slate-400 mx-1">·</span>
+                    <span class="text-amber-400 italic font-bold">A</span>
+                    <span class="text-slate-400 mx-1">·</span>
+                    <span class="text-white italic">x</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- TAB 2: EQUATIONS & EXTRACTION -->
+        <div id="tab-content-equations" class="grid md:grid-cols-2 gap-6 fade-in hidden">
+            
+            <!-- 1. Extraction / Initialization -->
+            <div class="bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden p-6">
+                <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <i data-lucide="network" class="text-blue-400 w-5 h-5"></i>
+                    1. Initialization
+                </h3>
+                
+                <div class="space-y-6">
+                    <div>
+                        <div class="text-sm text-slate-400 font-bold mb-2 uppercase tracking-wide">Standard LoRA</div>
+                        <div class="bg-slate-950 p-4 rounded-lg font-mono text-sm border border-slate-800 text-slate-300">
+                            <div class="text-amber-400">A ~ N(0, σ²)</div>
+                            <div class="text-emerald-400">B = 0</div>
+                            <div class="mt-3 pt-3 border-t border-slate-800 text-slate-400">
+                                ∴ ΔW = B × A = <span class="text-white font-bold">0</span> (Identity start)
+                            </div>
+                            <p class="mt-3 text-xs text-slate-400 font-sans leading-relaxed">
+                                <strong>Why?</strong> Gaussian noise for <span class="text-amber-400 font-bold">A</span> breaks symmetry, while initializing <span class="text-emerald-400 font-bold">B</span> with zeros ensures the initial adaptation is perfectly 0. This prevents disruptive updates and ensures the model behaves exactly like the base model at step 1.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 2. Training (Gradient Flow) -->
+            <div class="bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden p-6">
+                <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <i data-lucide="git-branch" class="text-emerald-400 w-5 h-5"></i>
+                    2. Training (Backward Pass)
+                </h3>
+                
+                <div class="bg-slate-950 p-5 rounded-lg border border-slate-800 space-y-5 font-serif text-base">
+                    <div class="flex items-center justify-between">
+                        <span class="flex items-center gap-1">
+                            <span class="italic">∂L</span> <span class="text-slate-500 mx-1">/</span> <span class="italic">∂W<sub class="text-xs">0</sub></span>
+                        </span>
+                        <span class="text-xs font-mono text-slate-500 border border-slate-700 bg-slate-900 px-2 py-1 rounded">Original weights (frozen)</span>
+                    </div>
+                    
+                    <div class="py-1">
+                        <div class="w-full border-t border-dashed border-slate-700 mb-3"></div>
+                        <div class="text-xs font-mono text-emerald-400 font-bold tracking-wide">Adapter weights (trainable)</div>
+                    </div>
+
+                    <div class="flex items-center justify-between text-amber-400">
+                        <span class="flex items-center gap-1">
+                            <span class="italic">∂L</span> <span class="text-slate-600 mx-1">/</span> <span class="italic">∂A</span> 
+                            <span class="text-slate-500 mx-2">=</span> 
+                            <span class="italic font-bold">Bᵀ</span> <span class="text-amber-600 text-sm mx-1">·</span> <span class="text-slate-400">(</span><span class="italic">∂L</span> <span class="text-slate-600 mx-1">/</span> <span class="italic text-purple-400">∂ΔW</span><span class="text-slate-400">)</span>
+                        </span>
+                    </div>
+                    
+                    <div class="flex items-center justify-between text-emerald-400">
+                        <span class="flex items-center gap-1">
+                            <span class="italic">∂L</span> <span class="text-slate-600 mx-1">/</span> <span class="italic">∂B</span> 
+                            <span class="text-slate-500 mx-2">=</span> 
+                            <span class="italic font-bold">Aᵀ</span> <span class="text-emerald-600 text-sm mx-1">·</span> <span class="text-slate-400">(</span><span class="italic">∂L</span> <span class="text-slate-600 mx-1">/</span> <span class="italic text-purple-400">∂ΔW</span><span class="text-slate-400">)</span>
+                        </span>
+                    </div>
+                </div>
+                <p class="mt-4 text-xs text-slate-400 font-medium">
+                    Optimizer states (Adam momentum/variance) are only tracked for <span class="font-serif italic text-lg px-1">A</span> and <span class="font-serif italic text-lg px-1">B</span>, vastly reducing VRAM usage.
+                </p>
+            </div>
+
+            <!-- 3. Adapter Merging & Inference -->
+            <div class="bg-slate-900 rounded-xl border border-slate-700 shadow-xl overflow-hidden p-6 md:col-span-2">
+                <h3 class="text-lg font-bold text-white mb-4 flex items-center gap-2 border-b border-slate-800 pb-3">
+                    <i data-lucide="download" class="text-purple-400 w-5 h-5"></i>
+                    3. Adapter Output & Inference Merging
+                </h3>
+                
+                <div class="grid md:grid-cols-2 gap-6">
+                    <div class="bg-slate-950 p-5 rounded-lg border border-slate-800">
+                        <div class="text-sm text-slate-400 font-bold mb-3 uppercase tracking-wide">Saved Adapter (Disk)</div>
+                        <ul class="space-y-2 font-mono text-sm">
+                            <li class="flex justify-between border-b border-slate-800 pb-1">
+                                <span class="text-slate-300">adapter_config.json</span>
+                                <span class="text-slate-500">{r, alpha}</span>
+                            </li>
+                            <li class="flex justify-between border-b border-slate-800 pb-1 pt-1">
+                                <span class="text-amber-400">lora_A.weight</span>
+                                <span class="text-slate-500">[<span class="rank-display-math">16</span>, <span class="dim-display-math">1024</span>]</span>
+                            </li>
+                            <li class="flex justify-between pt-1">
+                                <span class="text-emerald-400">lora_B.weight</span>
+                                <span class="text-slate-500">[<span class="dim-display-math">1024</span>, <span class="rank-display-math">16</span>]</span>
+                            </li>
+                        </ul>
+                        <div class="mt-4 text-xs text-purple-400 font-bold bg-purple-950/30 px-2 py-1 rounded inline-block">
+                            Size: ~<span id="adapter-size-display">0.06</span> MB (fp16)
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-950 p-5 rounded-lg border border-purple-900/50 shadow-[0_0_15px_rgba(168,85,247,0.1)] relative overflow-hidden">
+                        <div class="absolute right-0 top-0 w-32 h-32 bg-purple-600/10 blur-3xl rounded-full"></div>
+                        <div class="text-sm text-purple-300 font-bold mb-3 uppercase tracking-wide relative z-10">Weight Merging (Inference)</div>
+                        
+                        <div class="font-serif text-xl mb-4 relative z-10 text-white flex items-center gap-2">
+                            <span>W<sub class="text-sm">new</sub></span>
+                            <span class="text-slate-500">=</span>
+                            <span>W<sub class="text-sm">0</sub></span>
+                            <span class="text-emerald-500">+</span>
+                            
+                            <!-- Custom Fraction Display -->
+                            <span class="flex flex-col items-center justify-center text-sm mx-1">
+                                <span class="text-purple-400 border-b border-purple-500/50 px-1 leading-tight pb-0.5">α</span>
+                                <span class="text-purple-400 leading-tight pt-0.5">r</span>
+                            </span>
+                            
+                            <span class="text-emerald-400 font-bold italic">B</span>
+                            <span class="text-slate-400 text-sm">·</span>
+                            <span class="text-amber-400 font-bold italic">A</span>
+                        </div>
+                        
+                        <div class="text-xs text-slate-400 space-y-2 relative z-10">
+                            <p>• Adapter matrices are multiplied together and scaled.</p>
+                            <p>• Result is permanently added to base weights.</p>
+                            <p>• <strong class="text-slate-200">Result:</strong> Zero latency overhead during production inference.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+    <script>
+        // Initialize Lucide Icons
+        lucide.createIcons();
+
+        // State Variables
+        let dim = 1024;
+        let rank = 16;
+        let alpha = 32;
+
+        // Elements
+        const dimInput = document.getElementById('dim-input');
+        const rankInput = document.getElementById('rank-input');
+        const alphaInput = document.getElementById('alpha-input');
+
+        function updateUI() {
+            // Update Number Displays
+            document.getElementById('dim-display').textContent = dim;
+            document.getElementById('rank-display').textContent = rank;
+            document.getElementById('alpha-display').textContent = alpha;
+
+            // Math Calculations
+            const paramsOriginal = dim * dim;
+            const paramsLoRA = (dim * rank) + (rank * dim);
+            const reductionPercent = ((1 - (paramsLoRA / paramsOriginal)) * 100).toFixed(2);
+            const scaleFactor = (alpha / rank).toFixed(2);
+            const adapterSizeMB = (paramsLoRA * 2 / 1024 / 1024).toFixed(2); // fp16 is 2 bytes
+
+            // Update Text Readouts
+            document.getElementById('params-original-display').textContent = paramsOriginal.toLocaleString();
+            document.getElementById('params-lora-display').textContent = paramsLoRA.toLocaleString();
+            document.getElementById('reduction-display').textContent = reductionPercent;
+            document.getElementById('scale-factor-display').textContent = scaleFactor;
+            document.getElementById('adapter-size-display').textContent = adapterSizeMB;
+
+            // Update Math Text Nodes inside equations
+            document.querySelectorAll('.alpha-display-math').forEach(el => el.textContent = alpha);
+            document.querySelectorAll('.rank-display-math').forEach(el => el.textContent = rank);
+            document.querySelectorAll('.dim-display-math').forEach(el => el.textContent = dim);
+
+            // Set Matrix Visual Sizes
+            setMatrixSize('matrix-w0', dim, dim);
+            setMatrixSize('matrix-b', dim, rank);
+            setMatrixSize('matrix-a', rank, dim);
+        }
+
+        function setMatrixSize(idBase, r, c) {
+            // Non-linear visual scale
+            const visualW = 60 + Math.sqrt(c) * 3;
+            const visualH = 60 + Math.sqrt(r) * 3;
+            
+            const visualEl = document.getElementById(idBase + '-visual');
+            visualEl.style.width = `${visualW}px`;
+            visualEl.style.height = `${visualH}px`;
+            
+            document.getElementById(idBase + '-text').textContent = `${r} × ${c}`;
+        }
+
+        // Event Listeners
+        dimInput.addEventListener('input', (e) => { dim = Number(e.target.value); updateUI(); });
+        rankInput.addEventListener('input', (e) => { rank = Number(e.target.value); updateUI(); });
+        alphaInput.addEventListener('input', (e) => { alpha = Number(e.target.value); updateUI(); });
+
+        // Tab Switching Logic
+        function switchTab(tabId) {
+            const btnInteractive = document.getElementById('tab-btn-interactive');
+            const btnEquations = document.getElementById('tab-btn-equations');
+            const contentInteractive = document.getElementById('tab-content-interactive');
+            const contentEquations = document.getElementById('tab-content-equations');
+
+            if (tabId === 'interactive') {
+                btnInteractive.className = "flex items-center gap-2 px-6 py-2.5 rounded-md font-medium transition-all text-sm bg-blue-600 text-white shadow-md";
+                btnEquations.className = "flex items-center gap-2 px-6 py-2.5 rounded-md font-medium transition-all text-sm text-slate-400 hover:text-white hover:bg-slate-800";
+                
+                contentInteractive.classList.remove('hidden');
+                contentInteractive.classList.add('block');
+                contentEquations.classList.remove('block');
+                contentEquations.classList.add('hidden');
+            } else {
+                btnEquations.className = "flex items-center gap-2 px-6 py-2.5 rounded-md font-medium transition-all text-sm bg-emerald-600 text-white shadow-md";
+                btnInteractive.className = "flex items-center gap-2 px-6 py-2.5 rounded-md font-medium transition-all text-sm text-slate-400 hover:text-white hover:bg-slate-800";
+                
+                contentEquations.classList.remove('hidden');
+                contentEquations.classList.add('block');
+                contentInteractive.classList.remove('block');
+                contentInteractive.classList.add('hidden');
+            }
+        }
+
+        // Initial Render
+        updateUI();
+
+    </script>
+</body>
+</html>

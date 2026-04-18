@@ -57,6 +57,7 @@ Interactive visualizations spanning classical text representations to modern lan
 - Word embeddings, cosine similarity, and sentence embeddings
 - RNNs, LSTMs, Seq2Seq encoder-decoder pipelines, and cross-attention
 - Pretraining, transfer learning, BERT, and the historical progression of language models
+- LoRA low-rank adaptation, parameter savings, scaling, and adapter extraction
 
 ### ⚡ GEMM Optimization
 
