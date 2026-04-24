@@ -1,0 +1,1316 @@
+<!DOCTYPE html>
+<!-- Brief: FlashAttention visualizer comparing naive attention vs tiled, IO-aware FlashAttention-2 with online softmax, HBM traffic, and SRAM residency. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashAttention Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body {
+            background-color: #f1f5f9;
+            font-family: "Inter", system-ui, sans-serif;
+            color: #0f172a;
+        }
+
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .card {
+            background: white;
+            border-radius: 14px;
+            box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+            border: 1px solid #e2e8f0;
+        }
+
+        .pill {
+            display: inline-flex; align-items: center; gap: 0.35rem;
+            padding: 0.18rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.68rem;
+            font-weight: 600;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+        }
+
+        .pill-hbm  { background: #fef3c7; color: #92400e; border: 1px solid #fde68a; }
+        .pill-sram { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+        .pill-warn { background: #fee2e2; color: #991b1b; border: 1px solid #fecaca; }
+        .pill-info { background: #e0e7ff; color: #3730a3; border: 1px solid #c7d2fe; }
+
+        .mode-btn {
+            padding: 0.45rem 0.9rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            border-radius: 8px;
+            color: #475569;
+            transition: all 0.15s ease;
+            cursor: pointer;
+        }
+        .mode-btn.active {
+            background: #1e293b;
+            color: white;
+            box-shadow: 0 2px 6px rgba(15, 23, 42, 0.2);
+        }
+        .mode-btn:not(.active):hover { background: #e2e8f0; }
+
+        .ctrl-btn {
+            padding: 0.4rem 0.75rem;
+            font-size: 0.82rem;
+            font-weight: 600;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: white;
+            color: #334155;
+            transition: all 0.15s ease;
+            cursor: pointer;
+        }
+        .ctrl-btn:hover:not(:disabled) { background: #f8fafc; border-color: #94a3b8; }
+        .ctrl-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .ctrl-btn-primary {
+            background: #2563eb;
+            color: white;
+            border-color: #2563eb;
+        }
+        .ctrl-btn-primary:hover:not(:disabled) { background: #1d4ed8; border-color: #1d4ed8; }
+
+        .matrix-cell {
+            transition: background-color 0.25s ease, transform 0.25s ease, box-shadow 0.25s ease;
+        }
+        .cell-q    { background: #fef3c7; border: 1px solid #fcd34d; }
+        .cell-k    { background: #d1fae5; border: 1px solid #6ee7b7; }
+        .cell-v    { background: #ffedd5; border: 1px solid #fdba74; }
+        .cell-s    { background: #ede9fe; border: 1px solid #c4b5fd; }
+        .cell-p    { background: #fce7f3; border: 1px solid #f9a8d4; }
+        .cell-o    { background: #dbeafe; border: 1px solid #93c5fd; }
+        .cell-empty{ background: #f8fafc; border: 1px dashed #cbd5e1; }
+
+        .active-block {
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.55);
+            transform: scale(1.015);
+            z-index: 5;
+            position: relative;
+        }
+
+        .recent-write {
+            animation: pulse-write 0.7s ease;
+        }
+        @keyframes pulse-write {
+            0%   { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0.6); }
+            70%  { box-shadow: 0 0 0 10px rgba(37, 99, 235, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(37, 99, 235, 0); }
+        }
+
+        .faded { opacity: 0.25; }
+
+        .flow-arrow {
+            width: 0; height: 0;
+            border-left: 8px solid #2563eb;
+            border-top: 6px solid transparent;
+            border-bottom: 6px solid transparent;
+            display: inline-block;
+        }
+
+        .slider-row input[type="range"] {
+            flex: 1;
+            accent-color: #2563eb;
+        }
+
+        .stat-number {
+            font-family: "JetBrains Mono", ui-monospace, monospace;
+            font-weight: 700;
+            font-size: 1.35rem;
+            color: #0f172a;
+            line-height: 1;
+        }
+
+        .stat-delta-good { color: #15803d; }
+        .stat-delta-bad  { color: #b91c1c; }
+
+        .formula-line {
+            background: #f8fafc;
+            border-left: 3px solid #3b82f6;
+            padding: 0.6rem 0.85rem;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            color: #1e293b;
+        }
+
+        .formula-line.muted {
+            border-left-color: #cbd5e1;
+            color: #94a3b8;
+        }
+
+        .legend-swatch {
+            display: inline-block;
+            width: 12px; height: 12px;
+            border-radius: 3px;
+            margin-right: 6px;
+            vertical-align: -1px;
+        }
+
+        .tooltip-wrap { position: relative; }
+        .tooltip-wrap:hover .tooltip-body { opacity: 1; pointer-events: auto; }
+        .tooltip-body {
+            position: absolute;
+            bottom: calc(100% + 6px);
+            left: 50%;
+            transform: translateX(-50%);
+            background: #0f172a;
+            color: white;
+            font-size: 0.72rem;
+            line-height: 1.35;
+            padding: 0.45rem 0.65rem;
+            border-radius: 6px;
+            width: max-content;
+            max-width: 260px;
+            opacity: 0;
+            pointer-events: none;
+            transition: opacity 0.15s ease;
+            z-index: 20;
+            text-align: left;
+            font-weight: 400;
+        }
+
+        .grid-gap { gap: 1.5rem; }
+
+        /* Mobile polish */
+        @media (max-width: 768px) {
+            .stat-number { font-size: 1.1rem; }
+        }
+    </style>
+</head>
+<body class="min-h-screen p-3 md:p-6">
+
+<div class="max-w-7xl mx-auto">
+
+    <!-- Header -->
+    <header class="mb-5">
+        <div class="flex flex-wrap items-center gap-2 mb-2">
+            <span class="pill pill-info">NLP · Transformers</span>
+            <span class="pill pill-warn">IO-Aware</span>
+        </div>
+        <h1 class="text-2xl md:text-3xl font-bold text-slate-900">
+            FlashAttention: Tiled, IO-Aware Self-Attention
+        </h1>
+        <p class="text-slate-600 mt-2 text-sm md:text-base max-w-4xl">
+            Standard attention materializes the full <span class="font-mono">N × N</span> score matrix in HBM — GPU off-chip memory.
+            FlashAttention never does. It streams blocks of <span class="font-mono">Q, K, V</span> through on-chip SRAM, fuses the softmax with the matmul, and
+            produces the same output with a fraction of the memory traffic. Toggle the two paths below to see why.
+        </p>
+    </header>
+
+    <!-- Controls -->
+    <section class="card p-4 mb-5">
+        <div class="flex flex-wrap items-center gap-4 md:gap-6">
+            <!-- Mode toggle -->
+            <div class="flex items-center gap-2">
+                <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Algorithm</span>
+                <div class="flex gap-1 p-1 bg-slate-100 rounded-lg">
+                    <button class="mode-btn active" data-mode="flash" id="btn-flash">FlashAttention-2</button>
+                    <button class="mode-btn" data-mode="naive" id="btn-naive">Naive Attention</button>
+                </div>
+            </div>
+
+            <!-- Sequence length -->
+            <label class="slider-row flex items-center gap-2 text-sm min-w-[220px] flex-1">
+                <span class="text-xs font-semibold text-slate-600 whitespace-nowrap">N (seq len)</span>
+                <input type="range" id="slider-N" min="4" max="16" step="2" value="8">
+                <span id="val-N" class="font-mono text-xs w-6 text-right">8</span>
+            </label>
+
+            <!-- Head dim -->
+            <label class="slider-row flex items-center gap-2 text-sm min-w-[180px]">
+                <span class="text-xs font-semibold text-slate-600 whitespace-nowrap">d (head dim)</span>
+                <input type="range" id="slider-d" min="2" max="8" step="1" value="4">
+                <span id="val-d" class="font-mono text-xs w-6 text-right">4</span>
+            </label>
+
+            <!-- Block sizes -->
+            <label class="slider-row flex items-center gap-2 text-sm min-w-[160px]">
+                <span class="text-xs font-semibold text-slate-600 whitespace-nowrap">Br</span>
+                <input type="range" id="slider-Br" min="1" max="8" step="1" value="4">
+                <span id="val-Br" class="font-mono text-xs w-6 text-right">4</span>
+            </label>
+            <label class="slider-row flex items-center gap-2 text-sm min-w-[160px]">
+                <span class="text-xs font-semibold text-slate-600 whitespace-nowrap">Bc</span>
+                <input type="range" id="slider-Bc" min="1" max="8" step="1" value="4">
+                <span id="val-Bc" class="font-mono text-xs w-6 text-right">4</span>
+            </label>
+        </div>
+
+        <!-- Step controls -->
+        <div class="mt-4 pt-4 border-t border-slate-200 flex flex-wrap items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+                <button id="btn-reset" class="ctrl-btn">↺ Reset</button>
+                <button id="btn-prev" class="ctrl-btn">← Prev</button>
+                <button id="btn-next" class="ctrl-btn ctrl-btn-primary">Next →</button>
+                <button id="btn-auto" class="ctrl-btn">▶ Auto</button>
+                <button id="btn-finish" class="ctrl-btn">⏭ Finish</button>
+            </div>
+            <div class="flex items-center gap-3 text-sm">
+                <span class="text-slate-500">Step</span>
+                <span class="font-mono font-bold text-slate-900" id="step-label">0 / 0</span>
+                <span class="text-slate-300">|</span>
+                <span class="text-slate-500">Phase</span>
+                <span class="pill pill-info" id="phase-label">init</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Stats strip -->
+    <section class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-5">
+        <div class="card p-3">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2 tooltip-wrap">
+                HBM Reads
+                <span class="text-slate-400 cursor-help">ⓘ</span>
+                <span class="tooltip-body">Elements loaded from high-bandwidth off-chip memory. Naive attention reads the full N×N score and probability matrices; FlashAttention reads each K/V block once per Q block and never stores S or P.</span>
+            </div>
+            <div class="stat-number mt-1" id="stat-reads">0</div>
+            <div class="text-[11px] text-slate-500" id="stat-reads-sub">elements</div>
+        </div>
+        <div class="card p-3">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2 tooltip-wrap">
+                HBM Writes
+                <span class="text-slate-400 cursor-help">ⓘ</span>
+                <span class="tooltip-body">Elements written back to HBM. Naive attention writes S (N×N) and P (N×N). FlashAttention only writes the final output O (N×d).</span>
+            </div>
+            <div class="stat-number mt-1" id="stat-writes">0</div>
+            <div class="text-[11px] text-slate-500">elements</div>
+        </div>
+        <div class="card p-3">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2 tooltip-wrap">
+                Peak SRAM
+                <span class="text-slate-400 cursor-help">ⓘ</span>
+                <span class="tooltip-body">Largest on-chip working set at any point. FlashAttention keeps only current Q, K, V blocks plus a tiny (Br×Bc) tile — no dependence on N².</span>
+            </div>
+            <div class="stat-number mt-1" id="stat-sram">0</div>
+            <div class="text-[11px] text-slate-500">elements</div>
+        </div>
+        <div class="card p-3">
+            <div class="text-[11px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-2 tooltip-wrap">
+                HBM Footprint
+                <span class="text-slate-400 cursor-help">ⓘ</span>
+                <span class="tooltip-body">Total bytes a single attention call keeps resident in HBM. Scales as O(N²) for naive, O(N·d) for FlashAttention.</span>
+            </div>
+            <div class="stat-number mt-1" id="stat-footprint">0</div>
+            <div class="text-[11px] text-slate-500">elements</div>
+        </div>
+    </section>
+
+    <!-- Main visualization: HBM ↔ SRAM -->
+    <section class="grid grid-cols-1 lg:grid-cols-5 grid-gap mb-5">
+        <!-- HBM pane -->
+        <div class="card p-4 lg:col-span-3">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <span class="pill pill-hbm">HBM · Off-chip</span>
+                    <span class="text-xs text-slate-500">Slow · Abundant · Expensive to touch</span>
+                </div>
+                <span class="text-[11px] text-slate-400">~1.5 TB/s · GBs capacity</span>
+            </div>
+            <div id="hbm-panel" class="space-y-3">
+                <!-- Rendered dynamically -->
+            </div>
+        </div>
+
+        <!-- SRAM pane -->
+        <div class="card p-4 lg:col-span-2 bg-emerald-50/30">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <span class="pill pill-sram">SRAM · On-chip</span>
+                    <span class="text-xs text-slate-500">Fast · Tiny · Free to reuse</span>
+                </div>
+                <span class="text-[11px] text-slate-400">~19 TB/s · ~192 KB / SM</span>
+            </div>
+            <div id="sram-panel" class="space-y-3 min-h-[200px]">
+                <!-- Rendered dynamically -->
+            </div>
+        </div>
+    </section>
+
+    <!-- Online softmax state + current operation -->
+    <section class="grid grid-cols-1 lg:grid-cols-2 grid-gap mb-5">
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="pill pill-info">Current Operation</span>
+                <span class="text-xs text-slate-500" id="op-subtitle">—</span>
+            </div>
+            <div id="op-detail" class="text-sm text-slate-700 leading-relaxed">
+                Press <span class="font-mono font-semibold">Next →</span> to start.
+            </div>
+            <div id="formula-stack" class="mt-3 space-y-2 text-sm">
+                <!-- Formula steps injected -->
+            </div>
+        </div>
+
+        <div class="card p-4">
+            <div class="flex items-center gap-2 mb-3">
+                <span class="pill pill-sram">Online Softmax State</span>
+                <span class="text-xs text-slate-500" id="state-subtitle">Per Q-block running statistics</span>
+            </div>
+            <div id="online-state" class="space-y-3">
+                <!-- mi, li, Oi rows injected -->
+            </div>
+            <p class="text-[11px] text-slate-500 mt-3 leading-relaxed">
+                FlashAttention avoids storing <span class="font-mono">S</span> and <span class="font-mono">P</span> by carrying three running statistics per Q row:
+                the running max <span class="font-mono text-slate-700">mᵢ</span>, running normalizer <span class="font-mono text-slate-700">ℓᵢ</span>,
+                and partial output <span class="font-mono text-slate-700">Oᵢ</span>.
+                When a new K/V block arrives, <em>both</em> the output and the normalizer are rescaled by <span class="font-mono text-slate-700">exp(mᵢ<sup>old</sup> − mᵢ<sup>new</sup>)</span> — the online-softmax trick.
+            </p>
+        </div>
+    </section>
+
+    <!-- Explanation / legend -->
+    <section class="card p-4 md:p-5 mb-5">
+        <h2 class="font-bold text-slate-900 mb-2">Why FlashAttention wins</h2>
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm text-slate-700">
+            <div>
+                <div class="font-semibold text-slate-900 mb-1">1. Attention is memory-bound</div>
+                On modern GPUs the bottleneck isn't FLOPs — it's HBM bandwidth.
+                Naive attention does <span class="font-mono">O(N²)</span> HBM reads/writes just to stage
+                <span class="font-mono">S = QKᵀ</span> and <span class="font-mono">P = softmax(S)</span>.
+            </div>
+            <div>
+                <div class="font-semibold text-slate-900 mb-1">2. Online softmax</div>
+                Softmax <em>looks</em> like it needs the whole row before normalizing. With a running max and
+                running sum you can process blocks one at a time and rescale earlier contributions. Output stays numerically identical.
+            </div>
+            <div>
+                <div class="font-semibold text-slate-900 mb-1">3. Kernel fusion</div>
+                One CUDA kernel does QKᵀ, softmax, and PV together on SRAM-resident tiles.
+                <span class="font-mono">S</span> and <span class="font-mono">P</span> never exist in HBM —
+                that's where the bandwidth savings come from.
+            </div>
+        </div>
+        <div class="mt-4 pt-4 border-t border-slate-200 flex flex-wrap gap-4 text-xs text-slate-600">
+            <span><span class="legend-swatch" style="background:#fef3c7;border:1px solid #fcd34d"></span>Q (query)</span>
+            <span><span class="legend-swatch" style="background:#d1fae5;border:1px solid #6ee7b7"></span>K (key)</span>
+            <span><span class="legend-swatch" style="background:#ffedd5;border:1px solid #fdba74"></span>V (value)</span>
+            <span><span class="legend-swatch" style="background:#ede9fe;border:1px solid #c4b5fd"></span>S = QKᵀ</span>
+            <span><span class="legend-swatch" style="background:#fce7f3;border:1px solid #f9a8d4"></span>P = softmax(S)</span>
+            <span><span class="legend-swatch" style="background:#dbeafe;border:1px solid #93c5fd"></span>O (output)</span>
+            <span><span class="legend-swatch" style="background:#f8fafc;border:1px dashed #cbd5e1"></span>Not materialized</span>
+        </div>
+    </section>
+
+    <footer class="text-center text-xs text-slate-400 py-4">
+        Based on Dao et al., <em>FlashAttention</em> (2022) and <em>FlashAttention-2</em> (2023). Sequence length and block sizes are scaled down for visual clarity; the algorithm and counters are accurate.
+    </footer>
+</div>
+
+<script>
+/* =========================================================================
+ * FlashAttention Visualizer
+ * ---------------------------------------------------------------------
+ * Simulates two algorithms producing the same output for softmax(QKᵀ/√d)·V:
+ *   - Naive: materializes S and P in HBM
+ *   - FlashAttention-2: tiled, online softmax, S/P stay on SRAM only
+ *
+ * Goals (pedagogy):
+ *   - Show HBM ↔ SRAM traffic live
+ *   - Show online softmax running statistics (m, l, O) update per block
+ *   - Accurate element counters for reads/writes/peak SRAM
+ * =======================================================================*/
+
+(() => {
+    // -----------------------------
+    // State
+    // -----------------------------
+    const state = {
+        mode: 'flash',       // 'flash' | 'naive'
+        N: 8,
+        d: 4,
+        Br: 4,
+        Bc: 4,
+        steps: [],
+        cursor: -1,
+        autoTimer: null,
+        // cumulative counters (advance with cursor)
+        reads: 0,
+        writes: 0,
+        peakSRAM: 0,
+        footprint: 0,
+        // for display
+        currentSRAM: { Q: null, K: null, V: null, S: null, P: null, O: null, accO: null, m: null, l: null },
+        onlineState: [],     // per Q-block: { startRow, rows, m:[], l:[], O:[[...]] }
+        materialized: { S: false, P: false }, // naive only
+    };
+
+    // -----------------------------
+    // Element refs
+    // -----------------------------
+    const el = {
+        hbm: document.getElementById('hbm-panel'),
+        sram: document.getElementById('sram-panel'),
+        opSubtitle: document.getElementById('op-subtitle'),
+        opDetail: document.getElementById('op-detail'),
+        formulaStack: document.getElementById('formula-stack'),
+        online: document.getElementById('online-state'),
+        stateSubtitle: document.getElementById('state-subtitle'),
+        stepLabel: document.getElementById('step-label'),
+        phaseLabel: document.getElementById('phase-label'),
+        statReads: document.getElementById('stat-reads'),
+        statReadsSub: document.getElementById('stat-reads-sub'),
+        statWrites: document.getElementById('stat-writes'),
+        statSRAM: document.getElementById('stat-sram'),
+        statFootprint: document.getElementById('stat-footprint'),
+        btnPrev: document.getElementById('btn-prev'),
+        btnNext: document.getElementById('btn-next'),
+        btnReset: document.getElementById('btn-reset'),
+        btnAuto: document.getElementById('btn-auto'),
+        btnFinish: document.getElementById('btn-finish'),
+        btnFlash: document.getElementById('btn-flash'),
+        btnNaive: document.getElementById('btn-naive'),
+    };
+
+    // -----------------------------
+    // Utilities
+    // -----------------------------
+    function fmt(n) {
+        if (n < 1000) return n.toString();
+        if (n < 1000000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+        return (n / 1000000).toFixed(1) + 'M';
+    }
+    function fmtF(x, digits = 2) {
+        if (x === null || x === undefined) return '—';
+        if (x === -Infinity) return '−∞';
+        if (!isFinite(x)) return '∞';
+        return x.toFixed(digits);
+    }
+    function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+    // -----------------------------
+    // Step builders
+    // -----------------------------
+    // Each step is a self-contained object describing:
+    //   { phase, op, detail, reads, writes, sramDelta, snapshot }
+    // 'snapshot' captures what the SRAM and online-state panels should show.
+    function buildSteps() {
+        const { N, d, Br, Bc } = state;
+        const Tr = Math.ceil(N / Br);
+        const Tc = Math.ceil(N / Bc);
+
+        const steps = [];
+
+        if (state.mode === 'naive') {
+            // 1. Load Q, K from HBM, compute S = QKᵀ, write S to HBM
+            steps.push({
+                phase: 'S = Q·Kᵀ',
+                title: 'Compute full score matrix S',
+                detail: `Load all of <b>Q (N×d = ${N}×${d})</b> and <b>Kᵀ (d×N)</b> from HBM, compute <span class="font-mono">S = Q·Kᵀ / √d</span>, and write the full <b>N×N = ${N}×${N}</b> score matrix back to HBM. This is the <span class="text-red-700 font-semibold">O(N²)</span> memory blowup.`,
+                formulas: [
+                    { latex: `\\text{Load } Q \\in \\mathbb{R}^{${N}\\times ${d}}, K \\in \\mathbb{R}^{${N}\\times ${d}}`, active: true },
+                    { latex: `S = Q K^\\top / \\sqrt{d}\\in \\mathbb{R}^{${N}\\times ${N}}`, active: true },
+                    { latex: `\\text{Write } S \\to \\text{HBM}`, active: true },
+                ],
+                reads: N * d + N * d,          // read Q, read K
+                writes: N * N,                 // write S
+                peakSRAM: 2 * N * d,            // Q and K resident while matmul runs
+                footprintDelta: N * N,          // S persists
+                materialize: 'S',
+                hbmHighlight: { Q: true, K: true, S: true },
+                sramShow: { Q: true, K: true, S: false },
+            });
+
+            // 2. Softmax: read S, write P
+            steps.push({
+                phase: 'P = softmax(S)',
+                title: 'Materialize the probability matrix P',
+                detail: `Read S back from HBM, apply row-wise softmax, and write the full <b>N×N</b> probability matrix P to HBM. Another <span class="text-red-700 font-semibold">O(N²)</span> round-trip just for the softmax.`,
+                formulas: [
+                    { latex: `\\text{Load } S \\text{ from HBM}`, active: true },
+                    { latex: `P_{ij} = \\frac{\\exp(S_{ij} - \\max_k S_{ik})}{\\sum_k \\exp(S_{ik} - \\max_k S_{ik})}`, active: true },
+                    { latex: `\\text{Write } P \\to \\text{HBM}`, active: true },
+                ],
+                reads: N * N,
+                writes: N * N,
+                peakSRAM: 2 * N * d,
+                footprintDelta: N * N,          // P persists too
+                materialize: 'P',
+                hbmHighlight: { S: true, P: true },
+                sramShow: { S: true, P: true },
+            });
+
+            // 3. O = P·V
+            steps.push({
+                phase: 'O = P·V',
+                title: 'Output projection',
+                detail: `Read P and V from HBM, compute <span class="font-mono">O = P·V</span>, write the output. Only now, after three HBM round-trips, does naive attention finish.`,
+                formulas: [
+                    { latex: `\\text{Load } P \\in \\mathbb{R}^{${N}\\times ${N}}, V \\in \\mathbb{R}^{${N}\\times ${d}}`, active: true },
+                    { latex: `O = P V \\in \\mathbb{R}^{${N}\\times ${d}}`, active: true },
+                    { latex: `\\text{Write } O \\to \\text{HBM}`, active: true },
+                ],
+                reads: N * N + N * d,
+                writes: N * d,
+                peakSRAM: N * N + N * d,
+                hbmHighlight: { P: true, V: true, O: true },
+                sramShow: { P: true, V: true, O: true },
+            });
+            return steps;
+        }
+
+        // ---------- FlashAttention-2 ----------
+        // Outer loop: Q-blocks (i). Inner loop: K/V-blocks (j).
+        // For each Q-block we keep (mi, li, Oi) resident in SRAM.
+        for (let i = 0; i < Tr; i++) {
+            const rowStart = i * Br;
+            const rowEnd = Math.min(rowStart + Br, N);
+            const br = rowEnd - rowStart;
+
+            steps.push({
+                phase: `Block Qᵢ=${i + 1}/${Tr}`,
+                title: `Load Q-block Qᵢ into SRAM`,
+                detail: `Load rows <b>${rowStart}–${rowEnd - 1}</b> of Q into SRAM (that's <b>${br} × ${d} = ${br * d}</b> elements). Initialize per-row running stats: <span class="font-mono">mᵢ = −∞</span>, <span class="font-mono">ℓᵢ = 0</span>, <span class="font-mono">Oᵢ = 0</span>.`,
+                formulas: [
+                    { latex: `\\text{Load } Q_i \\in \\mathbb{R}^{${br}\\times ${d}}`, active: true },
+                    { latex: `m_i \\gets -\\infty,\\quad \\ell_i \\gets 0,\\quad O_i \\gets 0`, active: true },
+                ],
+                reads: br * d,
+                writes: 0,
+                peakSRAM: br * d + 2 * Bc * d + br * d + 2 * br,
+                sramShow: { Qi: { rowStart, rowEnd }, init: true, i },
+                blockI: i,
+            });
+
+            for (let j = 0; j < Tc; j++) {
+                const colStart = j * Bc;
+                const colEnd = Math.min(colStart + Bc, N);
+                const bc = colEnd - colStart;
+
+                // Load Kj, Vj
+                steps.push({
+                    phase: `Q${i + 1} × K${j + 1}/V${j + 1}`,
+                    title: `Load Kⱼ and Vⱼ blocks into SRAM`,
+                    detail: `Bring columns <b>${colStart}–${colEnd - 1}</b> of K and V into SRAM (<b>${bc}×${d}</b> each). Qᵢ, Kⱼ, Vⱼ now all reside on-chip — ready for one fused matmul+softmax+matmul.`,
+                    formulas: [
+                        { latex: `\\text{Load } K_j, V_j \\in \\mathbb{R}^{${bc}\\times ${d}}`, active: true },
+                    ],
+                    reads: 2 * bc * d,
+                    writes: 0,
+                    peakSRAM: br * d + 2 * bc * d + br * d + 2 * br,
+                    sramShow: { Qi: { rowStart, rowEnd }, Kj: { colStart, colEnd }, Vj: { colStart, colEnd }, i, j },
+                    blockI: i, blockJ: j,
+                });
+
+                // Compute Sij and online softmax
+                steps.push({
+                    phase: `Q${i + 1} × K${j + 1}`,
+                    title: `Compute Sᵢⱼ = Qᵢ·Kⱼᵀ — on SRAM only`,
+                    detail: `Do the <b>${br}×${bc}</b> matmul on-chip. <span class="text-emerald-700 font-semibold">Sᵢⱼ never touches HBM.</span> Then take the row-wise max <span class="font-mono">m̃ᵢⱼ</span>, exponentiate to form the tile <span class="font-mono">P̃ᵢⱼ</span>, and compute its row-sums <span class="font-mono">ℓ̃ᵢⱼ</span>.`,
+                    formulas: [
+                        { latex: `S_{ij} = Q_i K_j^\\top / \\sqrt{d} \\in \\mathbb{R}^{${br}\\times ${bc}} \\quad \\text{(SRAM only)}`, active: true },
+                        { latex: `\\tilde m_{ij} = \\mathrm{rowmax}(S_{ij})`, active: true },
+                        { latex: `\\tilde P_{ij} = \\exp(S_{ij} - \\tilde m_{ij})`, active: true },
+                        { latex: `\\tilde \\ell_{ij} = \\mathrm{rowsum}(\\tilde P_{ij})`, active: true },
+                    ],
+                    reads: 0,
+                    writes: 0,
+                    peakSRAM: br * d + 2 * bc * d + br * bc + br * d + 2 * br,
+                    sramShow: { Qi: { rowStart, rowEnd }, Kj: { colStart, colEnd }, Vj: { colStart, colEnd }, Sij: { br, bc }, i, j },
+                    blockI: i, blockJ: j, computeS: true,
+                });
+
+                // Merge into running stats, accumulate Oi
+                steps.push({
+                    phase: `online softmax merge`,
+                    title: `Rescale and accumulate — the FlashAttention trick`,
+                    detail: `Update the running max <span class="font-mono">mᵢ</span>. Rescale the <em>old</em> output and normalizer by <span class="font-mono">exp(mᵢ<sup>old</sup> − mᵢ<sup>new</sup>)</span>, then fold in <span class="font-mono">P̃ᵢⱼ·Vⱼ</span>. This makes softmax associative across blocks without ever materializing the full row.`,
+                    formulas: [
+                        { latex: `m_i^{\\text{new}} = \\max(m_i, \\tilde m_{ij})`, active: true },
+                        { latex: `\\ell_i \\gets e^{m_i - m_i^{\\text{new}}} \\ell_i + e^{\\tilde m_{ij} - m_i^{\\text{new}}} \\tilde\\ell_{ij}`, active: true },
+                        { latex: `O_i \\gets \\mathrm{diag}(e^{m_i - m_i^{\\text{new}}})\\, O_i + e^{\\tilde m_{ij} - m_i^{\\text{new}}}\\, \\tilde P_{ij} V_j`, active: true },
+                        { latex: `m_i \\gets m_i^{\\text{new}}`, active: true },
+                    ],
+                    reads: 0,
+                    writes: 0,
+                    peakSRAM: br * d + 2 * bc * d + br * bc + br * d + 2 * br,
+                    sramShow: { Qi: { rowStart, rowEnd }, Kj: { colStart, colEnd }, Vj: { colStart, colEnd }, Pij: { br, bc }, i, j },
+                    blockI: i, blockJ: j, mergeStats: true,
+                });
+            }
+
+            // Finalize Oi: divide by li, write to HBM
+            steps.push({
+                phase: `Oᵢ = Oᵢ / ℓᵢ`,
+                title: `Normalize and write Oᵢ to HBM`,
+                detail: `After all K/V blocks have been streamed, divide the accumulated output by the running normalizer and write the finished Q-block output to HBM — the <em>only</em> HBM write for this Q-block.`,
+                formulas: [
+                    { latex: `O_i \\gets O_i / \\ell_i`, active: true },
+                    { latex: `\\text{Write } O_i \\to \\text{HBM}`, active: true },
+                ],
+                reads: 0,
+                writes: br * d,
+                peakSRAM: br * d,
+                sramShow: { Qi: { rowStart, rowEnd }, Oi: { rowStart, rowEnd }, i, finalize: true },
+                blockI: i, finalize: true,
+            });
+        }
+
+        return steps;
+    }
+
+    // -----------------------------
+    // Render: HBM panel
+    // -----------------------------
+    // Get current (partial) O matrix based on cursor state.
+    function currentO() {
+        const { N, d, mode } = state;
+        if (mode === 'naive') {
+            return state.materialized.P && state.cursor >= 2 ? gtO : null;
+        }
+        // flash: assemble per-block running O from onlineState when finalized
+        const out = Array.from({ length: N }, () => Array(d).fill(null));
+        let anyFilled = false;
+        state.onlineState.forEach((slot, i) => {
+            if (!slot || !slot.done) return;
+            const rowStart = i * state.Br;
+            for (let r = 0; r < slot.O.length; r++) {
+                for (let k = 0; k < d; k++) out[rowStart + r][k] = slot.O[r][k];
+                anyFilled = true;
+            }
+        });
+        return anyFilled ? out : null;
+    }
+
+    function renderHBM(step) {
+        const { N, d, mode } = state;
+        const blocks = [];
+        const hi = step?.hbmHighlight || {};
+        const isFlash = mode === 'flash';
+        const oNow = currentO();
+
+        blocks.push(tensorBlock({
+            label: 'Q', sub: `(N×d = ${N}×${d})`, hue: 'q',
+            rows: N, cols: d, values: mockQ, highlight: hi.Q,
+        }));
+        blocks.push(tensorBlock({
+            label: 'K', sub: `(N×d = ${N}×${d})`, hue: 'k',
+            rows: N, cols: d, values: mockK, highlight: hi.K,
+        }));
+        blocks.push(tensorBlock({
+            label: 'V', sub: `(N×d = ${N}×${d})`, hue: 'v',
+            rows: N, cols: d, values: mockV, highlight: hi.V,
+        }));
+        blocks.push(tensorBlock({
+            label: 'S = QKᵀ/√d',
+            sub: isFlash ? 'never in HBM ✔' : `(N×N = ${N}×${N})`,
+            hue: 's',
+            rows: N, cols: N,
+            values: (!isFlash && state.materialized.S) ? gtS : null,
+            highlight: hi.S,
+            ghost: isFlash || !state.materialized.S,
+        }));
+        blocks.push(tensorBlock({
+            label: 'P = softmax(S)',
+            sub: isFlash ? 'never in HBM ✔' : `(N×N = ${N}×${N})`,
+            hue: 'p',
+            rows: N, cols: N,
+            values: (!isFlash && state.materialized.P) ? gtP : null,
+            highlight: hi.P,
+            ghost: isFlash || !state.materialized.P,
+        }));
+        blocks.push(tensorBlock({
+            label: 'O (output)',
+            sub: `(N×d = ${N}×${d})`,
+            hue: 'o',
+            rows: N, cols: d,
+            values: oNow,
+            highlight: hi.O,
+            ghost: !oNow,
+        }));
+
+        el.hbm.innerHTML = blocks.join('');
+    }
+
+    function tensorBlock({ label, sub, hue, rows, cols, values, highlight, ghost }) {
+        const gridMaxCols = Math.min(cols, 12);
+        const gridMaxRows = Math.min(rows, 10);
+        const cellSize = Math.max(14, Math.min(30, Math.floor(220 / Math.max(gridMaxCols, gridMaxRows))));
+        const showText = cellSize >= 22 && values;
+        const fontSize = cellSize >= 28 ? 9 : 8;
+        const vmax = values ? maxAbs(values) : 1;
+        const base = baseHues[hue];
+        const cells = [];
+        for (let r = 0; r < gridMaxRows; r++) {
+            for (let c = 0; c < gridMaxCols; c++) {
+                const v = values ? values[r][c] : null;
+                const isGhost = ghost || v === null || v === undefined;
+                let style = `width:${cellSize}px;height:${cellSize}px;border-radius:2px;display:flex;align-items:center;justify-content:center;`;
+                if (isGhost) {
+                    style += 'background:#f8fafc;border:1px dashed #cbd5e1;';
+                } else {
+                    const bg = cellBg(v, base, vmax);
+                    style += `background:${bg};border:1px solid rgba(${base.r},${base.g},${base.b},0.45);`;
+                }
+                const text = showText && !isGhost
+                    ? `<span style="font-family:ui-monospace,monospace;font-size:${fontSize}px;color:#0f172a;line-height:1;">${formatCell(v)}</span>`
+                    : '';
+                cells.push(`<div class="matrix-cell" style="${style}">${text}</div>`);
+            }
+        }
+        const truncated = (rows > gridMaxRows || cols > gridMaxCols) ? `<span class="text-[10px] text-slate-400 ml-1">(abridged)</span>` : '';
+        const highlightCls = highlight ? 'ring-2 ring-blue-400 ring-offset-1' : '';
+        const ghostBadge = ghost ? `<span class="pill ml-1" style="background:#f1f5f9;color:#64748b;border:1px solid #e2e8f0">ghost</span>` : '';
+        return `
+            <div class="flex items-center gap-3 p-2 rounded-lg ${highlightCls}">
+                <div class="min-w-[130px]">
+                    <div class="text-sm font-bold text-slate-800">${label} ${ghostBadge}</div>
+                    <div class="text-[11px] text-slate-500">${sub}</div>
+                </div>
+                <div class="grid gap-[1px]" style="grid-template-columns:repeat(${gridMaxCols}, ${cellSize}px);">
+                    ${cells.join('')}
+                </div>
+                ${truncated}
+            </div>`;
+    }
+
+    function formatCell(v) {
+        if (v === null || v === undefined || !isFinite(v)) return '';
+        const abs = Math.abs(v);
+        if (abs >= 10) return v.toFixed(0);
+        if (abs >= 1) return v.toFixed(1);
+        return v.toFixed(2).replace(/^0\./, '.').replace(/^-0\./, '-.');
+    }
+
+    // -----------------------------
+    // Render: SRAM panel
+    // -----------------------------
+    // Slice helper
+    function slice2D(mat, rs, re, cs, ce) {
+        const out = [];
+        for (let r = rs; r < re; r++) {
+            const row = [];
+            for (let c = cs; c < ce; c++) row.push(mat[r][c]);
+            out.push(row);
+        }
+        return out;
+    }
+    function transposeSlice(mat, rs, re, cs, ce) {
+        // returns mat[cs..ce, rs..re]^T = mat[rs..re, cs..ce] transposed
+        const out = [];
+        for (let c = cs; c < ce; c++) {
+            const row = [];
+            for (let r = rs; r < re; r++) row.push(mat[r][c]);
+            out.push(row);
+        }
+        return out;
+    }
+    function computeTileSij(i, j) {
+        const { Br, Bc, N, d } = state;
+        const sqrtD = Math.sqrt(d);
+        const rs = i * Br, re = Math.min(rs + Br, N);
+        const cs = j * Bc, ce = Math.min(cs + Bc, N);
+        const out = [];
+        for (let r = rs; r < re; r++) {
+            const row = [];
+            for (let c = cs; c < ce; c++) row.push(rowDot(mockQ[r], mockK[c]) / sqrtD);
+            out.push(row);
+        }
+        return out;
+    }
+    function computeTilePij(i, j) {
+        const Sij = computeTileSij(i, j);
+        return Sij.map(row => {
+            const m = Math.max(...row);
+            return row.map(v => Math.exp(v - m));
+        });
+    }
+    function currentOiSlot(i) {
+        const slot = state.onlineState[i];
+        return slot && slot.O && slot.O.length ? slot.O : null;
+    }
+
+    function renderSRAM(step) {
+        if (!step) {
+            el.sram.innerHTML = `<div class="text-sm text-slate-400 italic">Nothing loaded yet. Press <span class="font-mono">Next →</span>.</div>`;
+            return;
+        }
+        const { mode, N, d, Br, Bc } = state;
+        const s = step.sramShow || {};
+        const parts = [];
+
+        if (mode === 'naive') {
+            if (s.Q) parts.push(sramMatrix('Q', 'q', N, d, mockQ));
+            if (s.K) parts.push(sramMatrix('Kᵀ', 'k', d, N, transposeSlice(mockK, 0, N, 0, d)));
+            if (s.S) parts.push(sramMatrix('S <span class="text-[11px] font-normal text-slate-500">read from HBM</span>', 's', N, N, gtS));
+            if (s.P) parts.push(sramMatrix('P <span class="text-[11px] font-normal text-slate-500">materialized</span>', 'p', N, N, gtP));
+            if (s.V) parts.push(sramMatrix('V', 'v', N, d, mockV));
+            if (s.O) parts.push(sramMatrix('O <span class="text-[11px] font-normal text-slate-500">just computed</span>', 'o', N, d, gtO));
+            if (parts.length === 0) parts.push(`<div class="text-sm text-slate-400 italic">SRAM idle.</div>`);
+        } else {
+            if (s.Qi) {
+                const rs = s.Qi.rowStart, re = s.Qi.rowEnd;
+                parts.push(sramMatrix(
+                    `Qᵢ  <span class="text-[11px] font-normal text-slate-500">rows ${rs}–${re - 1}</span>`,
+                    'q', re - rs, d, slice2D(mockQ, rs, re, 0, d)
+                ));
+            }
+            if (s.Kj) {
+                const cs = s.Kj.colStart, ce = s.Kj.colEnd;
+                parts.push(sramMatrix(
+                    `Kⱼ  <span class="text-[11px] font-normal text-slate-500">rows ${cs}–${ce - 1}</span>`,
+                    'k', ce - cs, d, slice2D(mockK, cs, ce, 0, d)
+                ));
+            }
+            if (s.Vj) {
+                const cs = s.Vj.colStart, ce = s.Vj.colEnd;
+                parts.push(sramMatrix(`Vⱼ`, 'v', ce - cs, d, slice2D(mockV, cs, ce, 0, d)));
+            }
+            if (s.Sij && step.blockI !== undefined && step.blockJ !== undefined) {
+                const tile = computeTileSij(step.blockI, step.blockJ);
+                parts.push(sramMatrix(
+                    `Sᵢⱼ  <span class="text-[11px] font-normal text-emerald-700">fused, not in HBM</span>`,
+                    's', tile.length, tile[0].length, tile
+                ));
+            }
+            if (s.Pij && step.blockI !== undefined && step.blockJ !== undefined) {
+                const tile = computeTilePij(step.blockI, step.blockJ);
+                parts.push(sramMatrix(
+                    `P̃ᵢⱼ  <span class="text-[11px] font-normal text-emerald-700">fused, not in HBM</span>`,
+                    'p', tile.length, tile[0].length, tile
+                ));
+            }
+            if (s.Oi && step.blockI !== undefined) {
+                const rs = s.Oi.rowStart, re = s.Oi.rowEnd;
+                const OiVals = currentOiSlot(step.blockI);
+                parts.push(sramMatrix(
+                    `Oᵢ  <span class="text-[11px] font-normal text-slate-500">writing to HBM</span>`,
+                    'o', re - rs, d, OiVals
+                ));
+            }
+            if (parts.length === 0) parts.push(`<div class="text-sm text-slate-400 italic">SRAM idle.</div>`);
+        }
+
+        el.sram.innerHTML = parts.join('');
+    }
+
+    function sramMatrix(label, hue, rows, cols, values) {
+        const gridMaxCols = Math.min(cols, 10);
+        const gridMaxRows = Math.min(rows, 8);
+        const cellSize = Math.max(16, Math.min(32, Math.floor(200 / Math.max(gridMaxCols, gridMaxRows))));
+        const fontSize = cellSize >= 28 ? 10 : (cellSize >= 22 ? 9 : 8);
+        const showText = cellSize >= 18 && values;
+        const vmax = values ? maxAbs(values) : 1;
+        const base = baseHues[hue];
+        const cells = [];
+        for (let r = 0; r < gridMaxRows; r++) {
+            for (let c = 0; c < gridMaxCols; c++) {
+                const v = values ? values[r][c] : null;
+                const isGhost = v === null || v === undefined;
+                let style = `width:${cellSize}px;height:${cellSize}px;border-radius:2px;display:flex;align-items:center;justify-content:center;`;
+                if (isGhost) {
+                    style += 'background:#f8fafc;border:1px dashed #cbd5e1;';
+                } else {
+                    style += `background:${cellBg(v, base, vmax)};border:1px solid rgba(${base.r},${base.g},${base.b},0.45);`;
+                }
+                const text = showText && !isGhost
+                    ? `<span style="font-family:ui-monospace,monospace;font-size:${fontSize}px;color:#0f172a;line-height:1;">${formatCell(v)}</span>`
+                    : '';
+                cells.push(`<div class="matrix-cell" style="${style}">${text}</div>`);
+            }
+        }
+        const meta = values ? `${rows}×${cols}` : '';
+        return `
+            <div class="flex items-center gap-3 p-2 bg-white rounded-lg border border-emerald-200">
+                <div class="min-w-[120px]">
+                    <div class="text-sm font-bold text-slate-800">${label}</div>
+                    ${meta ? `<div class="text-[11px] text-slate-500 font-mono">${meta}</div>` : ''}
+                </div>
+                <div class="grid gap-[1px]" style="grid-template-columns:repeat(${gridMaxCols}, ${cellSize}px);">
+                    ${cells.join('')}
+                </div>
+            </div>`;
+    }
+
+    // -----------------------------
+    // Render: Online softmax state panel
+    // -----------------------------
+    function renderOnlineState(step) {
+        const { mode, N, Br } = state;
+        if (mode === 'naive') {
+            el.stateSubtitle.textContent = 'Not used in naive attention';
+            el.online.innerHTML = `<div class="text-sm text-slate-500 italic leading-relaxed">
+                Naive attention applies softmax to the full row of S at once. There's no online state — it simply pays the <span class="font-mono">O(N²)</span> HBM cost to materialize S and P.
+            </div>`;
+            return;
+        }
+
+        el.stateSubtitle.textContent = `Per Q-block running statistics · block size Br=${Br}`;
+        const Tr = Math.ceil(N / Br);
+        const rows = [];
+        for (let i = 0; i < Tr; i++) {
+            const s = state.onlineState[i] || { m: [], l: [], O: [] };
+            const rowStart = i * Br;
+            const rowEnd = Math.min(rowStart + Br, N);
+            const active = step && step.blockI === i;
+            const done = step && step.cursor > -1 && (state.onlineState[i]?.done);
+            const badge = active ? `<span class="pill pill-info">active</span>` : (done ? `<span class="pill pill-sram">done</span>` : `<span class="pill pill-warn" style="background:#f1f5f9;color:#64748b;border-color:#e2e8f0">pending</span>`);
+            rows.push(`
+                <div class="p-3 rounded-lg border ${active ? 'border-blue-400 bg-blue-50/40' : (done ? 'border-emerald-200 bg-emerald-50/30' : 'border-slate-200')}">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="font-semibold text-slate-800 text-sm">Q-block ${i + 1} <span class="text-slate-500 font-normal text-xs">rows ${rowStart}–${rowEnd - 1}</span></div>
+                        ${badge}
+                    </div>
+                    <div class="grid grid-cols-3 gap-2 text-xs">
+                        <div>
+                            <div class="text-slate-500 font-semibold">mᵢ (max)</div>
+                            <div class="font-mono text-slate-800">[${(s.m.length ? s.m.map(v => fmtF(v, 2)).join(', ') : '—')}]</div>
+                        </div>
+                        <div>
+                            <div class="text-slate-500 font-semibold">ℓᵢ (sum)</div>
+                            <div class="font-mono text-slate-800">[${(s.l.length ? s.l.map(v => fmtF(v, 2)).join(', ') : '—')}]</div>
+                        </div>
+                        <div>
+                            <div class="text-slate-500 font-semibold">‖Oᵢ‖</div>
+                            <div class="font-mono text-slate-800">${s.O.length ? fmtF(Math.sqrt(s.O.flat().reduce((a, x) => a + x * x, 0)), 2) : '—'}</div>
+                        </div>
+                    </div>
+                </div>`);
+        }
+        el.online.innerHTML = rows.join('');
+    }
+
+    // -----------------------------
+    // Update online-state simulation
+    // This is deterministic-ish for visualization; real values are computed from mock Q/K/V.
+    // -----------------------------
+    let mockQ, mockK, mockV, gtS, gtP, gtO;
+    function initMockData() {
+        const { N, d } = state;
+        // simple reproducible "random"
+        let seed = 42;
+        const rnd = () => {
+            seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+            return (seed / 0x7fffffff) * 2 - 1;
+        };
+        mockQ = Array.from({ length: N }, () => Array.from({ length: d }, rnd));
+        mockK = Array.from({ length: N }, () => Array.from({ length: d }, rnd));
+        mockV = Array.from({ length: N }, () => Array.from({ length: d }, rnd));
+        computeGroundTruth();
+    }
+    function rowDot(a, b) {
+        let s = 0;
+        for (let i = 0; i < a.length; i++) s += a[i] * b[i];
+        return s;
+    }
+    function computeGroundTruth() {
+        const { N, d } = state;
+        const sqrtD = Math.sqrt(d);
+        gtS = Array.from({ length: N }, (_, i) =>
+            Array.from({ length: N }, (_, j) => rowDot(mockQ[i], mockK[j]) / sqrtD)
+        );
+        gtP = gtS.map(row => {
+            const m = Math.max(...row);
+            const exps = row.map(v => Math.exp(v - m));
+            const s = exps.reduce((a, b) => a + b, 0);
+            return exps.map(e => e / s);
+        });
+        gtO = Array.from({ length: N }, (_, i) =>
+            Array.from({ length: d }, (_, k) => {
+                let s = 0;
+                for (let j = 0; j < N; j++) s += gtP[i][j] * mockV[j][k];
+                return s;
+            })
+        );
+    }
+    // Map a value in approx [-vmax, +vmax] to an inline background color.
+    // Positive -> reinforces the base hue; negative -> shifts toward red.
+    function cellBg(v, base, vmax) {
+        if (v === null || v === undefined) return null;
+        const t = clamp(v / (vmax || 1), -1, 1);
+        const alpha = 0.15 + 0.6 * Math.abs(t);
+        // base is an {r,g,b} tuple; for negative, blend toward a red accent
+        const neg = { r: 239, g: 68, b: 68 };
+        const pos = base;
+        const c = t >= 0 ? pos : neg;
+        return `rgba(${c.r},${c.g},${c.b},${alpha.toFixed(3)})`;
+    }
+    const baseHues = {
+        q: { r: 245, g: 158, b: 11 },   // amber
+        k: { r: 16,  g: 185, b: 129 },  // emerald
+        v: { r: 249, g: 115, b: 22 },   // orange
+        s: { r: 139, g: 92,  b: 246 },  // violet
+        p: { r: 236, g: 72,  b: 153 },  // pink
+        o: { r: 59,  g: 130, b: 246 },  // blue
+    };
+    function maxAbs(mat) {
+        let m = 1e-6;
+        for (const row of mat) for (const v of row) if (Math.abs(v) > m) m = Math.abs(v);
+        return m;
+    }
+    function runOnlineSim(step) {
+        if (state.mode !== 'flash') return;
+        const { N, d, Br, Bc } = state;
+        const Tr = Math.ceil(N / Br);
+        const Tc = Math.ceil(N / Bc);
+
+        // Rebuild state.onlineState from scratch up to the current cursor
+        state.onlineState = Array.from({ length: Tr }, (_, i) => {
+            const rowStart = i * Br;
+            const rowEnd = Math.min(rowStart + Br, N);
+            const br = rowEnd - rowStart;
+            return {
+                m: Array(br).fill(-Infinity),
+                l: Array(br).fill(0),
+                O: Array.from({ length: br }, () => Array(d).fill(0)),
+                done: false,
+            };
+        });
+
+        // Walk steps up to and including current cursor; update state on relevant steps.
+        const sqrtD = Math.sqrt(d);
+        for (let sIdx = 0; sIdx <= state.cursor && sIdx < state.steps.length; sIdx++) {
+            const st = state.steps[sIdx];
+            if (!st) continue;
+            const i = st.blockI;
+            if (i === undefined) continue;
+            const slot = state.onlineState[i];
+            const rowStart = i * Br;
+            const rowEnd = Math.min(rowStart + Br, N);
+            const br = rowEnd - rowStart;
+
+            if (st.mergeStats) {
+                const j = st.blockJ;
+                const colStart = j * Bc;
+                const colEnd = Math.min(colStart + Bc, N);
+                const bc = colEnd - colStart;
+
+                // compute tile Sij
+                const Sij = Array.from({ length: br }, (_, r) => {
+                    const row = mockQ[rowStart + r];
+                    return Array.from({ length: bc }, (_, c) => rowDot(row, mockK[colStart + c]) / sqrtD);
+                });
+                const tilde_m = Sij.map(row => Math.max(...row));
+                const Pij = Sij.map((row, r) => row.map(v => Math.exp(v - tilde_m[r])));
+                const tilde_l = Pij.map(row => row.reduce((a, b) => a + b, 0));
+
+                for (let r = 0; r < br; r++) {
+                    const m_old = slot.m[r];
+                    const m_new = Math.max(m_old, tilde_m[r]);
+                    const alpha = Math.exp(m_old - m_new);  // may be 0 if m_old = -inf
+                    const beta  = Math.exp(tilde_m[r] - m_new);
+                    const l_new = alpha * slot.l[r] + beta * tilde_l[r];
+                    for (let k = 0; k < d; k++) {
+                        let PVjk = 0;
+                        for (let c = 0; c < bc; c++) PVjk += Pij[r][c] * mockV[colStart + c][k];
+                        slot.O[r][k] = alpha * slot.O[r][k] + beta * PVjk;
+                    }
+                    slot.m[r] = m_new;
+                    slot.l[r] = l_new;
+                }
+            } else if (st.finalize) {
+                for (let r = 0; r < br; r++) {
+                    const l = slot.l[r] || 1;
+                    for (let k = 0; k < d; k++) slot.O[r][k] = slot.O[r][k] / l;
+                }
+                slot.done = true;
+            }
+        }
+    }
+
+    // -----------------------------
+    // Advance/revert step
+    // -----------------------------
+    function advanceTo(target) {
+        target = clamp(target, -1, state.steps.length - 1);
+        // We always recompute counters from scratch for clarity.
+        state.reads = 0;
+        state.writes = 0;
+        state.peakSRAM = 0;
+        state.footprint = footprintBase();
+        state.materialized = { S: false, P: false };
+        for (let i = 0; i <= target; i++) {
+            const s = state.steps[i];
+            state.reads += s.reads || 0;
+            state.writes += s.writes || 0;
+            state.peakSRAM = Math.max(state.peakSRAM, s.peakSRAM || 0);
+            state.footprint += s.footprintDelta || 0;
+            if (s.materialize === 'S') state.materialized.S = true;
+            if (s.materialize === 'P') state.materialized.P = true;
+        }
+        state.cursor = target;
+        runOnlineSim();
+        render();
+    }
+
+    function footprintBase() {
+        // Q, K, V, O always live in HBM
+        const { N, d } = state;
+        return 3 * N * d + N * d;  // Q, K, V, O
+    }
+
+    // -----------------------------
+    // Render everything
+    // -----------------------------
+    function render() {
+        const step = state.steps[state.cursor];
+
+        // Header labels
+        const total = state.steps.length;
+        el.stepLabel.textContent = `${state.cursor + 1} / ${total}`;
+        el.phaseLabel.textContent = step ? step.phase : 'init';
+
+        el.opSubtitle.textContent = step ? step.title : '—';
+        el.opDetail.innerHTML = step
+            ? step.detail
+            : `Press <span class="font-mono font-semibold">Next →</span> to begin. Current mode: <b>${state.mode === 'flash' ? 'FlashAttention-2' : 'Naive Attention'}</b>.`;
+
+        // Formulas
+        if (step && step.formulas) {
+            el.formulaStack.innerHTML = step.formulas.map(f => `
+                <div class="formula-line ${f.active ? '' : 'muted'}">\\[${f.latex}\\]</div>
+            `).join('');
+            if (window.MathJax && MathJax.typesetPromise) {
+                MathJax.typesetPromise([el.formulaStack]).catch(() => { });
+            }
+        } else {
+            el.formulaStack.innerHTML = '';
+        }
+
+        renderHBM(step);
+        renderSRAM(step);
+        renderOnlineState(step ? { ...step, cursor: state.cursor } : null);
+        updateStats();
+
+        // Button enablement
+        el.btnPrev.disabled = state.cursor < 0;
+        el.btnNext.disabled = state.cursor >= state.steps.length - 1;
+        el.btnFinish.disabled = state.cursor >= state.steps.length - 1;
+    }
+
+    function updateStats() {
+        el.statReads.textContent = fmt(state.reads);
+        el.statWrites.textContent = fmt(state.writes);
+        el.statSRAM.textContent = fmt(state.peakSRAM);
+        el.statFootprint.textContent = fmt(state.footprint);
+
+        // Small subtitle: compare against the other algorithm
+        const { N, d } = state;
+        const naiveReadsTotal = 2 * N * d + N * N + N * N + N * d;   // Q+K + S + (P+V)
+        const naiveWritesTotal = N * N + N * N + N * d;               // S + P + O
+        const flashReadsTotal = (() => {
+            // Q + (K+V) * Tr
+            const Tr = Math.ceil(N / state.Br);
+            return N * d + 2 * N * d * Tr;
+        })();
+        const flashWritesTotal = N * d;
+
+        const curReads = state.reads;
+        const curWrites = state.writes;
+        const otherReads = state.mode === 'flash' ? naiveReadsTotal : flashReadsTotal;
+        const otherTag = state.mode === 'flash' ? 'naive end-state' : 'flash end-state';
+        const ratio = otherReads > 0 ? (curReads / Math.max(otherReads, 1)) : 0;
+        if (state.cursor >= state.steps.length - 1 && state.steps.length) {
+            el.statReadsSub.innerHTML = state.mode === 'flash'
+                ? `<span class="stat-delta-good">${(otherReads / Math.max(curReads, 1)).toFixed(1)}× less than naive</span>`
+                : `<span class="stat-delta-bad">${(curReads / Math.max(flashReadsTotal, 1)).toFixed(1)}× more than flash</span>`;
+        } else {
+            el.statReadsSub.textContent = 'elements';
+        }
+    }
+
+    // -----------------------------
+    // Controls
+    // -----------------------------
+    function stopAuto() {
+        if (state.autoTimer) {
+            clearInterval(state.autoTimer);
+            state.autoTimer = null;
+            el.btnAuto.textContent = '▶ Auto';
+        }
+    }
+    function startAuto() {
+        if (state.autoTimer) return;
+        el.btnAuto.textContent = '❚❚ Pause';
+        state.autoTimer = setInterval(() => {
+            if (state.cursor >= state.steps.length - 1) {
+                stopAuto();
+                return;
+            }
+            advanceTo(state.cursor + 1);
+        }, 900);
+    }
+    function rebuild() {
+        stopAuto();
+        initMockData();
+        state.steps = buildSteps();
+        advanceTo(-1);
+    }
+
+    // -----------------------------
+    // Wire events
+    // -----------------------------
+    function setMode(mode) {
+        if (state.mode === mode) return;
+        state.mode = mode;
+        el.btnFlash.classList.toggle('active', mode === 'flash');
+        el.btnNaive.classList.toggle('active', mode === 'naive');
+        rebuild();
+    }
+    el.btnFlash.addEventListener('click', () => setMode('flash'));
+    el.btnNaive.addEventListener('click', () => setMode('naive'));
+
+    document.getElementById('slider-N').addEventListener('input', (e) => {
+        state.N = Number(e.target.value);
+        document.getElementById('val-N').textContent = state.N;
+        state.Br = Math.min(state.Br, state.N);
+        state.Bc = Math.min(state.Bc, state.N);
+        document.getElementById('slider-Br').max = state.N;
+        document.getElementById('slider-Bc').max = state.N;
+        document.getElementById('val-Br').textContent = state.Br;
+        document.getElementById('val-Bc').textContent = state.Bc;
+        rebuild();
+    });
+    document.getElementById('slider-d').addEventListener('input', (e) => {
+        state.d = Number(e.target.value);
+        document.getElementById('val-d').textContent = state.d;
+        rebuild();
+    });
+    document.getElementById('slider-Br').addEventListener('input', (e) => {
+        state.Br = Math.min(Number(e.target.value), state.N);
+        document.getElementById('val-Br').textContent = state.Br;
+        rebuild();
+    });
+    document.getElementById('slider-Bc').addEventListener('input', (e) => {
+        state.Bc = Math.min(Number(e.target.value), state.N);
+        document.getElementById('val-Bc').textContent = state.Bc;
+        rebuild();
+    });
+
+    el.btnReset.addEventListener('click', () => { stopAuto(); advanceTo(-1); });
+    el.btnPrev.addEventListener('click', () => { stopAuto(); advanceTo(state.cursor - 1); });
+    el.btnNext.addEventListener('click', () => { stopAuto(); advanceTo(state.cursor + 1); });
+    el.btnFinish.addEventListener('click', () => { stopAuto(); advanceTo(state.steps.length - 1); });
+    el.btnAuto.addEventListener('click', () => {
+        if (state.autoTimer) { stopAuto(); }
+        else {
+            if (state.cursor >= state.steps.length - 1) advanceTo(-1);
+            startAuto();
+        }
+    });
+
+    // Keyboard nav
+    document.addEventListener('keydown', (e) => {
+        if (e.target.tagName === 'INPUT') return;
+        if (e.key === 'ArrowRight') { stopAuto(); advanceTo(state.cursor + 1); }
+        else if (e.key === 'ArrowLeft') { stopAuto(); advanceTo(state.cursor - 1); }
+        else if (e.key === 'r' || e.key === 'R') { stopAuto(); advanceTo(-1); }
+        else if (e.key === ' ') { e.preventDefault(); el.btnAuto.click(); }
+    });
+
+    // -----------------------------
+    // Init
+    // -----------------------------
+    initMockData();
+    state.steps = buildSteps();
+    advanceTo(-1);
+})();
+</script>
+
+</body>
+</html>
