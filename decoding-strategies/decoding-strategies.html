@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Text Generation Decoding Strategies</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+
+  :root {
+    --bg: #0a0e17;
+    --surface: #111827;
+    --surface2: #1a2235;
+    --border: #1e2d45;
+    --accent: #38bdf8;
+    --accent2: #f472b6;
+    --accent3: #34d399;
+    --accent4: #fbbf24;
+    --accent5: #a78bfa;
+    --text: #e2e8f0;
+    --text-dim: #64748b;
+    --text-mid: #94a3b8;
+    --greedy: #38bdf8;
+    --beam: #f472b6;
+    --topk: #34d399;
+    --topp: #fbbf24;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* Grid bg */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: 
+      linear-gradient(rgba(56,189,248,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(56,189,248,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .container {
+    position: relative;
+    z-index: 1;
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 24px 20px;
+  }
+
+  /* Header */
+  .header {
+    text-align: center;
+    margin-bottom: 32px;
+  }
+  .header .tag {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: rgba(56,189,248,0.1);
+    border: 1px solid rgba(56,189,248,0.2);
+    padding: 4px 12px;
+    border-radius: 2px;
+    margin-bottom: 14px;
+  }
+  .header h1 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: clamp(22px, 4vw, 34px);
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    color: var(--text);
+    margin-bottom: 10px;
+  }
+  .header h1 span { color: var(--accent); }
+  .header p {
+    font-size: 14px;
+    color: var(--text-mid);
+    max-width: 560px;
+    margin: 0 auto;
+    line-height: 1.6;
+  }
+
+  /* Prompt input */
+  .prompt-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 18px 20px;
+    margin-bottom: 20px;
+  }
+  .prompt-section label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    display: block;
+    margin-bottom: 10px;
+  }
+  .prompt-row {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    flex-wrap: wrap;
+  }
+  .prompt-display {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    color: var(--accent);
+    background: rgba(56,189,248,0.07);
+    border: 1px solid rgba(56,189,248,0.2);
+    border-radius: 4px;
+    padding: 8px 14px;
+    flex: 1;
+    min-width: 200px;
+  }
+
+  /* Strategy tabs */
+  .strategy-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+  }
+  .tab {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    padding: 8px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text-dim);
+    cursor: pointer;
+    transition: all 0.18s;
+    letter-spacing: 0.05em;
+  }
+  .tab:hover { border-color: currentColor; color: var(--text); }
+  .tab.active-greedy { border-color: var(--greedy); color: var(--greedy); background: rgba(56,189,248,0.08); }
+  .tab.active-beam { border-color: var(--beam); color: var(--beam); background: rgba(244,114,182,0.08); }
+  .tab.active-topk { border-color: var(--topk); color: var(--topk); background: rgba(52,211,153,0.08); }
+  .tab.active-topp { border-color: var(--topp); color: var(--topp); background: rgba(251,191,36,0.08); }
+
+  /* Main layout */
+  .main-grid {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 16px;
+  }
+  @media (max-width: 800px) {
+    .main-grid { grid-template-columns: 1fr; }
+  }
+
+  /* Canvas area */
+  .canvas-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0;
+    overflow: hidden;
+    position: relative;
+  }
+  .canvas-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+  }
+  .canvas-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+  .canvas-title.greedy { color: var(--greedy); }
+  .canvas-title.beam { color: var(--beam); }
+  .canvas-title.topk { color: var(--topk); }
+  .canvas-title.topp { color: var(--topp); }
+  .btn-run {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    padding: 5px 14px;
+    border-radius: 3px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .btn-run.greedy { background: var(--greedy); color: #0a0e17; }
+  .btn-run.beam { background: var(--beam); color: #0a0e17; }
+  .btn-run.topk { background: var(--topk); color: #0a0e17; }
+  .btn-run.topp { background: var(--topp); color: #0a0e17; }
+  .btn-run:hover { opacity: 0.85; transform: translateY(-1px); }
+  .btn-run:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  #treeCanvas {
+    display: block;
+    width: 100%;
+    background: #080c14;
+  }
+
+  /* Output display */
+  .output-sequence {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    min-height: 48px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-wrap: wrap;
+  }
+  .output-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+    letter-spacing: 0.1em;
+    margin-right: 4px;
+  }
+  .token-chip {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    opacity: 0;
+    transform: translateY(4px);
+    transition: opacity 0.25s, transform 0.25s;
+  }
+  .token-chip.show { opacity: 1; transform: translateY(0); }
+
+  /* Controls sidebar */
+  .controls-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .ctrl-section-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+
+  .ctrl-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+  }
+  .ctrl-label {
+    font-size: 12px;
+    color: var(--text-mid);
+  }
+  .ctrl-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text);
+    min-width: 32px;
+    text-align: right;
+  }
+  input[type=range] {
+    width: 100%;
+    -webkit-appearance: none;
+    height: 3px;
+    border-radius: 2px;
+    outline: none;
+    margin-bottom: 12px;
+    cursor: pointer;
+  }
+  input[type=range].greedy { background: linear-gradient(to right, var(--greedy) 0%, var(--greedy) var(--pct,50%), #1e2d45 var(--pct,50%)); }
+  input[type=range].beam { background: linear-gradient(to right, var(--beam) 0%, var(--beam) var(--pct,50%), #1e2d45 var(--pct,50%)); }
+  input[type=range].topk { background: linear-gradient(to right, var(--topk) 0%, var(--topk) var(--pct,50%), #1e2d45 var(--pct,50%)); }
+  input[type=range].topp { background: linear-gradient(to right, var(--topp) 0%, var(--topp) var(--pct,50%), #1e2d45 var(--pct,50%)); }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 13px; height: 13px;
+    border-radius: 50%;
+    background: var(--text);
+    border: 2px solid var(--bg);
+    cursor: pointer;
+  }
+
+  /* Probability bar display */
+  .prob-bar-section {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+  }
+  .prob-bar-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 10px;
+  }
+  .prob-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 6px;
+  }
+  .prob-token {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-mid);
+    width: 56px;
+    flex-shrink: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .prob-bar-bg {
+    flex: 1;
+    height: 16px;
+    background: rgba(255,255,255,0.04);
+    border-radius: 2px;
+    overflow: hidden;
+  }
+  .prob-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.4s ease;
+    display: flex;
+    align-items: center;
+    padding-left: 4px;
+  }
+  .prob-bar-pct {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: rgba(0,0,0,0.7);
+    font-weight: 700;
+  }
+  .prob-selected { border: 1px solid currentColor; border-radius: 2px; padding: 1px 4px; }
+
+  /* Description card */
+  .desc-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+  }
+  .desc-card h3 {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .desc-card p {
+    font-size: 12px;
+    color: var(--text-mid);
+    line-height: 1.6;
+  }
+  .desc-card .formula {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text);
+    background: rgba(255,255,255,0.05);
+    padding: 6px 8px;
+    border-radius: 3px;
+    margin-top: 8px;
+  }
+
+  /* Comparison table */
+  .compare-section {
+    margin-top: 20px;
+  }
+  .compare-title {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+  }
+  .compare-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+  @media (max-width: 600px) {
+    .compare-grid { grid-template-columns: repeat(2, 1fr); }
+  }
+  .compare-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 12px;
+    transition: border-color 0.2s;
+  }
+  .compare-card:hover { border-color: var(--accent); }
+  .compare-card .cc-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-bottom: 6px;
+  }
+  .compare-card .cc-prop {
+    font-size: 11px;
+    color: var(--text-mid);
+    margin-bottom: 3px;
+    line-height: 1.4;
+  }
+  .compare-card .cc-prop span {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 600;
+  }
+  .badge {
+    display: inline-block;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 8px;
+    font-weight: 700;
+    padding: 1px 5px;
+    border-radius: 2px;
+    letter-spacing: 0.05em;
+  }
+
+  /* Speed indicator */
+  .dot-row { display: flex; gap: 3px; margin-top: 6px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--border); }
+  .dot.on { background: currentColor; }
+</style>
+</head>
+<body>
+<div class="container">
+  <!-- Header -->
+  <div class="header">
+    <div class="tag">NLP &amp; Language Models</div>
+    <h1>Text Generation <span>Decoding Strategies</span></h1>
+    <p>How does an LLM choose the next token? Explore four strategies — greedy, beam search, top-k, and top-p — and see how each navigates the probability tree.</p>
+  </div>
+
+  <!-- Prompt -->
+  <div class="prompt-section">
+    <label>Input Prompt</label>
+    <div class="prompt-row">
+      <div class="prompt-display" id="promptDisplay">"The weather today is"</div>
+      <select id="promptSelect" style="font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:4px;padding:7px 10px;cursor:pointer;">
+        <option value="weather">The weather today is</option>
+        <option value="model">The neural network learned</option>
+        <option value="cat">The cat sat on the</option>
+        <option value="code">The function returns</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- Strategy Tabs -->
+  <div class="strategy-tabs">
+    <button class="tab active-greedy" onclick="setStrategy('greedy')">⬛ Greedy Search</button>
+    <button class="tab" onclick="setStrategy('beam')">🔀 Beam Search</button>
+    <button class="tab" onclick="setStrategy('topk')">🎯 Top-K Sampling</button>
+    <button class="tab" onclick="setStrategy('topp')">🎲 Top-P (Nucleus)</button>
+  </div>
+
+  <!-- Main Grid -->
+  <div class="main-grid">
+    <!-- Canvas -->
+    <div class="canvas-card">
+      <div class="canvas-header">
+        <div class="canvas-title greedy" id="canvasTitle">GREEDY SEARCH</div>
+        <button class="btn-run greedy" id="btnRun" onclick="runAnimation()">▶ RUN</button>
+      </div>
+      <canvas id="treeCanvas" height="380"></canvas>
+      <div class="output-sequence" id="outputSeq">
+        <span class="output-label">OUTPUT:</span>
+      </div>
+    </div>
+
+    <!-- Controls -->
+    <div class="controls-card">
+      <!-- Strategy Description -->
+      <div class="desc-card" id="descCard">
+        <h3 class="greedy" id="descTitle">GREEDY SEARCH</h3>
+        <p id="descText">At each step, pick the single token with the highest probability. Fast and deterministic, but can get stuck in suboptimal sequences.</p>
+        <div class="formula" id="descFormula">argmax P(xₜ | x₁...xₜ₋₁)</div>
+      </div>
+
+      <!-- Params -->
+      <div id="paramsSection">
+        <div class="ctrl-section-title">Parameters</div>
+
+        <!-- Beam width (beam only) -->
+        <div id="beamParams" style="display:none">
+          <div class="ctrl-row">
+            <span class="ctrl-label">Beam width</span>
+            <span class="ctrl-value" id="beamWidthVal">3</span>
+          </div>
+          <input type="range" class="beam" id="beamWidth" min="2" max="5" value="3">
+          <div class="ctrl-row">
+            <span class="ctrl-label">Max length</span>
+            <span class="ctrl-value" id="beamLenVal">4</span>
+          </div>
+          <input type="range" class="beam" id="beamLen" min="3" max="6" value="4">
+        </div>
+
+        <!-- Top-K params -->
+        <div id="topkParams" style="display:none">
+          <div class="ctrl-row">
+            <span class="ctrl-label">K (top tokens)</span>
+            <span class="ctrl-value" id="kVal">3</span>
+          </div>
+          <input type="range" class="topk" id="kSlider" min="1" max="6" value="3">
+          <div class="ctrl-row">
+            <span class="ctrl-label">Temperature</span>
+            <span class="ctrl-value" id="tempKVal">1.0</span>
+          </div>
+          <input type="range" class="topk" id="tempKSlider" min="1" max="20" value="10">
+        </div>
+
+        <!-- Top-P params -->
+        <div id="toppParams" style="display:none">
+          <div class="ctrl-row">
+            <span class="ctrl-label">P threshold</span>
+            <span class="ctrl-value" id="pVal">0.9</span>
+          </div>
+          <input type="range" class="topp" id="pSlider" min="1" max="10" value="9">
+          <div class="ctrl-row">
+            <span class="ctrl-label">Temperature</span>
+            <span class="ctrl-value" id="tempPVal">1.0</span>
+          </div>
+          <input type="range" class="topp" id="tempPSlider" min="1" max="20" value="10">
+        </div>
+
+        <!-- Greedy params (none, just a note) -->
+        <div id="greedyParams">
+          <p style="font-size:12px;color:var(--text-dim);line-height:1.5;">No parameters — greedy always picks the single highest-probability token.</p>
+        </div>
+      </div>
+
+      <!-- Next-token distribution -->
+      <div class="prob-bar-section">
+        <div class="prob-bar-title" id="probTitle">Next-token distribution</div>
+        <div id="probBars"></div>
+      </div>
+
+      <!-- Step info -->
+      <div id="stepInfo" style="font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--text-dim);line-height:1.6;min-height:36px;"></div>
+    </div>
+  </div>
+
+  <!-- Comparison table -->
+  <div class="compare-section">
+    <div class="compare-title">Strategy Comparison</div>
+    <div class="compare-grid">
+      <div class="compare-card">
+        <div class="cc-name" style="color:var(--greedy)">GREEDY</div>
+        <div class="cc-prop">Deterministic: <span style="color:var(--greedy)">Yes</span></div>
+        <div class="cc-prop">Search width: <span>1</span></div>
+        <div class="cc-prop">Compute: <span>O(V)</span></div>
+        <div class="cc-prop">Use when: <span>speed matters</span></div>
+        <div class="dot-row" style="color:var(--greedy)">
+          <div class="dot on"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div><div class="dot"></div>
+        </div>
+      </div>
+      <div class="compare-card">
+        <div class="cc-name" style="color:var(--beam)">BEAM</div>
+        <div class="cc-prop">Deterministic: <span style="color:var(--beam)">Yes</span></div>
+        <div class="cc-prop">Search width: <span>k beams</span></div>
+        <div class="cc-prop">Compute: <span>O(k·V·L)</span></div>
+        <div class="cc-prop">Use when: <span>translation, summarization</span></div>
+        <div class="dot-row" style="color:var(--beam)">
+          <div class="dot on"></div><div class="dot on"></div><div class="dot on"></div><div class="dot"></div><div class="dot"></div>
+        </div>
+      </div>
+      <div class="compare-card">
+        <div class="cc-name" style="color:var(--topk)">TOP-K</div>
+        <div class="cc-prop">Deterministic: <span style="color:var(--topk)">No</span></div>
+        <div class="cc-prop">Search width: <span>k tokens</span></div>
+        <div class="cc-prop">Compute: <span>O(V + k)</span></div>
+        <div class="cc-prop">Use when: <span>creative text</span></div>
+        <div class="dot-row" style="color:var(--topk)">
+          <div class="dot on"></div><div class="dot on"></div><div class="dot on"></div><div class="dot on"></div><div class="dot"></div>
+        </div>
+      </div>
+      <div class="compare-card">
+        <div class="cc-name" style="color:var(--topp)">TOP-P</div>
+        <div class="cc-prop">Deterministic: <span style="color:var(--topp)">No</span></div>
+        <div class="cc-prop">Search width: <span>dynamic</span></div>
+        <div class="cc-prop">Compute: <span>O(V log V)</span></div>
+        <div class="cc-prop">Use when: <span>diverse generation</span></div>
+        <div class="dot-row" style="color:var(--topp)">
+          <div class="dot on"></div><div class="dot on"></div><div class="dot on"></div><div class="dot on"></div><div class="dot on"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ─── Vocabulary / token trees ─────────────────────────────────────────────
+const PROMPTS = {
+  weather: {
+    label: '"The weather today is"',
+    tree: {
+      tokens: ['sunny','rainy','cloudy','cold','warm'],
+      probs: [0.38, 0.22, 0.18, 0.13, 0.09],
+      children: {
+        sunny:  { tokens: ['and', 'with', 'but', 'so'], probs: [0.40,0.28,0.18,0.14],
+          children: {
+            and: { tokens: ['warm','hot','clear','bright'], probs:[0.42,0.28,0.18,0.12], children:{} },
+            with:{ tokens: ['clear','high','low','mild'], probs:[0.38,0.32,0.18,0.12], children:{} },
+            but: { tokens: ['cold','windy','humid','dry'], probs:[0.40,0.30,0.18,0.12], children:{} },
+            so:  { tokens: ['bright','nice','good','fine'], probs:[0.45,0.28,0.17,0.10], children:{} }
+          }
+        },
+        rainy: { tokens: ['and', 'with', 'but', 'so'], probs: [0.35,0.30,0.22,0.13],
+          children: {
+            and:  { tokens: ['cold','dark','wet','grey'], probs:[0.38,0.32,0.18,0.12], children:{} },
+            with: { tokens: ['heavy','light','steady','strong'], probs:[0.40,0.28,0.20,0.12], children:{} },
+            but:  { tokens: ['warm','mild','calm','brief'], probs:[0.40,0.30,0.18,0.12], children:{} },
+            so:   { tokens: ['stay','bring','grab','skip'], probs:[0.42,0.28,0.18,0.12], children:{} }
+          }
+        },
+        cloudy: { tokens: ['skies','with','but','and'], probs: [0.38,0.28,0.20,0.14], children:{
+          skies: { tokens: ['ahead','above','today','here'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          with:  { tokens: ['some','mild','light','brief'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          but:   { tokens: ['warm','dry','calm','nice'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          and:   { tokens: ['cool','grey','damp','still'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        cold: { tokens: ['with','and','but','so'], probs: [0.36,0.28,0.22,0.14], children:{
+          with:  { tokens: ['frost','ice','snow','wind'], probs:[0.38,0.30,0.20,0.12], children:{} },
+          and:   { tokens: ['windy','dark','damp','grey'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          but:   { tokens: ['dry','clear','calm','bright'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          so:    { tokens: ['stay','dress','wear','bundle'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        warm: { tokens: ['and','with','but','so'], probs: [0.38,0.28,0.20,0.14], children:{
+          and:  { tokens: ['sunny','bright','clear','mild'], probs:[0.42,0.28,0.18,0.12], children:{} },
+          with: { tokens: ['light','gentle','some','a'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          but:  { tokens: ['humid','cloudy','windy','hazy'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          so:   { tokens: ['great','perfect','ideal','nice'], probs:[0.42,0.28,0.18,0.12], children:{} }
+        }}
+      }
+    }
+  },
+  model: {
+    label: '"The neural network learned"',
+    tree: {
+      tokens: ['to','how','that','a','the'],
+      probs: [0.38,0.24,0.18,0.12,0.08],
+      children: {
+        to: { tokens: ['classify','predict','recognize','detect'], probs:[0.38,0.30,0.20,0.12], children:{
+          classify: { tokens: ['images','patterns','data','objects'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          predict:  { tokens: ['outputs','labels','values','classes'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          recognize:{ tokens: ['speech','patterns','faces','objects'], probs:[0.38,0.30,0.20,0.12], children:{} },
+          detect:   { tokens: ['edges','features','objects','patterns'], probs:[0.38,0.30,0.20,0.12], children:{} }
+        }},
+        how: { tokens: ['to','well','fast','accurately'], probs:[0.40,0.30,0.18,0.12], children:{
+          to: { tokens: ['generalize','adapt','converge','learn'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          well:{ tokens: ['by','from','through','via'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          fast:{ tokens: ['the','to','by','with'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          accurately:{ tokens: ['with','through','by','from'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        that: { tokens: ['cats','dogs','images','data'], probs:[0.35,0.30,0.22,0.13], children:{
+          cats: { tokens: ['and','are','have','were'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          dogs: { tokens: ['and','are','have','were'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          images: { tokens: ['contain','have','show','include'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          data: { tokens: ['can','must','should','will'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        a: { tokens: ['new','deep','simple','complex'], probs:[0.38,0.30,0.20,0.12], children:{
+          new:{ tokens: ['way','method','approach','technique'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          deep:{ tokens: ['representation','feature','mapping','pattern'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          simple:{ tokens: ['rule','pattern','mapping','function'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          complex:{ tokens: ['function','mapping','pattern','relation'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        the: { tokens: ['patterns','weights','features','mapping'], probs:[0.38,0.30,0.20,0.12], children:{
+          patterns:{ tokens: ['in','of','from','within'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          weights: { tokens: ['of','for','in','during'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          features:{ tokens: ['of','in','from','within'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          mapping: { tokens: ['between','from','of','in'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }}
+      }
+    }
+  },
+  cat: {
+    label: '"The cat sat on the"',
+    tree: {
+      tokens: ['mat','floor','chair','roof','fence'],
+      probs: [0.42,0.24,0.18,0.10,0.06],
+      children: {
+        mat:   { tokens: ['and','near','by','while'], probs:[0.38,0.28,0.22,0.12], children:{
+          and:  { tokens: ['purred','slept','watched','waited'], probs:[0.42,0.30,0.16,0.12], children:{} },
+          near: { tokens: ['the','a','its','my'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          by:   { tokens: ['the','a','its','that'], probs:[0.40,0.30,0.18,0.12], children:{} },
+          while:{ tokens: ['the','a','its','her'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        floor: { tokens: ['and','near','by','while'], probs:[0.36,0.28,0.22,0.14], children:{
+          and:  { tokens: ['looked','watched','waited','slept'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          near: { tokens: ['the','a','its','her'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          by:   { tokens: ['the','a','its','that'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          while:{ tokens: ['the','a','its','her'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        chair: { tokens: ['and','near','by','while'], probs:[0.36,0.28,0.22,0.14], children:{
+          and:  { tokens: ['meowed','purred','slept','watched'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          near: { tokens: ['the','a','its','my'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          by:   { tokens: ['the','a','its','that'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          while:{ tokens: ['the','a','its','her'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        roof:  { tokens: ['and','near','by','while'], probs:[0.36,0.28,0.22,0.14], children:{
+          and:  { tokens: ['yowled','watched','waited','meowed'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          near: { tokens: ['the','a','its','my'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          by:   { tokens: ['the','a','its','that'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          while:{ tokens: ['the','a','its','her'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        fence: { tokens: ['and','near','by','while'], probs:[0.36,0.28,0.22,0.14], children:{
+          and:  { tokens: ['watched','waited','stared','yowled'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          near: { tokens: ['the','a','its','my'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          by:   { tokens: ['the','a','its','that'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          while:{ tokens: ['the','a','its','her'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }}
+      }
+    }
+  },
+  code: {
+    label: '"The function returns"',
+    tree: {
+      tokens: ['a','the','null','an','void'],
+      probs: [0.38,0.26,0.18,0.12,0.06],
+      children: {
+        a: { tokens: ['list','value','string','boolean'], probs:[0.36,0.28,0.22,0.14], children:{
+          list: { tokens: ['of','containing','with','that'], probs:[0.42,0.28,0.18,0.12], children:{} },
+          value:{ tokens: ['of','from','that','which'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          string:{ tokens: ['of','that','which','containing'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          boolean:{ tokens: ['that','which','indicating','representing'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        the: { tokens: ['result','index','count','total'], probs:[0.36,0.28,0.22,0.14], children:{
+          result: { tokens: ['of','from','after','when'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          index:  { tokens: ['of','from','for','in'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          count:  { tokens: ['of','from','for','in'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          total:  { tokens: ['of','from','for','in'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        null: { tokens: ['if','when','unless','until'], probs:[0.40,0.28,0.20,0.12], children:{
+          if:    { tokens: ['no','the','an','empty'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          when:  { tokens: ['no','the','an','empty'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          unless:{ tokens: ['a','the','an','some'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          until: { tokens: ['a','the','data','input'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        an: { tokens: ['array','error','object','integer'], probs:[0.36,0.28,0.22,0.14], children:{
+          array: { tokens: ['of','containing','with','that'], probs:[0.42,0.28,0.18,0.12], children:{} },
+          error: { tokens: ['if','when','unless','only'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          object:{ tokens: ['of','that','which','containing'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          integer:{ tokens: ['value','that','which','representing'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }},
+        void: { tokens: ['and','but','so','when'], probs:[0.36,0.28,0.22,0.14], children:{
+          and:   { tokens: ['modifies','updates','changes','alters'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          but:   { tokens: ['still','also','may','can'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          so:    { tokens: ['the','any','all','no'], probs:[0.40,0.28,0.20,0.12], children:{} },
+          when:  { tokens: ['no','the','an','a'], probs:[0.40,0.28,0.20,0.12], children:{} }
+        }}
+      }
+    }
+  }
+};
+
+// ─── State ─────────────────────────────────────────────────────────────────
+let currentStrategy = 'greedy';
+let currentPrompt = 'weather';
+let animating = false;
+let animFrame = null;
+
+const COLORS = {
+  greedy: '#38bdf8', beam: '#f472b6', topk: '#34d399', topp: '#fbbf24'
+};
+
+// ─── Canvas setup ──────────────────────────────────────────────────────────
+const canvas = document.getElementById('treeCanvas');
+const ctx = canvas.getContext('2d');
+
+function resizeCanvas() {
+  const w = canvas.parentElement.clientWidth;
+  canvas.width = w;
+  canvas.height = Math.min(380, Math.max(280, w * 0.5));
+  canvas.style.height = canvas.height + 'px';
+}
+resizeCanvas();
+window.addEventListener('resize', () => { resizeCanvas(); drawIdleState(); });
+
+// ─── Drawing helpers ───────────────────────────────────────────────────────
+function clearCanvas() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#080c14';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawNode(x, y, token, prob, color, selected, alpha=1, score=null) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  const r = 22;
+
+  // Glow for selected
+  if (selected) {
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 14;
+  }
+
+  // Circle
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fillStyle = selected ? color : '#111827';
+  ctx.fill();
+  ctx.strokeStyle = selected ? color : '#1e2d45';
+  ctx.lineWidth = selected ? 2 : 1;
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // Token text
+  ctx.font = `bold 10px "JetBrains Mono", monospace`;
+  ctx.fillStyle = selected ? '#0a0e17' : '#e2e8f0';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  const short = token.length > 6 ? token.slice(0, 5) + '…' : token;
+  ctx.fillText(short, x, y - 3);
+
+  // Prob text
+  ctx.font = `9px "JetBrains Mono", monospace`;
+  ctx.fillStyle = selected ? '#0a0e1790' : '#64748b';
+  ctx.fillText((prob * 100).toFixed(0) + '%', x, y + 7);
+
+  // Beam score label
+  if (score !== null) {
+    ctx.font = `8px "JetBrains Mono", monospace`;
+    ctx.fillStyle = '#f472b6';
+    ctx.fillText('s:' + score.toFixed(2), x, y + r + 10);
+  }
+
+  ctx.restore();
+}
+
+function drawEdge(x1, y1, x2, y2, color, selected, alpha=1) {
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.moveTo(x1, y1 + 22);
+  ctx.lineTo(x2, y2 - 22);
+  ctx.strokeStyle = selected ? color : '#1e2d45';
+  ctx.lineWidth = selected ? 2 : 1;
+  if (!selected) ctx.setLineDash([4, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ─── Idle state: show first level of tree ─────────────────────────────────
+function drawIdleState() {
+  clearCanvas();
+  const W = canvas.width, H = canvas.height;
+  const prompt = PROMPTS[currentPrompt];
+  const { tokens, probs } = prompt.tree;
+  const color = COLORS[currentStrategy];
+
+  // Root label
+  ctx.font = `11px "JetBrains Mono", monospace`;
+  ctx.fillStyle = '#64748b';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('[PROMPT]', W / 2, 28);
+
+  ctx.beginPath();
+  ctx.moveTo(W / 2, 38);
+  ctx.lineTo(W / 2, 60);
+  ctx.strokeStyle = '#1e2d45';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+
+  // First level tokens
+  const n = tokens.length;
+  const spacing = Math.min(W / (n + 1), 130);
+  const startX = W / 2 - ((n - 1) / 2) * spacing;
+  const y1 = 90;
+
+  tokens.forEach((tok, i) => {
+    const x = startX + i * spacing;
+    drawEdge(W / 2, 40, x, y1, color, false, 0.5);
+    drawNode(x, y1, tok, probs[i], color, false, 0.6);
+  });
+
+  // "Click Run" hint
+  ctx.font = `11px "DM Sans", sans-serif`;
+  ctx.fillStyle = '#334155';
+  ctx.textAlign = 'center';
+  ctx.fillText('Press RUN to animate', W / 2, H - 20);
+}
+
+// ─── GREEDY animation ─────────────────────────────────────────────────────
+async function runGreedy() {
+  const W = canvas.width, H = canvas.height;
+  const color = COLORS.greedy;
+  const prompt = PROMPTS[currentPrompt];
+  let node = prompt.tree;
+  const path = [];
+  const maxSteps = 4;
+
+  // Build layout: expand 3 levels
+  const levels = [{ tokens: node.tokens, probs: node.probs, y: 80 }];
+  let cur = node;
+  let chosen = [null, null, null];
+  for (let s = 0; s < maxSteps - 1; s++) {
+    const bestIdx = cur.probs.indexOf(Math.max(...cur.probs));
+    const bestTok = cur.tokens[bestIdx];
+    chosen[s] = bestIdx;
+    if (cur.children && cur.children[bestTok]) {
+      cur = cur.children[bestTok];
+      levels.push({ tokens: cur.tokens, probs: cur.probs, y: 80 + (s + 1) * ((H - 120) / (maxSteps)) });
+    } else break;
+  }
+
+  // Draw all nodes faded
+  function drawAll(highlightPath) {
+    clearCanvas();
+    const n0 = levels[0].tokens.length;
+    const spacingX = Math.min(W / (n0 + 1), 100);
+    const startX0 = W / 2 - ((n0 - 1) / 2) * spacingX;
+
+    // Root
+    ctx.font = `10px "JetBrains Mono", monospace`;
+    ctx.fillStyle = '#334155';
+    ctx.textAlign = 'center';
+    ctx.fillText('[PROMPT]', W / 2, 22);
+
+    ctx.beginPath(); ctx.moveTo(W/2, 30); ctx.lineTo(startX0 + chosen[0] * spacingX, levels[0].y - 22);
+    ctx.strokeStyle = highlightPath >= 0 ? color : '#1e2d45';
+    ctx.lineWidth = highlightPath >= 0 ? 2 : 1;
+    ctx.stroke();
+
+    levels.forEach((level, li) => {
+      const nn = level.tokens.length;
+      const sp = Math.min(W / (nn + 1), 100);
+      const sx = W / 2 - ((nn - 1) / 2) * sp;
+      level.tokens.forEach((tok, ti) => {
+        const x = sx + ti * sp;
+        const isChosen = ti === (li < chosen.length ? chosen[li] : -1);
+        const inPath = isChosen && li <= highlightPath;
+        drawNode(x, level.y, tok, level.probs[ti], color, inPath, inPath ? 1 : (li <= highlightPath + 1 ? 0.4 : 0.2));
+
+        // Edge to next level
+        if (li < levels.length - 1 && isChosen) {
+          const nextLevel = levels[li + 1];
+          const nnext = nextLevel.tokens.length;
+          const spnext = Math.min(W / (nnext + 1), 100);
+          const sxnext = W / 2 - ((nnext - 1) / 2) * spnext;
+          nextLevel.tokens.forEach((_, nti) => {
+            const nx = sxnext + nti * spnext;
+            const isNextChosen = nti === chosen[li + 1];
+            drawEdge(x, level.y, nx, nextLevel.y, color, isNextChosen && li < highlightPath, li < highlightPath ? 0.5 : 0.2);
+          });
+        }
+      });
+    });
+  }
+
+  // Animate step by step
+  const outputTokens = [];
+  for (let step = 0; step <= maxSteps - 1 && animating; step++) {
+    drawAll(step);
+    updateProbBars(levels[step < levels.length ? step : levels.length - 1], chosen[step] || 0, color);
+    document.getElementById('stepInfo').innerHTML =
+      `<span style="color:${color}">Step ${step + 1}:</span> argmax → <span style="color:${color}">"${levels[step < levels.length ? step : 0].tokens[chosen[step] || 0]}"</span>`;
+
+    if (step < levels.length) {
+      const tok = levels[step].tokens[chosen[step]];
+      outputTokens.push({ token: tok, color });
+      renderOutput(outputTokens, color);
+    }
+    await sleep(700);
+  }
+}
+
+// ─── BEAM animation ────────────────────────────────────────────────────────
+async function runBeam() {
+  const W = canvas.width, H = canvas.height;
+  const color = COLORS.beam;
+  const beamWidth = parseInt(document.getElementById('beamWidth').value);
+  const maxLen = parseInt(document.getElementById('beamLen').value);
+  const prompt = PROMPTS[currentPrompt];
+
+  // Build beam paths
+  let beams = prompt.tree.tokens.map((tok, i) => ({
+    tokens: [tok],
+    score: Math.log(prompt.tree.probs[i]),
+    node: prompt.tree.children[tok] || { tokens: [], probs: [] }
+  }));
+  beams.sort((a, b) => b.score - a.score);
+  beams = beams.slice(0, beamWidth);
+
+  const history = [beams.map(b => ({ ...b }))];
+
+  for (let step = 0; step < maxLen - 1; step++) {
+    let candidates = [];
+    beams.forEach(beam => {
+      if (beam.node.tokens) {
+        beam.node.tokens.forEach((tok, ti) => {
+          const nextNode = beam.node.children?.[tok] || { tokens: [], probs: [] };
+          candidates.push({
+            tokens: [...beam.tokens, tok],
+            score: beam.score + Math.log(beam.node.probs[ti] + 1e-9),
+            node: nextNode
+          });
+        });
+      }
+    });
+    candidates.sort((a, b) => b.score - a.score);
+    beams = candidates.slice(0, beamWidth);
+    history.push(beams.map(b => ({ ...b })));
+  }
+
+  // Animate each step
+  const levelY = (step) => 70 + step * ((H - 100) / maxLen);
+  const beamColors = ['#f472b6', '#e879f9', '#c084fc'];
+
+  for (let step = 0; step <= maxLen && animating; step++) {
+    clearCanvas();
+    ctx.font = `10px "JetBrains Mono", monospace`;
+    ctx.fillStyle = '#334155';
+    ctx.textAlign = 'center';
+    ctx.fillText('[PROMPT]', W / 2, 20);
+
+    const curBeams = history[Math.min(step, history.length - 1)];
+
+    curBeams.forEach((beam, bi) => {
+      const bColor = beamColors[bi] || color;
+      const xSpacing = W / (beamWidth + 1);
+      const bx = xSpacing * (bi + 1);
+
+      beam.tokens.forEach((tok, ti) => {
+        const y = levelY(ti);
+        const py = ti === 0 ? 28 : levelY(ti - 1);
+        const px = ti === 0 ? W / 2 : xSpacing * (bi + 1);
+
+        drawEdge(px, py, bx, y, bColor, ti <= step, ti < step ? 0.7 : 0.3);
+        drawNode(bx, y, tok,
+          ti === 0 ? prompt.tree.probs[prompt.tree.tokens.indexOf(tok)] || 0.1 : (beam.node.probs?.[ti] || 0.15),
+          bColor, ti === beam.tokens.length - 1,
+          ti <= step ? 0.9 : 0.3,
+          ti === beam.tokens.length - 1 ? beam.score : null
+        );
+      });
+    });
+
+    const topBeam = curBeams[0];
+    document.getElementById('stepInfo').innerHTML =
+      `<span style="color:${color}">Step ${step + 1}/${maxLen}:</span> Keeping top-${beamWidth} beams by log-score`;
+    updateProbBarsBeam(curBeams, beamColors);
+    renderOutput(topBeam.tokens.map(t => ({ token: t, color })), color);
+    await sleep(800);
+  }
+}
+
+// ─── TOP-K animation ───────────────────────────────────────────────────────
+async function runTopK() {
+  const W = canvas.width, H = canvas.height;
+  const color = COLORS.topk;
+  const K = parseInt(document.getElementById('kSlider').value);
+  const temp = parseFloat(document.getElementById('tempKSlider').value) / 10;
+  const prompt = PROMPTS[currentPrompt];
+  const maxSteps = 4;
+
+  let node = prompt.tree;
+  const outputTokens = [];
+  const levelH = (H - 100) / maxSteps;
+
+  for (let step = 0; step < maxSteps && animating; step++) {
+    const { tokens, probs } = node;
+    // Apply temperature
+    const scaledLogits = probs.map(p => Math.log(p + 1e-9) / temp);
+    const maxLogit = Math.max(...scaledLogits);
+    const expLogits = scaledLogits.map(l => Math.exp(l - maxLogit));
+    const sumExp = expLogits.reduce((a, b) => a + b, 0);
+    const scaledProbs = expLogits.map(e => e / sumExp);
+
+    // Sort and take top-k
+    const indexed = scaledProbs.map((p, i) => ({ p, i, token: tokens[i] }));
+    indexed.sort((a, b) => b.p - a.p);
+    const topK = indexed.slice(0, K);
+    const rest = indexed.slice(K);
+    const topKSum = topK.reduce((s, t) => s + t.p, 0);
+    const normalized = topK.map(t => ({ ...t, pNorm: t.p / topKSum }));
+
+    // Sample
+    let r = Math.random();
+    let chosen = normalized[0];
+    for (const t of normalized) {
+      r -= t.pNorm;
+      if (r <= 0) { chosen = t; break; }
+    }
+
+    // Draw this step
+    clearCanvas();
+    const n = tokens.length;
+    const spacing = Math.min((W - 60) / n, 90);
+    const startX = W / 2 - ((n - 1) / 2) * spacing;
+    const y = 70 + step * levelH;
+
+    ctx.font = `10px "JetBrains Mono", monospace`;
+    ctx.fillStyle = '#334155';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Step ${step + 1} — Top-K distribution (K=${K}, T=${temp.toFixed(1)})`, W / 2, 22);
+
+    // Draw previous output tokens small
+    outputTokens.forEach((ot, oti) => {
+      const oy = 70 + oti * levelH;
+      ctx.font = `9px "JetBrains Mono", monospace`;
+      ctx.fillStyle = color + '60';
+      ctx.fillText(`"${ot.token}"`, W / 2, oy);
+    });
+
+    tokens.forEach((tok, ti) => {
+      const x = startX + ti * spacing;
+      const inTopK = topK.some(t => t.i === ti);
+      const isChosen = ti === chosen.i;
+      drawNode(x, y, tok, scaledProbs[ti], color, isChosen, inTopK ? 1 : 0.25);
+
+      // Top-k boundary bracket
+      if (inTopK) {
+        ctx.beginPath();
+        ctx.arc(x, y, 26, 0, Math.PI * 2);
+        ctx.strokeStyle = color + '30';
+        ctx.lineWidth = 1;
+        ctx.setLineDash([2, 3]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+    });
+
+    // K boundary line (between kth and k+1th)
+    if (topK.length < tokens.length) {
+      const sortedXs = indexed.map((t, _) => startX + t.i * spacing).sort((a, b) => a - b);
+      const topKXs = topK.map(t => startX + t.i * spacing).sort((a, b) => a - b);
+      const restXs = rest.map(t => startX + t.i * spacing).sort((a, b) => a - b);
+
+      // Draw shaded region for excluded
+      rest.forEach(t => {
+        const x = startX + t.i * spacing;
+        ctx.beginPath();
+        ctx.arc(x, y, 22, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fill();
+        ctx.font = `8px "JetBrains Mono", monospace`;
+        ctx.fillStyle = '#334155';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('✗', x, y);
+      });
+    }
+
+    updateProbBars({ tokens, probs: scaledProbs }, chosen.i, color, topK.map(t => t.i));
+    document.getElementById('stepInfo').innerHTML =
+      `<span style="color:${color}">Top-${K}</span> tokens selected · Sampled: <span style="color:${color}">"${chosen.token}"</span> (p=${(chosen.pNorm * 100).toFixed(0)}%)`;
+
+    outputTokens.push({ token: chosen.token, color });
+    renderOutput(outputTokens, color);
+
+    // Move to next node
+    if (node.children && node.children[chosen.token]) {
+      node = node.children[chosen.token];
+    } else {
+      const keys = Object.keys(node.children || {});
+      if (keys.length) node = node.children[keys[0]];
+      else break;
+    }
+    await sleep(900);
+  }
+}
+
+// ─── TOP-P animation ───────────────────────────────────────────────────────
+async function runTopP() {
+  const W = canvas.width, H = canvas.height;
+  const color = COLORS.topp;
+  const P = parseFloat(document.getElementById('pSlider').value) / 10;
+  const temp = parseFloat(document.getElementById('tempPSlider').value) / 10;
+  const prompt = PROMPTS[currentPrompt];
+  const maxSteps = 4;
+
+  let node = prompt.tree;
+  const outputTokens = [];
+  const levelH = (H - 100) / maxSteps;
+
+  for (let step = 0; step < maxSteps && animating; step++) {
+    const { tokens, probs } = node;
+    const scaledLogits = probs.map(p => Math.log(p + 1e-9) / temp);
+    const maxLogit = Math.max(...scaledLogits);
+    const expLogits = scaledLogits.map(l => Math.exp(l - maxLogit));
+    const sumExp = expLogits.reduce((a, b) => a + b, 0);
+    const scaledProbs = expLogits.map(e => e / sumExp);
+
+    // Sort descending, accumulate until >= P
+    const indexed = scaledProbs.map((p, i) => ({ p, i, token: tokens[i] }));
+    indexed.sort((a, b) => b.p - a.p);
+    let cumSum = 0;
+    const nucleus = [];
+    for (const t of indexed) {
+      nucleus.push(t);
+      cumSum += t.p;
+      if (cumSum >= P) break;
+    }
+    const nucleusSum = nucleus.reduce((s, t) => s + t.p, 0);
+    const normalized = nucleus.map(t => ({ ...t, pNorm: t.p / nucleusSum }));
+
+    let r = Math.random();
+    let chosen = normalized[0];
+    for (const t of normalized) { r -= t.pNorm; if (r <= 0) { chosen = t; break; } }
+
+    clearCanvas();
+    const n = tokens.length;
+    const spacing = Math.min((W - 60) / n, 90);
+    const startX = W / 2 - ((n - 1) / 2) * spacing;
+    const y = 70 + step * levelH;
+
+    ctx.font = `10px "JetBrains Mono", monospace`;
+    ctx.fillStyle = '#334155';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Step ${step + 1} — Nucleus (p=${P.toFixed(1)}, T=${temp.toFixed(1)})`, W / 2, 22);
+
+    outputTokens.forEach((ot, oti) => {
+      const oy = 70 + oti * levelH;
+      ctx.font = `9px "JetBrains Mono", monospace`;
+      ctx.fillStyle = color + '60';
+      ctx.fillText(`"${ot.token}"`, W / 2, oy);
+    });
+
+    // Draw cumulative bar at top
+    const barY = 38;
+    ctx.fillStyle = '#1a2235';
+    ctx.fillRect(30, barY, W - 60, 14);
+    let bx = 30;
+    indexed.forEach((t, ti) => {
+      const bw = (t.p / 1) * (W - 60);
+      const inNucleus = nucleus.some(n => n.i === t.i);
+      ctx.fillStyle = inNucleus ? color : '#1e2d45';
+      ctx.fillRect(bx, barY, bw, 14);
+      bx += bw;
+    });
+    ctx.font = `8px "JetBrains Mono", monospace`;
+    ctx.fillStyle = color;
+    ctx.textAlign = 'left';
+    ctx.fillText(`p=${P.toFixed(1)} cutoff`, 30, barY - 3);
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([3, 2]);
+    const cutX = 30 + P * (W - 60);
+    ctx.beginPath(); ctx.moveTo(cutX, barY - 2); ctx.lineTo(cutX, barY + 16); ctx.stroke();
+    ctx.setLineDash([]);
+
+    tokens.forEach((tok, ti) => {
+      const x = startX + ti * spacing;
+      const inNucleus = nucleus.some(t => t.i === ti);
+      const isChosen = ti === chosen.i;
+      drawNode(x, y, tok, scaledProbs[ti], color, isChosen, inNucleus ? 1 : 0.2);
+    });
+
+    updateProbBars({ tokens, probs: scaledProbs }, chosen.i, color, nucleus.map(t => t.i));
+    document.getElementById('stepInfo').innerHTML =
+      `<span style="color:${color}">Nucleus size: ${nucleus.length} tokens</span> (cum. p=${(nucleusSum * 100).toFixed(0)}%) · Sampled: <span style="color:${color}">"${chosen.token}"</span>`;
+
+    outputTokens.push({ token: chosen.token, color });
+    renderOutput(outputTokens, color);
+
+    if (node.children && node.children[chosen.token]) node = node.children[chosen.token];
+    else { const keys = Object.keys(node.children || {}); if (keys.length) node = node.children[keys[0]]; else break; }
+    await sleep(900);
+  }
+}
+
+// ─── UI helpers ────────────────────────────────────────────────────────────
+function updateProbBars(level, selectedIdx, color, highlightSet = null) {
+  const container = document.getElementById('probBars');
+  container.innerHTML = '';
+  const n = Math.min(level.tokens.length, 6);
+  for (let i = 0; i < n; i++) {
+    const inHighlight = highlightSet ? highlightSet.includes(i) : i === selectedIdx;
+    const row = document.createElement('div');
+    row.className = 'prob-row';
+    const pct = (level.probs[i] * 100).toFixed(0);
+    row.innerHTML = `
+      <span class="prob-token" style="color:${inHighlight ? color : '#64748b'}">${level.tokens[i]}</span>
+      <div class="prob-bar-bg">
+        <div class="prob-bar-fill" style="width:${pct}%;background:${inHighlight ? color : '#1e2d45'}">
+          <span class="prob-bar-pct">${pct > 15 ? pct + '%' : ''}</span>
+        </div>
+      </div>
+    `;
+    container.appendChild(row);
+  }
+}
+
+function updateProbBarsBeam(beams, beamColors) {
+  const container = document.getElementById('probBars');
+  container.innerHTML = '';
+  beams.forEach((beam, bi) => {
+    const row = document.createElement('div');
+    row.className = 'prob-row';
+    const score = beam.score.toFixed(2);
+    row.innerHTML = `
+      <span class="prob-token" style="color:${beamColors[bi]}">${beam.tokens.join(' ')}</span>
+      <div class="prob-bar-bg">
+        <div class="prob-bar-fill" style="width:${Math.min(100, (1 + beam.score / 10) * 100)}%;background:${beamColors[bi]}">
+          <span class="prob-bar-pct">s=${score}</span>
+        </div>
+      </div>
+    `;
+    container.appendChild(row);
+  });
+}
+
+function renderOutput(tokens, color) {
+  const seq = document.getElementById('outputSeq');
+  seq.innerHTML = '<span class="output-label">OUTPUT:</span>';
+  tokens.forEach((t, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'token-chip';
+    chip.style.background = color + '20';
+    chip.style.color = color;
+    chip.style.border = `1px solid ${color}40`;
+    chip.textContent = `"${t.token}"`;
+    seq.appendChild(chip);
+    setTimeout(() => chip.classList.add('show'), 50);
+  });
+}
+
+function sleep(ms) {
+  return new Promise(res => setTimeout(res, ms));
+}
+
+// ─── Strategy switching ─────────────────────────────────────────────────────
+function setStrategy(strategy) {
+  currentStrategy = strategy;
+  // Tabs
+  document.querySelectorAll('.tab').forEach(t => {
+    t.className = 'tab';
+    if (t.textContent.toLowerCase().includes(strategy.replace(/[^a-z]/g, '').slice(0, 4))) {
+      t.classList.add('active-' + strategy);
+    }
+  });
+  
+  const tabMap = ['⬛ Greedy Search', '🔀 Beam Search', '🎯 Top-K Sampling', '🎲 Top-P (Nucleus)'];
+  const stratMap = ['greedy', 'beam', 'topk', 'topp'];
+  document.querySelectorAll('.tab').forEach((t, i) => {
+    t.className = 'tab';
+    if (stratMap[i] === strategy) t.classList.add('active-' + strategy);
+  });
+
+  const color = COLORS[strategy];
+  const title = { greedy: 'GREEDY SEARCH', beam: 'BEAM SEARCH', topk: 'TOP-K SAMPLING', topp: 'TOP-P (NUCLEUS)' }[strategy];
+  const descs = {
+    greedy: { text: 'At each step, pick the single token with the highest probability. Fast and deterministic, but can get stuck in suboptimal sequences.', formula: 'argmax P(xₜ | x₁…xₜ₋₁)' },
+    beam:   { text: 'Keep the top-k sequences at each step, exploring multiple paths simultaneously. More thorough than greedy, better for translation and summarization.', formula: 'top-k beams by Σ log P(xᵢ)' },
+    topk:   { text: 'Restrict sampling to the K most likely tokens, then sample from their renormalized distribution. Balances diversity with coherence.', formula: 'sample from top-K tokens' },
+    topp:   { text: 'Include the smallest set of tokens whose cumulative probability exceeds P. Adapts the vocabulary size dynamically — the nucleus changes each step.', formula: 'min set S: Σ P(x) ≥ p' }
+  };
+
+  document.getElementById('canvasTitle').textContent = title;
+  document.getElementById('canvasTitle').className = 'canvas-title ' + strategy;
+  document.getElementById('descTitle').textContent = title;
+  document.getElementById('descTitle').className = strategy;
+  document.getElementById('descText').textContent = descs[strategy].text;
+  document.getElementById('descFormula').textContent = descs[strategy].formula;
+  document.getElementById('btnRun').className = 'btn-run ' + strategy;
+  document.getElementById('probTitle').textContent = 'Next-token distribution';
+
+  document.getElementById('greedyParams').style.display = strategy === 'greedy' ? '' : 'none';
+  document.getElementById('beamParams').style.display = strategy === 'beam' ? '' : 'none';
+  document.getElementById('topkParams').style.display = strategy === 'topk' ? '' : 'none';
+  document.getElementById('toppParams').style.display = strategy === 'topp' ? '' : 'none';
+
+  // Initial prob bars
+  const pdata = PROMPTS[currentPrompt].tree;
+  updateProbBars(pdata, 0, color);
+  document.getElementById('outputSeq').innerHTML = '<span class="output-label">OUTPUT:</span>';
+  document.getElementById('stepInfo').textContent = '';
+
+  stopAnimation();
+  drawIdleState();
+}
+
+function stopAnimation() {
+  animating = false;
+  if (animFrame) clearTimeout(animFrame);
+}
+
+async function runAnimation() {
+  if (animating) { stopAnimation(); return; }
+  animating = true;
+  document.getElementById('btnRun').textContent = '■ STOP';
+  document.getElementById('btnRun').disabled = false;
+  document.getElementById('outputSeq').innerHTML = '<span class="output-label">OUTPUT:</span>';
+  document.getElementById('stepInfo').textContent = '';
+
+  try {
+    if (currentStrategy === 'greedy') await runGreedy();
+    else if (currentStrategy === 'beam') await runBeam();
+    else if (currentStrategy === 'topk') await runTopK();
+    else if (currentStrategy === 'topp') await runTopP();
+  } finally {
+    animating = false;
+    document.getElementById('btnRun').textContent = '▶ RUN';
+  }
+}
+
+// ─── Sliders ───────────────────────────────────────────────────────────────
+function updateSlider(el, pct) {
+  el.style.setProperty('--pct', pct + '%');
+}
+
+document.getElementById('beamWidth').addEventListener('input', function() {
+  document.getElementById('beamWidthVal').textContent = this.value;
+  updateSlider(this, (this.value - this.min) / (this.max - this.min) * 100);
+});
+document.getElementById('beamLen').addEventListener('input', function() {
+  document.getElementById('beamLenVal').textContent = this.value;
+  updateSlider(this, (this.value - this.min) / (this.max - this.min) * 100);
+});
+document.getElementById('kSlider').addEventListener('input', function() {
+  document.getElementById('kVal').textContent = this.value;
+  updateSlider(this, (this.value - this.min) / (this.max - this.min) * 100);
+});
+document.getElementById('tempKSlider').addEventListener('input', function() {
+  document.getElementById('tempKVal').textContent = (this.value / 10).toFixed(1);
+  updateSlider(this, (this.value - this.min) / (this.max - this.min) * 100);
+});
+document.getElementById('pSlider').addEventListener('input', function() {
+  document.getElementById('pVal').textContent = (this.value / 10).toFixed(1);
+  updateSlider(this, (this.value - this.min) / (this.max - this.min) * 100);
+});
+document.getElementById('tempPSlider').addEventListener('input', function() {
+  document.getElementById('tempPVal').textContent = (this.value / 10).toFixed(1);
+  updateSlider(this, (this.value - this.min) / (this.max - this.min) * 100);
+});
+
+// Initialize sliders
+['beamWidth','beamLen','kSlider','tempKSlider','pSlider','tempPSlider'].forEach(id => {
+  const el = document.getElementById(id);
+  updateSlider(el, (el.value - el.min) / (el.max - el.min) * 100);
+});
+
+// ─── Prompt select ─────────────────────────────────────────────────────────
+document.getElementById('promptSelect').addEventListener('change', function() {
+  currentPrompt = this.value;
+  document.getElementById('promptDisplay').textContent = PROMPTS[this.value].label;
+  stopAnimation();
+  drawIdleState();
+  const pdata = PROMPTS[currentPrompt].tree;
+  updateProbBars(pdata, 0, COLORS[currentStrategy]);
+  document.getElementById('outputSeq').innerHTML = '<span class="output-label">OUTPUT:</span>';
+});
+
+// ─── Init ──────────────────────────────────────────────────────────────────
+drawIdleState();
+updateProbBars(PROMPTS.weather.tree, 0, COLORS.greedy);
+</script>
+</body>
+</html>
