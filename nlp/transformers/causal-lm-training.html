@@ -273,6 +273,11 @@
             color: #8a4b00;
         }
 
+        .btn.success {
+            background: #dcfce7;
+            color: #14532d;
+        }
+
         .toggle {
             display: flex;
             align-items: center;
@@ -373,6 +378,7 @@
             transform: translateY(-2px);
             border-color: var(--blue);
             box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+            animation: activeGlow 1.4s ease-in-out infinite;
         }
 
         .token-card.future {
@@ -383,6 +389,11 @@
             border-style: dashed;
             color: #7f1d1d;
             background: #fff1f2;
+        }
+
+        @keyframes activeGlow {
+            0%, 100% { box-shadow: 0 10px 24px rgba(37, 99, 235, 0.16); }
+            50% { box-shadow: 0 12px 30px rgba(37, 99, 235, 0.34); }
         }
 
         .token-index {
@@ -476,6 +487,17 @@
             text-decoration: line-through;
         }
 
+        .mask-cell.leaked {
+            background: #fee2e2;
+            color: #991b1b;
+            border-color: #f87171;
+            text-decoration: none;
+        }
+
+        .mask-cell.target-leak {
+            box-shadow: inset 0 0 0 2px rgba(220, 38, 38, 0.45);
+        }
+
         .mask-cell.active-row {
             border-color: var(--blue);
             box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
@@ -483,7 +505,7 @@
 
         .flow {
             display: grid;
-            grid-template-columns: repeat(5, minmax(120px, 1fr));
+            grid-template-columns: repeat(7, minmax(92px, 1fr));
             gap: 10px;
             align-items: center;
             margin-top: 14px;
@@ -518,6 +540,23 @@
             border-color: var(--purple);
             background: #f5f3ff;
             animation: pulse 0.85s ease;
+        }
+
+        .step-explainer {
+            margin-top: 14px;
+            padding: 13px 14px;
+            border: 1px solid #bfdbfe;
+            border-radius: var(--radius);
+            background: #eff6ff;
+            color: #1e3a8a;
+            font-weight: 800;
+        }
+
+        .step-explainer span {
+            display: block;
+            margin-top: 4px;
+            color: #334155;
+            font-weight: 600;
         }
 
         .flow-node strong {
@@ -593,6 +632,26 @@
             background: var(--green);
         }
 
+        .bar.step-target .bar-fill {
+            animation: targetLift 0.8s ease;
+        }
+
+        .bar.step-wrong .bar-fill {
+            animation: wrongDrop 0.8s ease;
+        }
+
+        @keyframes targetLift {
+            0% { filter: brightness(1); box-shadow: none; }
+            50% { filter: brightness(1.25); box-shadow: 0 0 16px rgba(5, 150, 105, 0.6); }
+            100% { filter: brightness(1); box-shadow: none; }
+        }
+
+        @keyframes wrongDrop {
+            0% { filter: brightness(1); }
+            50% { filter: brightness(0.82); }
+            100% { filter: brightness(1); }
+        }
+
         .bar.ignored {
             opacity: 0.5;
         }
@@ -621,6 +680,186 @@
             font-family: var(--mono);
             font-size: 0.92rem;
             color: #1e3a8a;
+        }
+
+        .warning-banner {
+            margin-top: 14px;
+            padding: 12px 14px;
+            border: 1px solid #fca5a5;
+            border-radius: var(--radius);
+            background: #fff1f2;
+            color: #991b1b;
+            font-weight: 850;
+        }
+
+        .step-result {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .delta-up {
+            color: var(--green);
+        }
+
+        .delta-down {
+            color: var(--red);
+        }
+
+        .loss-heatmap {
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(96px, 1fr);
+            gap: 8px;
+            min-width: max-content;
+        }
+
+        .loss-cell {
+            min-height: 66px;
+            padding: 9px 8px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #ecfdf5;
+            color: #102238;
+            text-align: center;
+            cursor: pointer;
+            transition: transform 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+        }
+
+        .loss-cell:hover,
+        .loss-cell:focus-visible {
+            transform: translateY(-1px);
+            outline: none;
+            border-color: var(--line-strong);
+        }
+
+        .loss-cell.current {
+            border-color: var(--blue);
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.18);
+        }
+
+        .loss-cell.medium {
+            background: #fef3c7;
+        }
+
+        .loss-cell.high {
+            background: #fee2e2;
+        }
+
+        .loss-cell.ignored {
+            background: #e5e7eb;
+            color: #64748b;
+            border-style: dashed;
+            cursor: default;
+        }
+
+        .loss-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 10px;
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 750;
+        }
+
+        .legend-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .legend-swatch {
+            width: 18px;
+            height: 10px;
+            border-radius: 999px;
+            border: 1px solid var(--line);
+        }
+
+        .chat-lanes {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .chat-lane {
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #fff;
+        }
+
+        .chat-lane h4 {
+            margin: 0 0 8px;
+            font-size: 0.92rem;
+        }
+
+        .challenge-grid {
+            display: grid;
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .challenge-card {
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--soft);
+        }
+
+        .challenge-card h3 {
+            margin: 0 0 10px;
+            font-size: 0.98rem;
+        }
+
+        .answer-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .answer-btn {
+            min-height: 34px;
+            padding: 7px 10px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: #fff;
+            color: #243244;
+            font-weight: 800;
+        }
+
+        .answer-btn.correct {
+            border-color: #86efac;
+            background: #dcfce7;
+            color: #14532d;
+        }
+
+        .answer-btn.incorrect {
+            border-color: #fecaca;
+            background: #fff1f2;
+            color: #991b1b;
+        }
+
+        .feedback {
+            min-height: 24px;
+            margin-top: 9px;
+            color: var(--muted);
+            font-weight: 750;
+        }
+
+        .feedback.good {
+            color: var(--green);
+        }
+
+        .feedback.bad {
+            color: var(--red);
+        }
+
+        .screenshot-guide {
+            border-style: dashed;
+            background: #f8fafc;
         }
 
         .gradient-row {
@@ -796,7 +1035,9 @@
             .button-row,
             .button-row.three,
             .toggle-grid,
-            .dashboard {
+            .dashboard,
+            .step-result,
+            .chat-lanes {
                 grid-template-columns: 1fr;
             }
 
@@ -876,7 +1117,14 @@
                         <button class="btn" id="step-button" type="button">Step</button>
                         <button class="btn" id="reset-button" type="button">Reset</button>
                     </div>
+                    <button class="btn success" id="gradient-step-button" type="button">Apply one gradient step</button>
                     <button class="btn warning" id="randomize-button" type="button">Randomize logits</button>
+                    <button class="btn" id="reset-logits-button" type="button">Reset learned logits</button>
+
+                    <label class="field">
+                        <span class="label-row"><span>Learning rate</span><output id="learning-rate-output">0.50</output></span>
+                        <input id="learning-rate-range" type="range" min="0.05" max="2" step="0.05" value="0.5">
+                    </label>
 
                     <label class="field">
                         <span class="label-row"><span>Temperature</span><output id="temperature-output">1.00</output></span>
@@ -908,6 +1156,7 @@
                         <label class="toggle"><input id="toggle-probs" type="checkbox" checked> Probabilities</label>
                         <label class="toggle"><input id="toggle-grad" type="checkbox" checked> Gradients</label>
                         <label class="toggle"><input id="toggle-teacher" type="checkbox" checked> Teacher vs inference</label>
+                        <label class="toggle"><input id="toggle-leakage" type="checkbox"> Allow future-token leakage</label>
                     </div>
                 </div>
             </aside>
@@ -925,12 +1174,20 @@
                     <div class="token-stage">
                         <div class="token-row" id="input-token-row" aria-label="Input tokens"></div>
                         <div class="label-row-viz" id="label-token-row" aria-label="Shifted labels"></div>
+                        <div class="loss-heatmap" id="loss-heatmap" aria-label="Per-token loss heatmap"></div>
+                    </div>
+                    <div class="loss-legend" aria-label="Loss heatmap legend">
+                        <span class="legend-chip"><span class="legend-swatch" style="background:#ecfdf5"></span>low loss</span>
+                        <span class="legend-chip"><span class="legend-swatch" style="background:#fef3c7"></span>medium loss</span>
+                        <span class="legend-chip"><span class="legend-swatch" style="background:#fee2e2"></span>high loss</span>
+                        <span class="legend-chip"><span class="legend-swatch" style="background:#e5e7eb"></span>ignored</span>
                     </div>
                 </section>
 
                 <section class="panel section" id="mask-section" aria-labelledby="mask-title">
                     <h2 class="section-title" id="mask-title">2. Causal attention mask</h2>
                     <p class="section-note">Position i can only use tokens at positions &lt;= i. If it could see future tokens, the training task would leak the answer.</p>
+                    <div class="warning-banner hidden" id="leakage-warning">Leakage enabled: the model can see the answer token during training, making next-token prediction invalid.</div>
                     <div class="matrix-wrap">
                         <div class="mask-matrix" id="mask-matrix"></div>
                     </div>
@@ -945,7 +1202,10 @@
                         <div class="flow-node" data-flow="mask"><strong>masked self-attention</strong><span>future blocked</span></div>
                         <div class="flow-node" data-flow="hidden"><strong>hidden states</strong><span>one per position</span></div>
                         <div class="flow-node" data-flow="logits"><strong>LM head -> logits</strong><span>vocabulary scores</span></div>
+                        <div class="flow-node" data-flow="loss"><strong>cross-entropy</strong><span>target comparison</span></div>
+                        <div class="flow-node" data-flow="gradient"><strong>gradient signal</strong><span>p - y</span></div>
                     </div>
+                    <div class="step-explainer" id="step-explanation">Step 1: choose current position<span>The highlighted token supplies the prefix for next-token prediction.</span></div>
                 </section>
 
                 <section class="panel section" aria-labelledby="softmax-title">
@@ -974,6 +1234,8 @@
                     <h2 class="section-title" id="gradient-title">6. Gradient microscope</h2>
                     <p class="section-note">For logits z, the gradient is dL/dz_i = p_i - y_i. Gradient descent subtracts this gradient, so the target logit increases and overconfident wrong logits decrease.</p>
                     <div class="formula-box"><code>dL/dz_i = p_i - y_i</code></div>
+                    <div class="formula-box" id="gradient-step-summary">Click "Apply one gradient step" to update the current position's logits.</div>
+                    <div class="step-result" id="gradient-step-result"></div>
                     <div id="gradient-bars"></div>
                 </section>
 
@@ -1001,7 +1263,15 @@
                         <h3>User: Explain attention.</h3>
                         <p><strong>Assistant:</strong> Attention weights values by relevance.</p>
                         <div class="mini-tokens" id="chat-mask-tokens"></div>
+                        <p class="muted" id="assistant-mask-explainer">In many instruction-tuning pipelines, the prompt is context while the assistant response is the supervised target.</p>
+                        <div class="chat-lanes" id="chat-lanes"></div>
                     </div>
+                </section>
+
+                <section class="panel section" aria-labelledby="challenge-title">
+                    <h2 class="section-title" id="challenge-title">Mini challenge</h2>
+                    <p class="section-note">Check your understanding against the current state of the lab.</p>
+                    <div class="challenge-grid" id="challenge-grid"></div>
                 </section>
 
                 <section class="panel section" aria-labelledby="quiz-title">
@@ -1022,6 +1292,11 @@
                         <summary>Why might we ignore prompt tokens during instruction tuning?</summary>
                         <p>Ignoring prompt labels focuses the loss on assistant responses instead of teaching the model to reproduce user or system prompts.</p>
                     </details>
+                </section>
+
+                <section class="panel section screenshot-guide" aria-labelledby="screenshot-title">
+                    <h2 class="section-title" id="screenshot-title">Screenshot guide</h2>
+                    <p class="section-note">Suggested PR screenshots: shifted labels plus causal mask; gradient microscope before and after one training step; assistant-only loss masking in chat mode.</p>
                 </section>
             </div>
         </div>
@@ -1056,14 +1331,18 @@
                 vocab: [],
                 logits: [],
                 position: 0,
+                learningRate: 0.5,
                 temperature: 1,
                 smoothing: 0,
                 maskMode: "all",
+                allowLeakage: false,
                 ignoreFirst: 2,
                 playing: false,
                 playTimer: null,
                 stepTick: 0,
                 rngSeed: 11,
+                lastStepResult: null,
+                challengeFeedback: {},
                 toggles: {
                     mask: true,
                     logits: true,
@@ -1083,7 +1362,11 @@
                 playButton: document.getElementById("play-button"),
                 stepButton: document.getElementById("step-button"),
                 resetButton: document.getElementById("reset-button"),
+                gradientStepButton: document.getElementById("gradient-step-button"),
                 randomizeButton: document.getElementById("randomize-button"),
+                resetLogitsButton: document.getElementById("reset-logits-button"),
+                learningRateRange: document.getElementById("learning-rate-range"),
+                learningRateOutput: document.getElementById("learning-rate-output"),
                 temperatureRange: document.getElementById("temperature-range"),
                 temperatureOutput: document.getElementById("temperature-output"),
                 smoothingRange: document.getElementById("smoothing-range"),
@@ -1094,14 +1377,19 @@
                 ignoreOutput: document.getElementById("ignore-output"),
                 inputTokenRow: document.getElementById("input-token-row"),
                 labelTokenRow: document.getElementById("label-token-row"),
+                lossHeatmap: document.getElementById("loss-heatmap"),
+                leakageWarning: document.getElementById("leakage-warning"),
                 maskMatrix: document.getElementById("mask-matrix"),
                 flowDiagram: document.getElementById("flow-diagram"),
+                stepExplanation: document.getElementById("step-explanation"),
                 logitBars: document.getElementById("logit-bars"),
                 probabilityBars: document.getElementById("probability-bars"),
                 logitsPanel: document.getElementById("logits-panel"),
                 probabilityPanel: document.getElementById("probability-panel"),
                 lossGrid: document.getElementById("loss-grid"),
                 targetDistribution: document.getElementById("target-distribution"),
+                gradientStepSummary: document.getElementById("gradient-step-summary"),
+                gradientStepResult: document.getElementById("gradient-step-result"),
                 gradientBars: document.getElementById("gradient-bars"),
                 metricsGrid: document.getElementById("metrics-grid"),
                 teacherSection: document.getElementById("teacher-section"),
@@ -1110,11 +1398,15 @@
                 teacherTokens: document.getElementById("teacher-tokens"),
                 inferenceTokens: document.getElementById("inference-tokens"),
                 chatMaskTokens: document.getElementById("chat-mask-tokens"),
+                assistantMaskExplainer: document.getElementById("assistant-mask-explainer"),
+                chatLanes: document.getElementById("chat-lanes"),
+                challengeGrid: document.getElementById("challenge-grid"),
                 toggleMask: document.getElementById("toggle-mask"),
                 toggleLogits: document.getElementById("toggle-logits"),
                 toggleProbs: document.getElementById("toggle-probs"),
                 toggleGrad: document.getElementById("toggle-grad"),
-                toggleTeacher: document.getElementById("toggle-teacher")
+                toggleTeacher: document.getElementById("toggle-teacher"),
+                toggleLeakage: document.getElementById("toggle-leakage")
             };
 
             function tokenize(text) {
@@ -1156,6 +1448,8 @@
                 buildVocab();
                 buildLogits(false);
                 state.position = Math.min(state.position, Math.max(0, state.tokens.length - 2));
+                state.lastStepResult = null;
+                state.challengeFeedback = {};
             }
 
             function applyMasking() {
@@ -1207,6 +1501,11 @@
                         return deterministicLogit(position, vocabIndex, targetIndex);
                     });
                 });
+            }
+
+            function resetLearnedLogits() {
+                buildLogits(false);
+                state.lastStepResult = null;
             }
 
             function softmax(logits, temperature) {
@@ -1328,8 +1627,36 @@
                 }).join("");
             }
 
+            function lossClass(loss) {
+                if (loss < 1.2) {
+                    return "low";
+                }
+                if (loss < 2.6) {
+                    return "medium";
+                }
+                return "high";
+            }
+
+            function renderLossHeatmap(totals) {
+                els.lossHeatmap.innerHTML = totals.positions.map((stats, index) => {
+                    const token = state.tokens[index];
+                    const ignored = stats.ignored;
+                    const classes = ["loss-cell", ignored ? "ignored" : lossClass(stats.loss)];
+                    if (index === state.position) classes.push("current");
+                    const label = ignored ? "ignored" : `loss ${fmt(stats.loss, 2)}`;
+                    return `
+                        <button class="${classes.join(" ")}" type="button" data-position="${index}" ${ignored ? "aria-label=\"ignored label\"" : ""}>
+                            <div class="token-index">pos ${index}</div>
+                            <div class="token-text">${escapeText(token.text)}</div>
+                            <div class="muted">${escapeText(label)}</div>
+                        </button>
+                    `;
+                }).join("");
+            }
+
             function renderMask() {
                 els.maskSection.classList.toggle("hidden", !state.toggles.mask);
+                els.leakageWarning.classList.toggle("hidden", !state.allowLeakage);
                 const n = state.tokens.length;
                 els.maskMatrix.style.gridTemplateColumns = `repeat(${n + 1}, minmax(52px, 1fr))`;
                 let html = "<div class=\"mask-cell header\">q \\ k</div>";
@@ -1339,10 +1666,14 @@
                 state.tokens.forEach((rowToken, row) => {
                     html += `<div class="mask-cell header">q_${row}<br>${escapeText(rowToken.text)}</div>`;
                     state.tokens.forEach((_, col) => {
-                        const allowed = col <= row;
+                        const future = col > row;
+                        const targetLeak = state.allowLeakage && row === state.position && col === state.position + 1 && col < n;
+                        const allowed = state.allowLeakage || col <= row;
                         const classes = ["mask-cell", allowed ? "allowed" : "blocked"];
+                        if (state.allowLeakage && future) classes.push("leaked");
+                        if (targetLeak) classes.push("target-leak");
                         if (row === state.position) classes.push("active-row");
-                        html += `<div class="${classes.join(" ")}">${allowed ? "use" : "no"}</div>`;
+                        html += `<div class="${classes.join(" ")}">${targetLeak ? "leaked" : allowed ? "use" : "no"}</div>`;
                     });
                 });
                 els.maskMatrix.innerHTML = html;
@@ -1354,6 +1685,15 @@
                 nodes.forEach((node, index) => {
                     node.classList.toggle("active", index === activeIndex || index === nodes.length - 1);
                 });
+                const steps = [
+                    ["Step 1: choose current position", "The highlighted token supplies the prefix for next-token prediction."],
+                    ["Step 2: apply causal mask", state.allowLeakage ? "Leakage is enabled, so future tokens are visible and the task is invalid." : "Future positions are blocked before self-attention computes context."],
+                    ["Step 3: compute next-token probabilities", "The LM head emits logits and stable softmax converts them into probabilities."],
+                    ["Step 4: compute cross-entropy", "The shifted label selects the target probability used in the loss."],
+                    ["Step 5: compute gradient signal", "The logit gradient is p - y, ready for a parameter update."]
+                ];
+                const [title, body] = steps[state.stepTick % steps.length];
+                els.stepExplanation.innerHTML = `${escapeText(title)}<span>${escapeText(body)}</span>`;
             }
 
             function renderBars(container, values, options) {
@@ -1366,6 +1706,8 @@
                     const classes = ["bar"];
                     if (item.target) classes.push("target");
                     if (item.ignored) classes.push("ignored");
+                    if (item.stepTarget) classes.push("step-target");
+                    if (item.stepWrong) classes.push("step-wrong");
                     return `
                         <div class="${classes.join(" ")}">
                             <div class="bar-label" title="${escapeText(item.label)}">${escapeText(item.label)}</div>
@@ -1391,10 +1733,34 @@
                     value: stats.probs[index] || 0,
                     display: `${fmt((stats.probs[index] || 0) * 100, 1)}%`,
                     target: index === stats.targetIndex,
-                    ignored: stats.ignored
+                    ignored: stats.ignored,
+                    stepTarget: state.lastStepResult && state.lastStepResult.position === state.position && index === stats.targetIndex && state.lastStepResult.afterTargetProb >= state.lastStepResult.beforeTargetProb,
+                    stepWrong: state.lastStepResult && state.lastStepResult.position === state.position && state.lastStepResult.decreasedWrongIndices.includes(index)
                 }));
                 renderBars(els.logitBars, logitValues, { kind: "logit" });
                 renderBars(els.probabilityBars, probValues, { kind: "prob" });
+            }
+
+            function renderGradientStepResult() {
+                els.gradientStepSummary.textContent = "Gradient descent subtracts p - y, so the target logit usually increases and high-probability wrong logits decrease.";
+                if (!state.lastStepResult || state.lastStepResult.position !== state.position) {
+                    els.gradientStepResult.innerHTML = `
+                        <div class="metric"><span>Target prob before</span><strong>--</strong></div>
+                        <div class="metric"><span>Target prob after</span><strong>--</strong></div>
+                        <div class="metric"><span>Loss before</span><strong>--</strong></div>
+                        <div class="metric"><span>Loss after</span><strong>--</strong></div>
+                    `;
+                    return;
+                }
+                const result = state.lastStepResult;
+                const probDeltaClass = result.afterTargetProb >= result.beforeTargetProb ? "delta-up" : "delta-down";
+                const lossDeltaClass = result.afterLoss <= result.beforeLoss ? "delta-up" : "delta-down";
+                els.gradientStepResult.innerHTML = `
+                    <div class="metric"><span>Target prob before</span><strong>${fmt(result.beforeTargetProb * 100, 2)}%</strong></div>
+                    <div class="metric"><span>Target prob after</span><strong class="${probDeltaClass}">${fmt(result.afterTargetProb * 100, 2)}%</strong></div>
+                    <div class="metric"><span>Loss before</span><strong>${result.ignored ? "ignored" : fmt(result.beforeLoss, 3)}</strong></div>
+                    <div class="metric"><span>Loss after</span><strong class="${lossDeltaClass}">${result.ignored ? "ignored" : fmt(result.afterLoss, 3)}</strong></div>
+                `;
             }
 
             function renderLoss(stats, totals) {
@@ -1481,6 +1847,36 @@
                     const suffix = ignored ? " -100" : "";
                     return `<span class="${cls}">${escapeText(token.text)}${suffix}</span>`;
                 }).join("");
+                const isAssistantOnlyChat = state.example === "chat" && state.maskMode === "assistant";
+                els.assistantMaskExplainer.textContent = isAssistantOnlyChat
+                    ? "In many instruction-tuning pipelines, the prompt is context while the assistant response is the supervised target."
+                    : "Switch to the chat example and assistant-only mode to see prompt labels become -100.";
+
+                if (state.example !== "chat") {
+                    els.chatLanes.innerHTML = `
+                        <div class="chat-lane"><h4>Prompt context</h4><p class="muted">Choose the chat example to inspect prompt masking.</p></div>
+                        <div class="chat-lane"><h4>Assistant target</h4><p class="muted">Assistant tokens become supervised labels in assistant-only mode.</p></div>
+                    `;
+                    return;
+                }
+
+                const promptTokens = state.tokens.filter((token) => token.role !== "assistant");
+                const assistantTokens = state.tokens.filter((token) => token.role === "assistant");
+                const laneToken = (token) => {
+                    const ignored = isAssistantOnlyChat && token.role !== "assistant";
+                    const label = token.labelText ? token.labelText : "none";
+                    return `<span class="mini-token ${ignored ? "ignored" : "good"}">${escapeText(token.text)} -> ${ignored ? "-100 ignored" : escapeText(label)}</span>`;
+                };
+                els.chatLanes.innerHTML = `
+                    <div class="chat-lane">
+                        <h4>User / prompt tokens</h4>
+                        <div class="mini-tokens">${promptTokens.map(laneToken).join("")}</div>
+                    </div>
+                    <div class="chat-lane">
+                        <h4>Assistant / completion tokens</h4>
+                        <div class="mini-tokens">${assistantTokens.map(laneToken).join("")}</div>
+                    </div>
+                `;
             }
 
             function renderMetrics(stats, totals) {
@@ -1494,7 +1890,7 @@
                     ["Target prob", `${fmt(stats.targetProb * 100, 2)}%`],
                     ["Position loss", stats.ignored ? "0.000 ignored" : fmt(stats.loss, 3)],
                     ["Context length", state.position + 1],
-                    ["Future leakage", state.toggles.mask ? "prevented" : "hidden"]
+                    ["Future leakage", state.allowLeakage ? "enabled" : "prevented"]
                 ];
                 els.metricsGrid.innerHTML = items.map(([label, value]) => `
                     <div class="metric">
@@ -1504,11 +1900,65 @@
                 `).join("");
             }
 
+            function renderChallenge(stats) {
+                const target = stats.token?.labelText || "none";
+                const distractors = state.vocab.filter((item) => item !== target).slice(0, 3);
+                const targetOptions = [target].concat(distractors).slice(0, 4);
+                const feedback = state.challengeFeedback;
+                const challengeOne = targetOptions.map((option) => {
+                    const answered = feedback.target === option;
+                    const cls = answered ? (option === target ? "correct" : "incorrect") : "";
+                    return `<button class="answer-btn ${cls}" type="button" data-challenge="target" data-answer="${escapeText(option)}">${escapeText(option)}</button>`;
+                }).join("");
+
+                const blockedAnswer = state.allowLeakage ? "none" : "columns j > i";
+                const blockedOptions = ["columns j > i", "columns j <= i", "all diagonal cells", "none"];
+                const challengeTwo = blockedOptions.map((option) => {
+                    const answered = feedback.mask === option;
+                    const cls = answered ? (option === blockedAnswer ? "correct" : "incorrect") : "";
+                    return `<button class="answer-btn ${cls}" type="button" data-challenge="mask" data-answer="${escapeText(option)}">${escapeText(option)}</button>`;
+                }).join("");
+
+                const lossAnswer = "it decreases";
+                const lossOptions = ["it decreases", "it increases", "it stays fixed"];
+                const challengeThree = lossOptions.map((option) => {
+                    const answered = feedback.loss === option;
+                    const cls = answered ? (option === lossAnswer ? "correct" : "incorrect") : "";
+                    return `<button class="answer-btn ${cls}" type="button" data-challenge="loss" data-answer="${escapeText(option)}">${escapeText(option)}</button>`;
+                }).join("");
+
+                const feedbackText = (key, correct, goodText, badText) => {
+                    if (!feedback[key]) return "";
+                    const ok = feedback[key] === correct;
+                    return `<div class="feedback ${ok ? "good" : "bad"}">${ok ? goodText : badText}</div>`;
+                };
+
+                els.challengeGrid.innerHTML = `
+                    <div class="challenge-card">
+                        <h3>Which token is predicted at the current position?</h3>
+                        <div class="answer-row">${challengeOne}</div>
+                        ${feedbackText("target", target, "Correct: labels are shifted by one token.", `Not quite. The current label is ${target}.`)}
+                    </div>
+                    <div class="challenge-card">
+                        <h3>Which cells are blocked by the causal mask?</h3>
+                        <div class="answer-row">${challengeTwo}</div>
+                        ${feedbackText("mask", blockedAnswer, state.allowLeakage ? "Correct: leakage mode allows future cells." : "Correct: future key columns are blocked.", "Check the highlighted mask row: causal masks block future columns.")}
+                    </div>
+                    <div class="challenge-card">
+                        <h3>If the target probability increases, what happens to cross-entropy loss?</h3>
+                        <div class="answer-row">${challengeThree}</div>
+                        ${feedbackText("loss", lossAnswer, "Correct: -log(p_target) gets smaller.", "Cross-entropy falls as the target probability rises.")}
+                    </div>
+                `;
+            }
+
             function syncControls() {
                 const maxPosition = Math.max(0, state.tokens.length - 2);
                 els.positionRange.max = String(maxPosition);
                 els.positionRange.value = String(state.position);
                 els.positionOutput.value = `${state.position} -> ${state.tokens[state.position]?.labelText || "ignored"}`;
+                els.learningRateRange.value = String(state.learningRate);
+                els.learningRateOutput.value = fmt(state.learningRate, 2);
                 els.temperatureRange.value = String(state.temperature);
                 els.temperatureOutput.value = fmt(state.temperature, 2);
                 els.smoothingRange.value = String(state.smoothing);
@@ -1521,6 +1971,7 @@
                 els.playButton.textContent = state.playing ? "Pause" : "Play";
                 els.maskMode.value = state.maskMode;
                 els.exampleSelect.value = state.example;
+                els.toggleLeakage.checked = state.allowLeakage;
             }
 
             function render() {
@@ -1529,14 +1980,17 @@
                 const stats = positionStats(state.position);
                 const totals = allLossStats();
                 renderTokens();
+                renderLossHeatmap(totals);
                 renderMask();
                 renderFlow();
                 renderLogitsAndProbabilities(stats);
                 renderLoss(stats, totals);
+                renderGradientStepResult();
                 renderGradients(stats);
                 renderTeacherForcing();
                 renderChatMask();
                 renderMetrics(stats, totals);
+                renderChallenge(stats);
             }
 
             function stopPlaying() {
@@ -1556,6 +2010,7 @@
                     state.position += 1;
                 }
                 state.stepTick += 1;
+                state.challengeFeedback = {};
                 render();
             }
 
@@ -1567,6 +2022,38 @@
                         stopPlaying();
                     }
                 }, els.animationMode.value === "pass" ? 1100 : 750);
+                render();
+            }
+
+            function applyGradientStep() {
+                stopPlaying();
+                const before = positionStats(state.position);
+                const beforeProbs = before.probs.slice();
+                const beforeLoss = before.loss;
+                const beforeTargetProb = before.targetProb;
+
+                if (!before.ignored && state.logits[state.position]) {
+                    state.logits[state.position] = state.logits[state.position].map((z, index) =>
+                        Number((z - state.learningRate * before.gradients[index]).toFixed(6))
+                    );
+                }
+
+                const after = positionStats(state.position);
+                state.lastStepResult = {
+                    position: state.position,
+                    ignored: before.ignored,
+                    targetIndex: before.targetIndex,
+                    beforeTargetProb,
+                    afterTargetProb: after.targetProb,
+                    beforeLoss,
+                    afterLoss: after.loss,
+                    decreasedWrongIndices: after.probs
+                        .map((prob, index) => ({ index, prob }))
+                        .filter((item) => item.index !== before.targetIndex && item.prob < (beforeProbs[item.index] || 0))
+                        .map((item) => item.index)
+                };
+                state.stepTick = 4;
+                state.challengeFeedback = {};
                 render();
             }
 
@@ -1613,19 +2100,36 @@
             els.resetButton.addEventListener("click", () => {
                 stopPlaying();
                 state.position = 0;
+                state.learningRate = 0.5;
                 state.temperature = 1;
                 state.smoothing = 0;
                 state.ignoreFirst = 2;
                 state.stepTick = 0;
+                state.allowLeakage = false;
                 makeTokens();
                 render();
             });
+
+            els.gradientStepButton.addEventListener("click", applyGradientStep);
 
             els.randomizeButton.addEventListener("click", () => {
                 stopPlaying();
                 state.rngSeed += 97;
                 buildLogits(true);
+                state.lastStepResult = null;
                 state.stepTick += 1;
+                render();
+            });
+
+            els.resetLogitsButton.addEventListener("click", () => {
+                stopPlaying();
+                resetLearnedLogits();
+                state.stepTick = 0;
+                render();
+            });
+
+            els.learningRateRange.addEventListener("input", () => {
+                state.learningRate = Number(els.learningRateRange.value);
                 render();
             });
 
@@ -1641,11 +2145,33 @@
 
             els.maskMode.addEventListener("change", () => {
                 state.maskMode = els.maskMode.value;
+                state.challengeFeedback = {};
                 render();
             });
 
             els.ignoreRange.addEventListener("input", () => {
                 state.ignoreFirst = Number(els.ignoreRange.value);
+                render();
+            });
+
+            els.lossHeatmap.addEventListener("click", (event) => {
+                const cell = event.target.closest("[data-position]");
+                if (!cell) {
+                    return;
+                }
+                stopPlaying();
+                state.position = Number(cell.dataset.position);
+                state.stepTick = 0;
+                state.challengeFeedback = {};
+                render();
+            });
+
+            els.challengeGrid.addEventListener("click", (event) => {
+                const button = event.target.closest("[data-challenge]");
+                if (!button) {
+                    return;
+                }
+                state.challengeFeedback[button.dataset.challenge] = button.dataset.answer;
                 render();
             });
 
@@ -1660,6 +2186,13 @@
                     state.toggles[key] = el.checked;
                     render();
                 });
+            });
+
+            els.toggleLeakage.addEventListener("change", () => {
+                state.allowLeakage = els.toggleLeakage.checked;
+                state.challengeFeedback = {};
+                state.stepTick = 1;
+                render();
             });
 
             window.addEventListener("beforeunload", stopPlaying);
