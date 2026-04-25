@@ -593,14 +593,22 @@ function appendTreeNode(rowEl, text, kindCls) {
 
 // Top-N alternatives by probability, excluding the chosen index.
 function topAlts(probs, vocab, chosenIdx, n) {
-  // Returns the alternatives that COULD have been picked but weren't.
-  //   - Tokens with prob === 0 are excluded automatically. For top-k / top-p
-  //     this means only pool / nucleus members appear (e.g. top-k = 3 yields
-  //     exactly 2 alternatives — the 2 non-chosen members of the pool).
-  //   - When `n` is undefined or null, no length cap is applied — show every
-  //     candidate that was actually in the sampling pool. For full-vocabulary
-  //     strategies (greedy / temperature / contrastive) callers should pass
-  //     n = 3 to keep the display compact.
+  // Returns the alternatives the algorithm actually CONSIDERED at this step
+  // but didn't pick. Tokens with prob === 0 are filtered out, so the size of
+  // the result naturally tracks the algorithm's effective candidate count:
+  //
+  //   strategy        considered      alts shown (= candidates − 1)
+  //   --------        ----------      ------------------------------
+  //   greedy          10  (full)      9
+  //   temperature     10  (full)      9
+  //   top-k = 3        3  (pool)      2
+  //   top-k = 1        1  (pool)      0
+  //   top-k = 10      10  (pool)      9
+  //   top-p (nucleus = N)  N          N − 1
+  //   contrastive     10  (full)      9
+  //
+  // The optional `n` argument caps the result if a caller wants only top-N
+  // (currently unused — every strategy prefers the natural pool size).
   let alts = probs
     .map(function (p, i) { return { text: vocab[i], prob: p, i: i }; })
     .filter(function (x) { return x.i !== chosenIdx && x.prob > 0; })
@@ -660,7 +668,9 @@ function greedyNext() {
   const probs = softmax(P.expertLogits);
   const idx = argmax(probs);
   const token = P.vocab[idx];
-  appendTreeStep(document.getElementById('greedy-seq'), token, probs[idx], topAlts(probs, P.vocab, idx, 3), 'tree-new');
+  // Greedy considers the full vocabulary at each position (no pool filter), so
+  // the alternatives column shows all 9 non-chosen tokens for that step.
+  appendTreeStep(document.getElementById('greedy-seq'), token, probs[idx], topAlts(probs, P.vocab, idx), 'tree-new');
   greedyPos++;
   if (token === EOS_TOKEN) { greedyStopped = true; setStopped('greedy-stopped', 'EOS'); return; }
   if (greedyPos >= MAX_LENGTH) { greedyStopped = true; setStopped('greedy-stopped', 'max'); return; }
@@ -688,9 +698,11 @@ function tempSample() {
   const probs = softmax(P.expertLogits, T);
   const idx = sample(probs);
   const token = P.vocab[idx];
-  // Display probability under the chosen sample's actual T-distribution so the
-  // probability label honestly reflects the distribution we sampled from.
-  appendTreeStep(document.getElementById('temp-seq'), token, probs[idx], topAlts(probs, P.vocab, idx, 3), 'tree-new');
+  // Probability under the actual T-distribution we sampled from. Temperature
+  // sampling considers every vocab token (every prob > 0), so the alts column
+  // shows all 9 non-chosen tokens at this step. With high T the alt probs
+  // flatten toward 10% each; with low T they collapse toward the chosen.
+  appendTreeStep(document.getElementById('temp-seq'), token, probs[idx], topAlts(probs, P.vocab, idx), 'tree-new');
   tempPos++;
   if (token === EOS_TOKEN) { tempStopped = true; setStopped('temp-stopped', 'EOS'); return; }
   if (tempPos >= MAX_LENGTH) { tempStopped = true; setStopped('temp-stopped', 'max'); return; }
@@ -1017,8 +1029,9 @@ function cdNext() {
   const token = P.vocab[idx];
   // Use base expert P for the displayed probability — pedagogically richer than
   // the CD-score because it lets students see "I chose a word the expert thought
-  // was only 22% likely" when α flips the argmax.
-  appendTreeStep(document.getElementById('cd-seq'), token, expertP[idx], topAlts(expertP, P.vocab, idx, 3), 'tree-new');
+  // was only 22% likely" when α flips the argmax. CD scores all 10 vocab tokens
+  // before taking argmax, so the alts column shows all 9 non-chosen.
+  appendTreeStep(document.getElementById('cd-seq'), token, expertP[idx], topAlts(expertP, P.vocab, idx), 'tree-new');
   cdPos++;
   if (token === EOS_TOKEN) { cdStopped = true; setStopped('cd-stopped', 'EOS'); return; }
   if (cdPos >= MAX_LENGTH) { cdStopped = true; setStopped('cd-stopped', 'max'); return; }
