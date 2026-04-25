@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LLM Decoding Strategies Explorer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  @keyframes token-appear { from { opacity: 0; transform: translateY(6px) scale(0.9); } to { opacity: 1; transform: none; } }
+  .tok-new { animation: token-appear 0.3s ease-out; }
+  .bar-fill { transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease; }
+  .toc-link.active { background: #e0e7ff; color: #4338ca; }
+  input[type=range] { accent-color: #4f46e5; }
+  .bar-row { display: grid; grid-template-columns: 6rem 1fr 4rem 4.5rem; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+  @media (max-width: 540px) {
+    /* On narrow screens drop the verbose state-label column ("✓ chosen", "in pool", "✗ out");
+       the bar color/strikethrough already conveys the state. Shrink other columns. */
+    .bar-row { grid-template-columns: 4.5rem 1fr 3rem; gap: 0.35rem; font-size: 0.72rem; }
+    .bar-row .bar-state { display: none; }
+  }
+  .bar-track { background: #f1f5f9; border-radius: 4px; height: 18px; overflow: hidden; position: relative; }
+  .bar-fill { height: 100%; border-radius: 4px; display: flex; align-items: center; justify-content: flex-end; padding-right: 4px; min-width: 0; }
+  .bar-pct { font-size: 0.68rem; color: white; font-weight: 600; white-space: nowrap; }
+  .bar-label { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #334155; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar-num { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: #64748b; font-size: 0.72rem; text-align: right; }
+  .bar-state { font-size: 0.7rem; text-align: right; white-space: nowrap; }
+  .state-selected { color: #16a34a; font-weight: 600; }
+  .state-kept     { color: #4f46e5; }
+  .state-masked   { color: #dc2626; }
+  .bar-masked .bar-label { color: #cbd5e1; text-decoration: line-through; }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="max-w-5xl mx-auto px-4 pt-10 pb-6">
+  <h1 class="text-3xl md:text-4xl font-bold text-slate-900">LLM Decoding Strategies Explorer</h1>
+  <p class="text-slate-600 mt-2 max-w-3xl">Compare greedy, temperature, top-k, top-p, beam search, contrastive, and speculative decoding with live probability distributions and full autoregressive token generation.</p>
+  <div class="mt-3 text-xs font-mono text-slate-500 bg-white border border-slate-200 rounded-md px-3 py-2 inline-block">
+    GPT-2-style decoder continuation. Context so far: <span class="text-indigo-600">"The cat sat"</span> → predicting next tokens (the canonical example used in Part 2 lecture slides 6 / 11–22).
+  </div>
+
+</header>
+
+<nav class="sticky top-0 z-10 bg-slate-50/95 backdrop-blur border-b border-slate-200">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap gap-2 text-sm">
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#greedy">🎯 Greedy</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#temperature">🌡 Temperature</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#topk">Top-k</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#topp">Top-p</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#beam">🌳 Beam</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#contrastive">⚖ Contrastive</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#speculative">⚡ Speculative</a>
+  </div>
+</nav>
+
+<main class="max-w-5xl mx-auto px-4 py-8 space-y-14">
+
+  <!-- ======================= GREEDY ======================= -->
+  <section id="greedy" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">🎯 Greedy Decoding</h2>
+    <p class="text-sm text-slate-600 mb-4">At each position, pick the single token with the highest probability. After picking, advance to the next position and re-render its distribution. Deterministic and fast.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+      <button onclick="greedyNext()"  class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Generate Next Token</button>
+      <button onclick="greedyReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+      <span class="text-xs text-slate-500">Current position: <span id="greedy-role" class="font-mono text-slate-700">—</span></span>
+    </div>
+    <div id="greedy-bars" class="space-y-1.5"></div>
+    <div class="mt-3">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="greedy-stopped" class="text-red-600 font-semibold"></span></div>
+      <div id="greedy-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+    </div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">x<sub>t</sub> = argmax<sub>v ∈ V</sub> P(v | x<sub>1..t-1</sub>)</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Deterministic, O(1) per step. Every run produces the same sentence — no exploration of alternatives.</div>
+    </div>
+  </section>
+
+  <!-- ======================= TEMPERATURE ======================= -->
+  <section id="temperature" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">🌡 Temperature Sampling</h2>
+    <p class="text-sm text-slate-600 mb-4">Scale logits by 1/T before softmax. Each Generate Next Token click samples from the current position and advances to the next one — the bar chart re-renders for the new position.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+      <label class="text-sm text-slate-700">T = <span id="temp-label" class="font-mono font-semibold">1.0</span></label>
+      <input id="temp-slider" type="range" min="0.1" max="3.0" step="0.1" value="1.0" oninput="updateTemp()" class="flex-1 min-w-[160px]">
+      <button onclick="tempSample()" class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Generate Next Token</button>
+      <button onclick="tempReset()"  class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+    <div class="text-xs text-slate-500 mb-2">Current position: <span id="temp-role" class="font-mono text-slate-700">—</span></div>
+    <div id="temp-bars" class="space-y-1.5"></div>
+    <div class="mt-3">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="temp-stopped" class="text-red-600 font-semibold"></span></div>
+      <div id="temp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+    </div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">P<sub>T</sub>(v) = softmax(logit<sub>v</sub> / T)</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Each run produces a different sentence. Low T → peaked / repetitive; high T → creative but incoherent.</div>
+    </div>
+  </section>
+
+  <!-- ======================= TOP-K ======================= -->
+  <section id="topk" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">Top-k Sampling</h2>
+    <p class="text-sm text-slate-600 mb-4">Keep only the k highest-probability tokens, renormalize, then sample. After sampling, advance to the next position.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+      <label class="text-sm text-slate-700">k = <span id="topk-label" class="font-mono font-semibold">5</span></label>
+      <input id="topk-slider" type="range" min="1" max="10" step="1" value="5" oninput="updateTopK()" class="flex-1 min-w-[160px]">
+      <button onclick="topkSample()" class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Generate Next Token</button>
+      <button onclick="topkReset()"  class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+    <div class="text-xs text-slate-500 mb-2">Current position: <span id="topk-role" class="font-mono text-slate-700">—</span></div>
+    <div id="topk-bars" class="space-y-1.5"></div>
+    <div class="mt-3">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="topk-stopped" class="text-red-600 font-semibold"></span></div>
+      <div id="topk-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+    </div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">keep top-k tokens; mask the rest; renormalize; sample</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Simple but not adaptive — k stays constant even when only 1 token really matters.</div>
+    </div>
+  </section>
+
+  <!-- ======================= TOP-P ======================= -->
+  <section id="topp" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">Top-p (Nucleus) Sampling</h2>
+    <p class="text-sm text-slate-600 mb-4">Keep the smallest set of tokens whose cumulative probability ≥ p. Nucleus size adapts to the distribution shape.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+      <label class="text-sm text-slate-700">p = <span id="topp-label" class="font-mono font-semibold">0.90</span></label>
+      <input id="topp-slider" type="range" min="0.05" max="1.00" step="0.05" value="0.90" oninput="updateTopP()" class="flex-1 min-w-[160px]">
+      <button onclick="toppSample()" class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Generate Next Token</button>
+      <button onclick="toppReset()"  class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+    <div class="mb-3">
+      <div class="flex justify-between text-xs text-slate-500 font-mono mb-1">
+        <span>Cumulative probability</span><span id="topp-nucleus-size" class="text-slate-700 font-semibold">Nucleus: — tokens</span>
+      </div>
+      <div class="relative h-4 bg-slate-100 rounded-md overflow-hidden border border-slate-200">
+        <div id="topp-cum-fill" class="bar-fill h-full bg-indigo-500" style="width: 0%"></div>
+        <div id="topp-threshold" class="absolute top-0 bottom-0 w-0.5 bg-amber-500" style="left: 90%"></div>
+      </div>
+      <div class="flex justify-between text-[10px] text-slate-400 font-mono mt-0.5"><span>0%</span><span>p = threshold</span><span>100%</span></div>
+    </div>
+    <div class="text-xs text-slate-500 mb-2">Current position: <span id="topp-role" class="font-mono text-slate-700">—</span></div>
+    <div id="topp-bars" class="space-y-1.5"></div>
+    <div class="mt-3">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="topp-stopped" class="text-red-600 font-semibold"></span></div>
+      <div id="topp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+    </div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">smallest set {v : Σ P(v) ≥ p} in descending P</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Watch the nucleus size change across positions — sharp distributions shrink it, flat ones widen it.</div>
+    </div>
+  </section>
+
+  <!-- ======================= BEAM ======================= -->
+  <section id="beam" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">🌳 Beam Search</h2>
+    <p class="text-sm text-slate-600 mb-4">Keep the B highest-scoring partial sequences at each step. Score is the sum of log-probabilities along the path.</p>
+    <div class="flex flex-wrap items-center gap-4 mb-4">
+      <label class="text-sm text-slate-700">Beam width B = <span id="beam-w-label" class="font-mono font-semibold">3</span></label>
+      <input id="beam-w" type="range" min="1" max="5" step="1" value="3" oninput="document.getElementById('beam-w-label').textContent=this.value" class="flex-1 min-w-[160px]">
+      <button onclick="beamNext()"  class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Next Step</button>
+      <button onclick="beamReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+    <div id="beam-info" class="text-sm text-slate-600 mb-3 font-mono">Press ▶ Next Step to begin</div>
+    <canvas id="beam-canvas" class="w-full rounded-md border border-slate-200 bg-slate-50" style="height: 240px"></canvas>
+    <div id="beam-paths" class="mt-3 space-y-1"></div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">score(x<sub>1..t</sub>) = Σ log P(x<sub>i</sub> | x<sub>1..i-1</sub>)</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Each step expands the B active beams → B×|V| candidates → keep top-B. Short and generic outputs tend to win without length normalization.</div>
+    </div>
+    <div class="mt-3 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-900">
+      ⚠ <strong>Beam collapse you can see above:</strong> the top-B paths all share the same prefix (<code class="font-mono">on the soft …</code>) and only diverge late.
+      Why? At step 1 the top token (<code class="font-mono">on</code>) leads the runner-up (<code class="font-mono">in</code>) by ~1.8 log-units, and every subsequent position uses the <em>same</em> distribution regardless of prefix (the demo is <strong>unconditioned</strong>).
+      In real LLMs, <code class="font-mono">P(the | "...sat on")</code> ≠ <code class="font-mono">P(the | "...sat in")</code>, which lets beams genuinely diverge — but beam search <em>still</em> collapses in practice.
+      That's why modern LLMs prefer <strong>sampling</strong> (temperature / top-p) over beam, and when beam is needed, apply <strong>length normalization</strong> (<code class="font-mono">score / length<sup>α</sup></code>) or <strong>diverse beam search</strong> (penalize beams that share prefixes).
+    </div>
+  </section>
+
+  <!-- ======================= CONTRASTIVE ======================= -->
+  <section id="contrastive" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">⚖ Contrastive Decoding</h2>
+    <p class="text-sm text-slate-600 mb-4">Pick tokens the expert prefers <em>more than</em> a small amateur model. Penalizes tokens the amateur likes (generic/high-frequency). Each Generate Next Token advances one position.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-3">
+      <label class="text-sm text-slate-700">α = <span id="cd-alpha-label" class="font-mono font-semibold">0.10</span></label>
+      <input id="cd-alpha" type="range" min="0" max="0.5" step="0.05" value="0.1" oninput="updateContrastive()" class="flex-1 min-w-[160px]">
+      <button onclick="cdNext()"  class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Generate Next Token</button>
+      <button onclick="cdReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+    <div class="text-xs text-slate-500 mb-2">Current position: <span id="cd-role" class="font-mono text-slate-700">—</span></div>
+    <div class="grid md:grid-cols-3 gap-4">
+      <div><div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Expert P<sub>exp</sub></div><div id="cd-expert"   class="space-y-1"></div></div>
+      <div><div class="text-xs uppercase tracking-wide text-slate-500 mb-2">Amateur P<sub>ama</sub></div><div id="cd-amateur" class="space-y-1"></div></div>
+      <div><div class="text-xs uppercase tracking-wide text-slate-500 mb-2">CD score</div><div id="cd-contrast"                  class="space-y-1"></div></div>
+    </div>
+    <div class="mt-3">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="cd-stopped" class="text-red-600 font-semibold"></span></div>
+      <div id="cd-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+    </div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">score(v) = log P<sub>exp</sub>(v) − α · log P<sub>ama</sub>(v)</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 α = 0 is identical to expert greedy. As α grows, tokens the amateur finds easy are pushed down — the output sentence may diverge from greedy.</div>
+    </div>
+  </section>
+
+  <!-- ======================= SPECULATIVE ======================= -->
+  <section id="speculative" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-indigo-600 mb-1">⚡ Speculative Decoding</h2>
+    <p class="text-sm text-slate-600 mb-4">A fast <em>draft</em> model proposes γ tokens up front (committing all γ regardless of whether they'll be accepted); the slow <em>target</em> model then verifies all γ in <strong>one</strong> batched forward pass. Accept with probability P<sub>target</sub>/P<sub>draft</sub>; on the first reject, sample a correction and discard the rest. Output distribution equals plain target sampling.</p>
+    <div class="flex flex-wrap items-center gap-3 mb-4">
+      <label class="text-sm text-slate-700">γ (draft length, # of tokens proposed per Step click) = <span id="spec-gamma-label" class="font-mono font-semibold">4</span></label>
+      <input id="spec-gamma" type="range" min="1" max="6" step="1" value="4" oninput="document.getElementById('spec-gamma-label').textContent=this.value" class="flex-1 min-w-[160px]">
+      <button onclick="specStep()"  class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Step</button>
+      <button onclick="specReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+    <div class="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-x-4 gap-y-2 items-start mb-4">
+      <div class="text-xs uppercase tracking-wide text-slate-500 md:pt-1">Draft</div>
+      <div id="spec-draft-row"  class="flex flex-wrap gap-1 min-h-[2rem]"></div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 md:pt-1">Target verify</div>
+      <div id="spec-target-row" class="flex flex-wrap gap-1 min-h-[2rem]"></div>
+      <div class="text-xs uppercase tracking-wide text-slate-500 md:pt-1">Result</div>
+      <div id="spec-result-row" class="flex flex-wrap gap-1 min-h-[2rem]"></div>
+    </div>
+    <div class="grid grid-cols-3 gap-3 mb-4">
+      <div class="bg-slate-50 border border-slate-200 rounded-md p-3 text-center"><div class="text-xs text-slate-500 uppercase">Steps</div><div id="spec-steps"  class="text-xl font-mono font-bold text-slate-800">0</div></div>
+      <div class="bg-slate-50 border border-slate-200 rounded-md p-3 text-center"><div class="text-xs text-slate-500 uppercase">Tokens generated</div><div id="spec-tokens" class="text-xl font-mono font-bold text-slate-800">0</div></div>
+      <div class="bg-slate-50 border border-slate-200 rounded-md p-3 text-center"><div class="text-xs text-slate-500 uppercase">Avg tokens / step</div><div id="spec-avg"     class="text-xl font-mono font-bold text-indigo-700">—</div></div>
+    </div>
+    <div class="mt-2">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Accepted sequence <span id="spec-stopped" class="text-red-600 font-semibold"></span></div>
+      <div id="spec-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+    </div>
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">accept x̃<sub>t</sub> if U[0,1] &lt; min(1, P<sub>target</sub>(x̃<sub>t</sub>) / P<sub>draft</sub>(x̃<sub>t</sub>))<br>on reject: sample from normalize(max(0, P<sub>target</sub> − P<sub>draft</sub>))</div>
+      <div class="bg-emerald-50 border border-blue-100 rounded-lg p-3 text-sm text-emerald-900">💡 Avg tokens/step &gt; 1 means speedup: the target runs once but emits multiple accepted tokens.</div>
+    </div>
+  </section>
+
+</main>
+
+<aside class="max-w-5xl mx-auto px-4 pb-8 space-y-4">
+  <div class="bg-white border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+    <div class="font-semibold text-slate-900 mb-2">🛑 How decoding stops</div>
+    Decoding strategies <em>only choose tokens</em> — they never decide on their own when to stop. Stopping is the outer loop's job, and there are exactly two mechanisms in this demo (and in real LLMs):
+    <ul class="mt-2 space-y-1 list-disc list-inside">
+      <li><span class="inline-block px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono text-xs">[stopped: EOS]</span>
+          — the sampled token equals the EOS marker. In this demo EOS = <code class="font-mono">.</code> (period). Real LLMs use a special <code class="font-mono">&lt;eos&gt;</code> / <code class="font-mono">&lt;|endoftext|&gt;</code> token in the vocabulary.</li>
+      <li><span class="inline-block px-1.5 py-0.5 rounded bg-red-100 text-red-800 font-mono text-xs">[stopped: max length]</span>
+          — the decoder has emitted <code class="font-mono">MAX_LENGTH = 7</code> tokens without hitting EOS, so we cut it off. Real LLMs use the same hard cap (typically 2k–8k tokens) to bound compute.</li>
+    </ul>
+    <div class="mt-2 text-xs text-slate-500">
+      <strong>Beam</strong> additionally stops when <em>all top-B beams</em> have hit EOS (or max length). <strong>Speculative</strong> stops when an accepted draft token (or a correction) is EOS, even mid-batch.
+      Try setting <code class="font-mono">T = 2.0</code> in Temperature — with a flat distribution at the punctuation slot, you'll often hit max length with <code class="font-mono">?</code> or <code class="font-mono">,</code> instead of EOS.
+    </div>
+  </div>
+
+  <div class="bg-white border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+    <div class="font-semibold text-slate-900 mb-2">📊 Where do the bar heights come from?</div>
+    Each position's bars are <code class="font-mono">P(v) = softmax(logit<sub>v</sub> / T)</code> over 10 candidate tokens. Three caveats:
+    <ul class="mt-2 space-y-1 list-disc list-inside">
+      <li><strong>Logits are hardcoded, not from a running model.</strong> I picked numbers that produce a plausible English sentence and let each strategy demonstrate its mechanism on the same data.</li>
+      <li><strong>Each position shows 10 grammatically curated candidates</strong> (preposition at pos 0, determiner at pos 1, adjective at pos 2, …). Real LLMs use a <em>fixed</em> vocabulary of 30k–100k tokens at every position — same softmax, just much wider.</li>
+      <li><strong>Expert vs Amateur</strong> (Contrastive section) are two different models scored on the same vocab. Amateur is intentionally peaked on generic tokens (e.g., its <code class="font-mono">slept</code> logit is 3.0 vs expert's 2.0) so contrastive decoding has something to push against.</li>
+    </ul>
+    <div class="mt-2 text-xs text-slate-500">
+      In a real LLM, these logits come from a forward pass: <code class="font-mono">context → transformer layers → final hidden state → linear projection → vocab logits</code>. Each new token is one forward pass — that's the slow part of inference, and the reason speculative decoding's batched verification gives a speedup.
+    </div>
+  </div>
+
+  <div class="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
+    <div class="font-semibold mb-2">📚 How this connects to the Part 2 lecture</div>
+    <div class="text-xs font-mono text-amber-700 mb-2">Reference: <code>ML_LectureSp26_transformers2.pdf</code></div>
+    The Part 2 lecture covers <strong>how the decoder produces P(next token | context)</strong> — BERT vs GPT (slides 1–3), the autoregressive decoder forward pass (slides 4–10), <strong>KV caching</strong> (slides 11–22), <strong>RoPE</strong> (slides 23–25), <strong>MLA / DeepSeek</strong> low-rank KV compression (slides 26–41), and <strong>Transformer-XL</strong> + relative positional encoding for long context (slides 42–66).
+    This page picks up <strong>after</strong> all of that: given the model has produced a P(next token) distribution at each step, <em>how do we pick the next token?</em>
+
+    <div class="mt-3 font-semibold">Three concrete connections to lecture content:</div>
+    <ol class="mt-1 space-y-1 list-decimal list-inside">
+      <li>Each ▶ Generate Next Token click corresponds to <strong>one decoder forward pass</strong>. Without KV caching it would cost O(N²) attention per step (lecture slide 11); with caching it's O(1×N) per step (slide 14). Greedy/Temperature/Top-k/Top-p all need exactly one cached forward pass per token.</li>
+      <li><strong>Speculative decoding's speedup directly relies on KV caching.</strong> The target model verifies γ drafted tokens in <em>one</em> parallel forward pass — re-using cached K, V from earlier tokens AND scoring all γ positions at once via masked self-attention. Without KV cache, the savings would evaporate. Avg tokens/step &gt; 1 ↔ "got γ+1 token outputs from one forward pass."</li>
+      <li><strong>Beam search with width B keeps B parallel KV caches</strong> — one per active beam. This is why beam width <em>linearly multiplies</em> inference memory cost (and why production LLMs prefer top-p sampling: sampling needs only 1 KV cache regardless of "creativity"). MLA / DeepSeek's low-rank compression (slides 38–40) is partly motivated by exactly this beam-vs-memory tension.</li>
+    </ol>
+
+    <div class="mt-3 text-xs">
+      Related visualizers in this repo:
+      <a href="kv-cache.html" class="underline hover:text-amber-700">KV Cache</a> ·
+      <a href="rope.html" class="underline hover:text-amber-700">RoPE</a> ·
+      <a href="masked-attention.html" class="underline hover:text-amber-700">Masked Self-Attention</a> ·
+      <a href="multi-head-attention.html" class="underline hover:text-amber-700">Multi-Head Attention</a>
+    </div>
+  </div>
+</aside>
+
+<footer class="max-w-5xl mx-auto px-4 pb-10 text-center text-xs text-slate-400">
+  Part of <a href="../../index.html" class="hover:text-indigo-600">ML Concept Visualizer</a> — by Arash Saifhashemi
+</footer>
+
+<script>
+// ---------- SHARED DATA ----------
+// Scenario: GPT-2-style autoregressive continuation (matches Part 2 lecture slides 4-6, 11-22).
+// Decoder has emitted ["The", "cat", "sat"] and now predicts 7 more tokens.
+// Greedy chain → "on the soft mat and slept ." (full sentence: "The cat sat on the soft mat and slept .")
+//
+// Each position has 10 candidate tokens with expert + amateur logits.
+// Amateur is flatter and over-prefers a generic token so contrastive decoding has
+// something to push against; pos 5 is the deliberate divergence point (verb slot).
+
+const POSITIONS = [
+  {
+    role: 'pos 0 — preposition',
+    vocab:         ['on',     'in',     'under',  'beside', 'near',   'above',  'by',     'at',     'past',   'behind'],
+    expertLogits:  [ 3.8,      2.0,      1.4,      1.0,      0.7,      0.4,      0.1,     -0.2,     -0.5,     -0.8],
+    amateurLogits: [ 2.9,      2.5,      2.1,      1.9,      1.6,      1.4,      1.2,      0.9,      0.6,      0.3],
+  },
+  {
+    role: 'pos 1 — determiner',
+    vocab:         ['the',    'a',      'its',    'this',   'that',   'her',    'his',    'my',     'our',    'their'],
+    expertLogits:  [ 4.0,      1.9,      1.4,      1.0,      0.7,      0.4,      0.1,     -0.2,     -0.5,     -0.9],
+    amateurLogits: [ 3.0,      2.4,      2.0,      1.7,      1.4,      1.2,      1.0,      0.7,      0.4,      0.1],
+  },
+  {
+    role: 'pos 2 — adjective',
+    vocab:         ['soft',   'warm',   'old',    'fluffy', 'small',  'big',    'red',    'striped','good',   'bad'],
+    expertLogits:  [ 3.5,      2.1,      1.7,      1.3,      0.9,      0.6,      0.3,      0.0,     -0.3,     -0.6],
+    amateurLogits: [ 2.7,      2.3,      2.0,      1.7,      1.4,      1.2,      1.0,      0.7,      0.4,      0.1],
+  },
+  {
+    role: 'pos 3 — noun (location)',
+    vocab:         ['mat',    'rug',    'bed',    'couch',  'floor',  'pillow', 'blanket','chair',  'table',  'sofa'],
+    expertLogits:  [ 3.6,      2.0,      1.6,      1.2,      0.8,      0.5,      0.2,     -0.1,     -0.4,     -0.7],
+    amateurLogits: [ 2.8,      2.4,      2.0,      1.7,      1.4,      1.2,      1.0,      0.7,      0.4,      0.1],
+  },
+  {
+    role: 'pos 4 — conjunction',
+    vocab:         ['and',    'while',  'then',   'as',     ',',      'before', 'until',  'since',  'because','after'],
+    expertLogits:  [ 3.4,      2.0,      1.7,      1.3,      1.0,      0.6,      0.3,      0.0,     -0.3,     -0.6],
+    amateurLogits: [ 2.6,      2.3,      2.0,      1.7,      1.5,      1.3,      1.1,      0.8,      0.5,      0.2],
+  },
+  {
+    role: 'pos 5 — verb',
+    // Deliberate CD divergence point: expert is flat (slept/purred/yawned all plausible),
+    // amateur is peaked on the generic "slept" → at α≳0.14 contrastive flips argmax to "purred",
+    // producing "...and purred ." instead of greedy "...and slept ." (one-word divergence).
+    vocab:         ['slept',  'purred', 'yawned', 'dreamed','rested', 'snored', 'curled', 'stretched','meowed','twitched'],
+    expertLogits:  [ 2.0,      1.8,      1.4,      1.0,      0.7,      0.4,      0.1,     -0.2,     -0.5,     -0.8],
+    amateurLogits: [ 3.0,      1.5,      1.2,      0.8,      0.6,      0.4,      0.2,      0.0,     -0.2,     -0.4],
+  },
+  {
+    role: 'pos 6 — punctuation (EOS)',
+    vocab:         ['.',      ',',      '!',      '?',      ';',      ':',      '…',      '—',      '"',      '\\n'],
+    expertLogits:  [ 4.0,      1.2,      0.5,      0.2,     -0.1,     -0.5,     -0.8,     -1.0,     -1.3,     -1.6],
+    amateurLogits: [ 3.2,      1.8,      1.0,      0.7,      0.4,      0.1,     -0.2,     -0.5,     -0.8,     -1.1],
+  },
+];
+
+const EOS_TOKEN = '.';
+const MAX_LENGTH = POSITIONS.length;
+
+const BAR_COLORS = [
+  '#4f46e5', '#16a34a', '#f59e0b', '#dc2626', '#8b5cf6',
+  '#0ea5e9', '#ec4899', '#14b8a6', '#f97316', '#6366f1'
+];
+
+// Beam search demo data (English). Step 1 = adjective, Step 2 = noun, Step 3 = verb.
+// Beam search reuses POSITIONS for its per-step next-token distribution, so it
+// covers the full 7-token journey to EOS instead of stopping after 3 hardcoded
+// levels. Unconditioned (all beams share the same per-step distribution) — this
+// makes surviving beams converge in their tails, which is an accurate depiction
+// of beam-search collapse under a fixed model without diverse decoding tricks.
+
+// ---------- CORE ALGORITHMS ----------
+function softmax(logits, T) {
+  if (T === undefined) T = 1.0;
+  const scaled = logits.map(function (l) { return l / T; });
+  const m = Math.max.apply(null, scaled);
+  const exps = scaled.map(function (l) { return Math.exp(l - m); });
+  const sum = exps.reduce(function (a, b) { return a + b; }, 0);
+  return exps.map(function (e) { return e / sum; });
+}
+function sample(probs) {
+  let r = Math.random(), cum = 0;
+  for (let i = 0; i < probs.length; i++) {
+    cum += probs[i];
+    if (r < cum) return i;
+  }
+  return probs.length - 1;
+}
+function argmax(probs) {
+  let best = 0;
+  for (let i = 1; i < probs.length; i++) if (probs[i] > probs[best]) best = i;
+  return best;
+}
+function topkFilter(probs, k) {
+  const ranked = probs.map(function (p, i) { return { p: p, i: i }; })
+                      .sort(function (a, b) { return b.p - a.p; });
+  const topSet = new Set(ranked.slice(0, k).map(function (x) { return x.i; }));
+  const filtered = probs.map(function (p, i) { return topSet.has(i) ? p : 0; });
+  const s = filtered.reduce(function (a, b) { return a + b; }, 0);
+  return { probs: filtered.map(function (p) { return s > 0 ? p / s : 0; }), topSet: topSet };
+}
+function toppFilter(probs, p) {
+  const sorted = probs.map(function (prob, i) { return { prob: prob, i: i }; })
+                      .sort(function (a, b) { return b.prob - a.prob; });
+  const nucleus = new Set();
+  let cum = 0;
+  for (let k = 0; k < sorted.length; k++) {
+    nucleus.add(sorted[k].i);
+    cum += sorted[k].prob;
+    if (cum >= p) break;
+  }
+  const filtered = probs.map(function (prob, i) { return nucleus.has(i) ? prob : 0; });
+  const s = filtered.reduce(function (a, b) { return a + b; }, 0);
+  return { probs: filtered.map(function (x) { return s > 0 ? x / s : 0; }), nucleus: nucleus, actualCum: cum };
+}
+
+// ---------- RENDERING HELPERS ----------
+function renderBars(containerId, probs, states, scores, vocab) {
+  const el = document.getElementById(containerId);
+  if (!el) return;
+  const visible = probs.map(function (p) { return p > 0 ? p : 0; });
+  const maxP = Math.max.apply(null, visible.length ? visible : [1e-9]);
+  let html = '';
+  for (let i = 0; i < probs.length; i++) {
+    const state = states ? states[i] : null;
+    const isMasked = state === 'masked';
+    const p = probs[i] || 0;
+    const pct = (!isMasked && maxP > 0) ? ((p / maxP) * 100).toFixed(1) : 0;
+    const dispPct = (p * 100).toFixed(1);
+    const hasScore = scores !== undefined && scores !== null;
+    const dispNum = hasScore ? scores[i].toFixed(3) : dispPct + '%';
+    const stateLabel = state === 'selected' ? '✓ chosen'
+                    : state === 'kept'     ? 'in pool'
+                    : state === 'masked'   ? '✗ out' : '';
+    const stateCls = state ? ('state-' + state) : '';
+    const rowCls = isMasked ? 'bar-row bar-masked' : 'bar-row';
+    const barOp = isMasked ? 0.18 : 1;
+    const label = vocab[i];
+    html += '<div class="' + rowCls + '">'
+          + '<span class="bar-label">' + label + '</span>'
+          + '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + BAR_COLORS[i] + ';opacity:' + barOp + '">'
+          + (pct > 18 && !isMasked ? '<span class="bar-pct">' + dispPct + '%</span>' : '')
+          + '</div></div>'
+          + '<span class="bar-num">' + dispNum + '</span>'
+          + '<span class="bar-state ' + stateCls + '">' + stateLabel + '</span>'
+          + '</div>';
+  }
+  el.innerHTML = html;
+}
+
+function appendToken(rowEl, text, cls) {
+  const span = document.createElement('span');
+  span.className = 'tok-new inline-block px-2 py-0.5 rounded font-mono text-xs ' + (cls || 'bg-slate-100 text-slate-700');
+  span.textContent = text;
+  rowEl.appendChild(span);
+  return span;
+}
+
+function seqWithContext(seqId) {
+  // Render the seeded decoder context ["The", "cat", "sat"] as grey preamble
+  // (matches the Part 2 lecture's running GPT-2 example).
+  const seq = document.getElementById(seqId);
+  seq.innerHTML = '';
+  appendToken(seq, 'The', 'bg-slate-200 text-slate-500');
+  appendToken(seq, 'cat', 'bg-slate-200 text-slate-500');
+  appendToken(seq, 'sat', 'bg-slate-200 text-slate-500');
+  return seq;
+}
+
+function setStopped(stateId, reason) {
+  const el = document.getElementById(stateId);
+  if (!el) return;
+  el.textContent = reason === 'EOS' ? '[stopped: EOS]'
+                : reason === 'max' ? '[stopped: max length]' : '';
+}
+
+// ---------- GREEDY ----------
+let greedyPos = 0;
+let greedyStopped = false;
+
+function renderGreedyBars() {
+  if (greedyStopped || greedyPos >= MAX_LENGTH) return;
+  const P = POSITIONS[greedyPos];
+  const probs = softmax(P.expertLogits);
+  const best = argmax(probs);
+  const states = probs.map(function (_, i) { return i === best ? 'selected' : null; });
+  renderBars('greedy-bars', probs, states, null, P.vocab);
+  document.getElementById('greedy-role').textContent = P.role;
+}
+
+function initGreedy() { greedyReset(); }
+
+function greedyReset() {
+  greedyPos = 0;
+  greedyStopped = false;
+  seqWithContext('greedy-seq');
+  setStopped('greedy-stopped', '');
+  renderGreedyBars();
+}
+
+function greedyNext() {
+  if (greedyStopped) return;
+  if (greedyPos >= MAX_LENGTH) { greedyStopped = true; setStopped('greedy-stopped', 'max'); return; }
+  const P = POSITIONS[greedyPos];
+  const probs = softmax(P.expertLogits);
+  const idx = argmax(probs);
+  const token = P.vocab[idx];
+  appendToken(document.getElementById('greedy-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  greedyPos++;
+  if (token === EOS_TOKEN) { greedyStopped = true; setStopped('greedy-stopped', 'EOS'); return; }
+  if (greedyPos >= MAX_LENGTH) { greedyStopped = true; setStopped('greedy-stopped', 'max'); return; }
+  renderGreedyBars();
+}
+
+// ---------- TEMPERATURE ----------
+let tempPos = 0;
+let tempStopped = false;
+
+function updateTemp() {
+  const T = parseFloat(document.getElementById('temp-slider').value);
+  document.getElementById('temp-label').textContent = T.toFixed(1);
+  if (tempStopped || tempPos >= MAX_LENGTH) return;
+  const P = POSITIONS[tempPos];
+  const probs = softmax(P.expertLogits, T);
+  renderBars('temp-bars', probs, null, null, P.vocab);
+  document.getElementById('temp-role').textContent = P.role;
+}
+
+function tempSample() {
+  if (tempStopped || tempPos >= MAX_LENGTH) return;
+  const T = parseFloat(document.getElementById('temp-slider').value);
+  const P = POSITIONS[tempPos];
+  const probs = softmax(P.expertLogits, T);
+  const idx = sample(probs);
+  const token = P.vocab[idx];
+  appendToken(document.getElementById('temp-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  tempPos++;
+  if (token === EOS_TOKEN) { tempStopped = true; setStopped('temp-stopped', 'EOS'); return; }
+  if (tempPos >= MAX_LENGTH) { tempStopped = true; setStopped('temp-stopped', 'max'); return; }
+  updateTemp();
+}
+
+function tempReset() {
+  tempPos = 0;
+  tempStopped = false;
+  seqWithContext('temp-seq');
+  setStopped('temp-stopped', '');
+  updateTemp();
+}
+
+// ---------- TOP-K ----------
+let topkPos = 0;
+let topkStopped = false;
+
+function updateTopK() {
+  const k = parseInt(document.getElementById('topk-slider').value, 10);
+  document.getElementById('topk-label').textContent = k;
+  if (topkStopped || topkPos >= MAX_LENGTH) return;
+  const P = POSITIONS[topkPos];
+  const base = softmax(P.expertLogits);
+  const f = topkFilter(base, k);
+  const states = base.map(function (_, i) { return f.topSet.has(i) ? 'kept' : 'masked'; });
+  renderBars('topk-bars', f.probs, states, null, P.vocab);
+  document.getElementById('topk-role').textContent = P.role;
+}
+
+function topkSample() {
+  if (topkStopped || topkPos >= MAX_LENGTH) return;
+  const k = parseInt(document.getElementById('topk-slider').value, 10);
+  const P = POSITIONS[topkPos];
+  const base = softmax(P.expertLogits);
+  const f = topkFilter(base, k);
+  const idx = sample(f.probs);
+  const token = P.vocab[idx];
+  appendToken(document.getElementById('topk-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  topkPos++;
+  if (token === EOS_TOKEN) { topkStopped = true; setStopped('topk-stopped', 'EOS'); return; }
+  if (topkPos >= MAX_LENGTH) { topkStopped = true; setStopped('topk-stopped', 'max'); return; }
+  updateTopK();
+}
+
+function topkReset() {
+  topkPos = 0;
+  topkStopped = false;
+  seqWithContext('topk-seq');
+  setStopped('topk-stopped', '');
+  updateTopK();
+}
+
+// ---------- TOP-P ----------
+let toppPos = 0;
+let toppStopped = false;
+
+function updateTopP() {
+  const p = parseFloat(document.getElementById('topp-slider').value);
+  document.getElementById('topp-label').textContent = p.toFixed(2);
+  if (toppStopped || toppPos >= MAX_LENGTH) return;
+  const P = POSITIONS[toppPos];
+  const base = softmax(P.expertLogits);
+  const f = toppFilter(base, p);
+  document.getElementById('topp-cum-fill').style.width = (Math.min(f.actualCum, 1) * 100).toFixed(1) + '%';
+  document.getElementById('topp-threshold').style.left = (p * 100).toFixed(1) + '%';
+  const n = f.nucleus.size;
+  document.getElementById('topp-nucleus-size').textContent = 'Nucleus: ' + n + ' token' + (n === 1 ? '' : 's');
+  const states = base.map(function (_, i) { return f.nucleus.has(i) ? 'kept' : 'masked'; });
+  renderBars('topp-bars', f.probs, states, null, P.vocab);
+  document.getElementById('topp-role').textContent = P.role;
+}
+
+function toppSample() {
+  if (toppStopped || toppPos >= MAX_LENGTH) return;
+  const p = parseFloat(document.getElementById('topp-slider').value);
+  const P = POSITIONS[toppPos];
+  const base = softmax(P.expertLogits);
+  const f = toppFilter(base, p);
+  const idx = sample(f.probs);
+  const token = P.vocab[idx];
+  appendToken(document.getElementById('topp-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  toppPos++;
+  if (token === EOS_TOKEN) { toppStopped = true; setStopped('topp-stopped', 'EOS'); return; }
+  if (toppPos >= MAX_LENGTH) { toppStopped = true; setStopped('topp-stopped', 'max'); return; }
+  updateTopP();
+}
+
+function toppReset() {
+  toppPos = 0;
+  toppStopped = false;
+  seqWithContext('topp-seq');
+  setStopped('topp-stopped', '');
+  updateTopP();
+}
+
+// ---------- BEAM ----------
+let beamStep = 0;
+let beamPaths = [];
+
+function beamReset() {
+  beamStep = 0;
+  beamPaths = [];
+  document.getElementById('beam-info').textContent = 'Press ▶ Next Step to begin';
+  document.getElementById('beam-paths').innerHTML = '';
+  requestAnimationFrame(resizeBeamCanvas);
+}
+
+function beamNext() {
+  const B = parseInt(document.getElementById('beam-w').value, 10);
+
+  // Guard: stop advancing once all top-B beams hit EOS, or once we've hit max length.
+  if (beamStep >= 1 && beamPaths.length > 0) {
+    const topB = beamPaths.slice(0, B);
+    if (topB.length > 0 && topB.every(function (p) { return p.stopped; })) {
+      document.getElementById('beam-info').textContent =
+        'All top-' + B + ' beams hit EOS. Press ↺ Reset to run again.';
+      return;
+    }
+  }
+  if (beamStep >= MAX_LENGTH) {
+    document.getElementById('beam-info').textContent =
+      'Beam search complete at step ' + beamStep + ' (max length reached). Press ↺ Reset.';
+    return;
+  }
+
+  beamStep++;
+  const P = POSITIONS[beamStep - 1];
+  const probs = softmax(P.expertLogits);
+  const logP = probs.map(function (p) { return Math.log(Math.max(p, 1e-10)); });
+  let candidates = [];
+
+  if (beamStep === 1) {
+    // Initialize beams from the adjective position.
+    for (let i = 0; i < P.vocab.length; i++) {
+      candidates.push({
+        tokens: [P.vocab[i]],
+        score: logP[i],
+        stopped: P.vocab[i] === EOS_TOKEN
+      });
+    }
+  } else {
+    // Expand each active (non-stopped) beam with every token at the current position.
+    const active = beamPaths.slice(0, B);
+    for (let b = 0; b < active.length; b++) {
+      const beam = active[b];
+      if (beam.stopped) {
+        // Carry stopped beam forward unchanged so it keeps competing in top-B.
+        candidates.push({ tokens: beam.tokens.slice(), score: beam.score, stopped: true });
+        continue;
+      }
+      for (let i = 0; i < P.vocab.length; i++) {
+        const tok = P.vocab[i];
+        candidates.push({
+          tokens: beam.tokens.concat([tok]),
+          score: beam.score + logP[i],
+          stopped: tok === EOS_TOKEN
+        });
+      }
+    }
+  }
+
+  candidates.sort(function (a, b) { return b.score - a.score; });
+  // Display the top B plus a few pruned ones to illustrate the cut.
+  const DISPLAY_N = Math.min(candidates.length, B + 3);
+  beamPaths = candidates.slice(0, DISPLAY_N);
+
+  const topB = beamPaths.slice(0, B);
+  const allStopped = topB.length > 0 && topB.every(function (p) { return p.stopped; });
+
+  let info;
+  if (beamStep === 1) {
+    info = 'Step 1 — initialized ' + candidates.length + ' candidates at "' + P.role + '"; keeping top ' + B + ' (green).';
+  } else {
+    info = 'Step ' + beamStep + ' (' + P.role + ') — expanded into ' + candidates.length +
+           ' candidates; keeping top ' + B + ' (green).';
+  }
+  if (allStopped) info += ' All top-' + B + ' beams hit EOS — search complete.';
+  else if (beamStep >= MAX_LENGTH) info += ' Reached max length.';
+
+  document.getElementById('beam-info').textContent = info;
+  renderBeamPaths(B);
+  requestAnimationFrame(resizeBeamCanvas);
+}
+
+function renderBeamPaths(B) {
+  const host = document.getElementById('beam-paths');
+  let html = '';
+  for (let i = 0; i < beamPaths.length; i++) {
+    const p = beamPaths[i];
+    const isBest = i < B;
+    const cls = isBest
+      ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
+      : 'bg-slate-50 border-slate-200 text-slate-500 line-through';
+    const eosTag = p.stopped ? '  [EOS]' : '';
+    html += '<div class="text-xs font-mono px-2 py-1 border rounded ' + cls + '">'
+          + (isBest ? '★ ' : '   ')
+          + '[' + p.tokens.join(', ') + ']'
+          + '  score = ' + p.score.toFixed(3)
+          + eosTag
+          + '</div>';
+  }
+  host.innerHTML = html;
+}
+
+function resizeBeamCanvas() {
+  const canvas = document.getElementById('beam-canvas');
+  if (!canvas) return;
+  const rect = canvas.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  const w = Math.max(rect.width, 1);
+  const h = 240;
+  canvas.width = Math.round(w * dpr);
+  canvas.height = Math.round(h * dpr);
+  canvas.style.width = w + 'px';
+  canvas.style.height = h + 'px';
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  drawBeamCanvas(ctx, w, h);
+}
+
+function drawBeamCanvas(ctx, w, h) {
+  ctx.clearRect(0, 0, w, h);
+  if (beamPaths.length === 0) {
+    ctx.fillStyle = '#94a3b8';
+    ctx.font = '13px ui-monospace, Menlo, monospace';
+    ctx.fillText('Press ▶ Next Step to start the beam search demo', 16, h / 2);
+    return;
+  }
+  const B = parseInt(document.getElementById('beam-w').value, 10);
+  const n = beamPaths.length;
+  let maxLen = 1;
+  for (let i = 0; i < n; i++) if (beamPaths[i].tokens.length > maxLen) maxLen = beamPaths[i].tokens.length;
+  const padX = 40, padY = 20;
+  const colW = (w - 2 * padX) / Math.max(1, maxLen - 1 + 0.5);
+  const rowH = (h - 2 * padY) / Math.max(1, n);
+  for (let i = 0; i < n; i++) {
+    const path = beamPaths[i];
+    const isBest = i < B;
+    ctx.strokeStyle = isBest ? '#16a34a' : '#cbd5e1';
+    ctx.lineWidth = isBest ? 2 : 1;
+    ctx.setLineDash(isBest ? [] : [4, 4]);
+    ctx.beginPath();
+    for (let t = 0; t < path.tokens.length; t++) {
+      const x = padX + t * colW;
+      const y = padY + (i + 0.5) * rowH;
+      if (t === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  ctx.font = '11px ui-monospace, Menlo, monospace';
+  for (let i = 0; i < n; i++) {
+    const path = beamPaths[i];
+    const isBest = i < B;
+    const nodeColor = isBest ? '#16a34a' : '#cbd5e1';
+    const textColor = isBest ? '#065f46' : '#94a3b8';
+    for (let t = 0; t < path.tokens.length; t++) {
+      const x = padX + t * colW;
+      const y = padY + (i + 0.5) * rowH;
+      ctx.fillStyle = nodeColor;
+      ctx.beginPath();
+      ctx.arc(x, y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = textColor;
+      ctx.fillText(path.tokens[t], x + 7, y + 3);
+    }
+  }
+  ctx.fillStyle = '#64748b';
+  ctx.font = '10px ui-monospace, Menlo, monospace';
+  ctx.fillText('green = top-' + B + ' (kept)    grey dashed = pruned', padX, h - 4);
+}
+
+// ---------- CONTRASTIVE ----------
+let cdPos = 0;
+let cdStopped = false;
+
+function renderContrastiveBars() {
+  if (cdStopped || cdPos >= MAX_LENGTH) return;
+  const alpha = parseFloat(document.getElementById('cd-alpha').value);
+  document.getElementById('cd-alpha-label').textContent = alpha.toFixed(2);
+  const P = POSITIONS[cdPos];
+  const expertP  = softmax(P.expertLogits);
+  const amateurP = softmax(P.amateurLogits);
+  renderBars('cd-expert',  expertP,  null, null, P.vocab);
+  renderBars('cd-amateur', amateurP, null, null, P.vocab);
+  const cdScores = expertP.map(function (ep, i) {
+    const ap = Math.max(amateurP[i], 1e-10);
+    const eps = Math.max(ep, 1e-10);
+    return Math.log(eps) - alpha * Math.log(ap);
+  });
+  const bestIdx = argmax(cdScores);
+  const minS = Math.min.apply(null, cdScores);
+  const maxS = Math.max.apply(null, cdScores);
+  const range = (maxS - minS) || 1e-10;
+  const normScores = cdScores.map(function (s) { return (s - minS) / range; });
+  const states = cdScores.map(function (_, i) { return i === bestIdx ? 'selected' : null; });
+  renderBars('cd-contrast', normScores, states, cdScores, P.vocab);
+  document.getElementById('cd-role').textContent = P.role;
+}
+
+function updateContrastive() { renderContrastiveBars(); }
+
+function cdNext() {
+  if (cdStopped || cdPos >= MAX_LENGTH) return;
+  const alpha = parseFloat(document.getElementById('cd-alpha').value);
+  const P = POSITIONS[cdPos];
+  const expertP  = softmax(P.expertLogits);
+  const amateurP = softmax(P.amateurLogits);
+  const cdScores = expertP.map(function (ep, i) {
+    const ap = Math.max(amateurP[i], 1e-10);
+    const eps = Math.max(ep, 1e-10);
+    return Math.log(eps) - alpha * Math.log(ap);
+  });
+  const idx = argmax(cdScores);
+  const token = P.vocab[idx];
+  appendToken(document.getElementById('cd-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  cdPos++;
+  if (token === EOS_TOKEN) { cdStopped = true; setStopped('cd-stopped', 'EOS'); return; }
+  if (cdPos >= MAX_LENGTH) { cdStopped = true; setStopped('cd-stopped', 'max'); return; }
+  renderContrastiveBars();
+}
+
+function cdReset() {
+  cdPos = 0;
+  cdStopped = false;
+  seqWithContext('cd-seq');
+  setStopped('cd-stopped', '');
+  renderContrastiveBars();
+}
+
+// ---------- SPECULATIVE ----------
+let specPos = 0;
+let specStopped = false;
+let specTotalSteps = 0;
+let specTotalTokens = 0;
+
+function specReset() {
+  specPos = 0;
+  specStopped = false;
+  specTotalSteps = 0;
+  specTotalTokens = 0;
+  document.getElementById('spec-draft-row').innerHTML = '';
+  document.getElementById('spec-target-row').innerHTML = '';
+  document.getElementById('spec-result-row').innerHTML = '';
+  document.getElementById('spec-steps').textContent = '0';
+  document.getElementById('spec-tokens').textContent = '0';
+  document.getElementById('spec-avg').textContent = '—';
+  setStopped('spec-stopped', '');
+  seqWithContext('spec-seq');
+}
+
+function specStep() {
+  if (specStopped || specPos >= MAX_LENGTH) return;
+  const gamma = parseInt(document.getElementById('spec-gamma').value, 10);
+
+  // Phase 1: draft model proposes ALL γ tokens up front (autoregressively in a real
+  // system; unconditioned here since our distributions don't depend on the prefix).
+  // This is the whole point of speculative decoding: draft commits γ guesses regardless
+  // of whether they'll be accepted.
+  const drafted = [];
+  for (let i = 0; i < gamma; i++) {
+    const p = specPos + i;
+    if (p >= MAX_LENGTH) break;
+    const P = POSITIONS[p];
+    const draftProbs  = softmax(P.expertLogits, 1.2);
+    const targetProbs = softmax(P.expertLogits, 1.0);
+    const idx = sample(draftProbs);
+    drafted.push({
+      pos: p, idx: idx, token: P.vocab[idx],
+      draftProb: draftProbs[idx], targetProb: targetProbs[idx],
+      draftProbs: draftProbs, targetProbs: targetProbs, P: P
+    });
+  }
+
+  // Phase 2: target verifies each draft left-to-right (one batched forward pass in a
+  // real system). On the first reject we sample a correction and DISCARD remaining drafts.
+  const verified = [];          // {drafted entry, accepted, corrIdx?, corrToken?}
+  let firstReject = -1;
+  let acceptedCount = 0;
+  let hitEos = false;
+  for (let i = 0; i < drafted.length; i++) {
+    const d = drafted[i];
+    const acceptProb = Math.min(1, d.targetProb / Math.max(d.draftProb, 1e-10));
+    const accepted = Math.random() < acceptProb;
+    if (accepted) {
+      verified.push({ d: d, accepted: true });
+      acceptedCount++;
+      if (d.token === EOS_TOKEN) { hitEos = true; break; }
+    } else {
+      const corrRaw = d.targetProbs.map(function (tp, j) { return Math.max(0, tp - d.draftProbs[j]); });
+      const corrSum = corrRaw.reduce(function (a, b) { return a + b; }, 0);
+      const corrProbs = corrSum > 0 ? corrRaw.map(function (x) { return x / corrSum; }) : d.targetProbs;
+      const corrIdx = sample(corrProbs);
+      const corrTok = d.P.vocab[corrIdx];
+      verified.push({ d: d, accepted: false, corrIdx: corrIdx, corrToken: corrTok });
+      firstReject = i;
+      if (corrTok === EOS_TOKEN) hitEos = true;
+      break;
+    }
+  }
+  // Drafts at indices > firstReject (or > verified.length-1 if EOS hit) are DISCARDED.
+
+  // Phase 3: bonus token if every drafted token was accepted and we're not at EOS / max length.
+  let bonusTok = null;
+  if (!hitEos && firstReject < 0 && acceptedCount === drafted.length && specPos + acceptedCount < MAX_LENGTH) {
+    const P = POSITIONS[specPos + acceptedCount];
+    const targetProbs = softmax(P.expertLogits, 1.0);
+    const bIdx = sample(targetProbs);
+    bonusTok = P.vocab[bIdx];
+    if (bonusTok === EOS_TOKEN) hitEos = true;
+  }
+
+  // ---------- Render ----------
+  const draftRow  = document.getElementById('spec-draft-row');
+  const targetRow = document.getElementById('spec-target-row');
+  const resultRow = document.getElementById('spec-result-row');
+  draftRow.innerHTML = '';
+  targetRow.innerHTML = '';
+  resultRow.innerHTML = '';
+
+  // Draft row: ALL γ drafted tokens. Tokens past the first reject are visually marked
+  // as discarded so the speculation/waste tradeoff is visible.
+  for (let i = 0; i < drafted.length; i++) {
+    const d = drafted[i];
+    const isWasted = firstReject >= 0 && i > firstReject;
+    const isPastEos = hitEos && i > verified.length - 1 && firstReject < 0;
+    const cls = (isWasted || isPastEos)
+      ? 'bg-amber-50 text-amber-400 line-through opacity-60'
+      : 'bg-amber-100 text-amber-800';
+    appendToken(draftRow, d.token, cls);
+  }
+
+  // Target verify row: ✓ accepted / ✗ first-reject / "—" wasted (target would still
+  // compute these positions in parallel in real systems, but their results are unused).
+  for (let i = 0; i < drafted.length; i++) {
+    const d = drafted[i];
+    if (i < verified.length) {
+      const v = verified[i];
+      if (v.accepted) appendToken(targetRow, '✓ ' + d.token, 'bg-green-100 text-green-800');
+      else            appendToken(targetRow, '✗ ' + d.token, 'bg-red-100 text-red-800');
+    } else {
+      appendToken(targetRow, '— ' + d.token, 'bg-slate-100 text-slate-400 line-through');
+    }
+  }
+
+  // Result row: accepted prefix → (correction OR bonus).
+  for (let i = 0; i < verified.length; i++) {
+    const v = verified[i];
+    if (v.accepted) {
+      appendToken(resultRow, v.d.token, 'bg-green-100 text-green-800');
+    } else {
+      appendToken(resultRow, v.d.token,    'bg-red-100 text-red-800 line-through');
+      appendToken(resultRow, v.corrToken,  'bg-blue-100 text-blue-800');
+    }
+  }
+  if (bonusTok !== null) {
+    appendToken(resultRow, bonusTok, 'bg-indigo-100 text-indigo-800 font-semibold');
+  }
+
+  // Append final accepted tokens to the running sequence.
+  const seq = document.getElementById('spec-seq');
+  for (let i = 0; i < verified.length; i++) {
+    const v = verified[i];
+    const tok = v.accepted ? v.d.token : v.corrToken;
+    appendToken(seq, tok, 'bg-indigo-100 text-indigo-800 font-semibold');
+  }
+  if (bonusTok !== null) {
+    appendToken(seq, bonusTok, 'bg-indigo-100 text-indigo-800 font-semibold');
+  }
+
+  // Stats.
+  specTotalSteps++;
+  const newTokens = verified.length + (bonusTok !== null ? 1 : 0);
+  specTotalTokens += newTokens;
+  document.getElementById('spec-steps').textContent  = specTotalSteps;
+  document.getElementById('spec-tokens').textContent = specTotalTokens;
+  document.getElementById('spec-avg').textContent    = (specTotalTokens / specTotalSteps).toFixed(2) + '×';
+
+  specPos = specPos + newTokens;
+  if (hitEos)                     { specStopped = true; setStopped('spec-stopped', 'EOS'); }
+  else if (specPos >= MAX_LENGTH) { specStopped = true; setStopped('spec-stopped', 'max'); }
+}
+
+// ---------- TOC HIGHLIGHT ----------
+function setupTocHighlight() {
+  const ids = ['greedy', 'temperature', 'topk', 'topp', 'beam', 'contrastive', 'speculative'];
+  const links = {};
+  const all = document.querySelectorAll('.toc-link');
+  all.forEach(function (a) {
+    const hash = a.getAttribute('href');
+    if (hash && hash.charAt(0) === '#') links[hash.slice(1)] = a;
+  });
+  const observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        all.forEach(function (a) { a.classList.remove('active'); });
+        const link = links[entry.target.id];
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  for (let i = 0; i < ids.length; i++) {
+    const sec = document.getElementById(ids[i]);
+    if (sec) observer.observe(sec);
+  }
+}
+
+// ---------- INIT ----------
+document.addEventListener('DOMContentLoaded', function () {
+  initGreedy();
+  tempReset();
+  topkReset();
+  toppReset();
+  beamReset();
+  cdReset();
+  specReset();
+  setupTocHighlight();
+});
+window.addEventListener('load',   resizeBeamCanvas);
+window.addEventListener('resize', resizeBeamCanvas);
+</script>
+
+</body>
+</html>
