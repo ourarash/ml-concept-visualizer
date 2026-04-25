@@ -54,7 +54,7 @@
 
     <div class="grid md:grid-cols-2 gap-6 items-start">
       <div>
-        <pre class="font-mono text-sm bg-slate-50 p-4 rounded-md border border-slate-200 leading-relaxed"><span id="line-init"   class="codeline">Initialize w with random value</span><span id="line-loop"   class="codeline">for iteration in range(m):</span><span id="line-grad"   class="codeline">    dL/dw = (1/n) Σ(ŷᵢ − yᵢ)xᵢ</span><span id="line-update" class="codeline">    w = w − α · dL/dw</span><span                  class="codeline">return w</span></pre>
+        <pre class="font-mono text-sm bg-slate-50 p-4 rounded-md border border-slate-200 leading-relaxed"><span id="line-init"   class="codeline">Initialize w = w₀ = 4.5</span><span id="line-loop"   class="codeline">for iteration in range(m):</span><span id="line-grad"   class="codeline">    dL/dw = (1/n) Σ(ŷᵢ − yᵢ)xᵢ</span><span id="line-update" class="codeline">    w = w − α · dL/dw</span><span                  class="codeline">return w</span></pre>
       </div>
 
       <div class="bg-white border border-slate-200 rounded-md p-4 stat-row">
@@ -276,10 +276,15 @@ function updateW(w, alpha, data) {
 function sampleBatch(data, B) {
   // For B ≥ data.length we just return everything.
   if (B >= data.length) return data;
-  // Shuffle a copy of indices (Fisher-Yates) and take the first B.
+  // INTENTIONAL: Math.random() rather than the seeded rand() above.
+  // The synthetic dataset is reproducible across reloads (so students always see the
+  // same loss curve and the same exam-aligned numbers), but mini-batch / SGD sampling
+  // is meant to be genuinely stochastic — every ▶ Run in §3 should produce a different
+  // SGD path, which is the whole point of demonstrating gradient noise. Seeding this
+  // call would defeat that lesson.
   const idx = data.map(function (_, i) { return i; });
   for (let i = idx.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(Math.random() * (i + 1));   // ← see comment above
     const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
   }
   const out = [];
