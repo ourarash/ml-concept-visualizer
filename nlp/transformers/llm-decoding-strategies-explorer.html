@@ -568,7 +568,10 @@ function appendTreeStep(rowEl, chosenText, chosenProb, alternatives, kindCls) {
   if (alternatives && alternatives.length) {
     const altCol = document.createElement('span');
     altCol.className = 'tree-alts';
-    alternatives.slice(0, 3).forEach(function (alt) {
+    // No cap here — let the caller (via topAlts) decide how many alternatives
+    // are pedagogically appropriate. For top-k / top-p that's the pool size − 1;
+    // for full-vocab strategies it's 9.
+    alternatives.forEach(function (alt) {
       const a = document.createElement('span');
       a.className = 'tree-alt';
       a.textContent = alt.text + ' ';
