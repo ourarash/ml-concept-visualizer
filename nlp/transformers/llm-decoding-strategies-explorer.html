@@ -360,12 +360,12 @@ const BAR_COLORS = [
   '#0ea5e9', '#ec4899', '#14b8a6', '#f97316', '#6366f1'
 ];
 
-// Beam search demo data (English). Step 1 = adjective, Step 2 = noun, Step 3 = verb.
-// Beam search reuses POSITIONS for its per-step next-token distribution, so it
-// covers the full 7-token journey to EOS instead of stopping after 3 hardcoded
-// levels. Unconditioned (all beams share the same per-step distribution) — this
-// makes surviving beams converge in their tails, which is an accurate depiction
-// of beam-search collapse under a fixed model without diverse decoding tricks.
+// Beam search reuses POSITIONS for its per-step next-token distribution,
+// starting at position 0 and potentially covering the full 7-token journey
+// to EOS rather than a fixed 3-step path. Unconditioned (all beams share
+// the same per-step distribution) — this makes surviving beams converge in
+// their tails, which is an accurate depiction of beam-search collapse under
+// a fixed model without diverse decoding tricks.
 
 // ---------- CORE ALGORITHMS ----------
 function softmax(logits, T) {
@@ -437,7 +437,10 @@ function renderBars(containerId, probs, states, scores, vocab) {
     html += '<div class="' + rowCls + '">'
           + '<span class="bar-label">' + label + '</span>'
           + '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + BAR_COLORS[i] + ';opacity:' + barOp + '">'
-          + (pct > 18 && !isMasked ? '<span class="bar-pct">' + dispPct + '%</span>' : '')
+          // Suppress the in-bar percent label when a separate `scores` array was
+          // passed in (e.g. the contrastive "CD score" panel uses min-max-normalized
+          // scores, not probabilities — a "%" label there would mislead readers).
+          + (pct > 18 && !isMasked && !hasScore ? '<span class="bar-pct">' + dispPct + '%</span>' : '')
           + '</div></div>'
           + '<span class="bar-num">' + dispNum + '</span>'
           + '<span class="bar-state ' + stateCls + '">' + stateLabel + '</span>'
@@ -665,7 +668,7 @@ function beamNext() {
   let candidates = [];
 
   if (beamStep === 1) {
-    // Initialize beams from the adjective position.
+    // Initialize beams from the preposition position (POSITIONS[0]).
     for (let i = 0; i < P.vocab.length; i++) {
       candidates.push({
         tokens: [P.vocab[i]],
