@@ -127,6 +127,10 @@
         <!-- populated by JS: dots split into batches with bracket separators -->
       </div>
       <div class="text-xs text-slate-500 mt-1">Each <span class="data-batch">[ ● ● ● ]</span> processes together; the weights update <strong>once</strong> per group. <button onclick="bsAnimate()" class="ml-2 px-2 py-0.5 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-500">▶ Animate one epoch</button></div>
+
+      <div class="mt-3 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 leading-relaxed">
+        <strong class="text-slate-800">When n isn't divisible by B</strong> (e.g. <span class="font-mono">B = 8, n = 20 → groups of 8, 8, 4</span>), the last batch is smaller. PyTorch's <code class="font-mono">drop_last=False</code> (default) processes the partial batch normally and runs <code class="font-mono">⌈n/B⌉</code> updates per epoch; <code class="font-mono">drop_last=True</code> skips it for an integer <code class="font-mono">⌊n/B⌋</code> updates. <span class="text-slate-500">§3 below uses a slightly different scheme — each step picks a fresh random subset of size B rather than walking a shuffled epoch — so its SGD path is genuinely stochastic across Resets, which is the whole point of demonstrating gradient noise.</span>
+      </div>
     </div>
 
     <div class="mt-4 grid md:grid-cols-2 gap-3">
