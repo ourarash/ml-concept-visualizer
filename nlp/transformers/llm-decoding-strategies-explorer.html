@@ -29,6 +29,84 @@
   .state-kept     { color: #4f46e5; }
   .state-masked   { color: #dc2626; }
   .bar-masked .bar-label { color: #cbd5e1; text-decoration: line-through; }
+
+  /* --- Tree-style generated-sequence display ---
+     Each generated token becomes a pill node connected to the previous one
+     by a short horizontal line. The line carries the probability of the
+     chosen token; below the chosen pill, the top-3 non-chosen alternatives
+     are listed in grey with their own probabilities — so students can see
+     both the picked path and what was rejected at each step. */
+  .tree-row { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 0; row-gap: 16px; }
+  .tree-step { display: inline-flex; flex-direction: column; align-items: center; gap: 3px; }
+  .tree-node {
+    display: inline-flex; align-items: center;
+    padding: 3px 10px;
+    border-radius: 999px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; white-space: nowrap;
+    border: 1px solid transparent;
+  }
+  /* Connector + probability label between two steps */
+  .tree-link-wrap {
+    display: inline-flex; align-items: center;
+    position: relative; padding: 0 4px;
+    margin-top: 9px;        /* center the line on the pill (pill ~24px tall) */
+    flex-shrink: 0;
+  }
+  .tree-link-wrap .prob-label {
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    margin-bottom: 2px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.6rem;
+    color: #475569;
+    white-space: nowrap;
+    padding: 0 3px;
+    background: rgba(248, 250, 252, 0.96);
+    border-radius: 2px;
+    font-variant-numeric: tabular-nums;
+  }
+  .tree-link {
+    display: inline-block; width: 22px; height: 2px;
+    background: #cbd5e1;
+  }
+  @keyframes tree-link-grow { from { width: 0; opacity: 0; } to { width: 22px; opacity: 1; } }
+  .tree-link.tree-link-new { animation: tree-link-grow 0.25s ease-out; }
+  /* Alternatives column under chosen pill */
+  .tree-alts {
+    display: flex; flex-direction: column;
+    align-items: stretch;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.6rem;
+    color: #94a3b8;
+    line-height: 1.35;
+    text-align: center;
+    position: relative;
+    padding-top: 3px;
+  }
+  .tree-alts::before {
+    /* Tiny "drop" tick from pill bottom into alts column */
+    content: ''; display: block; width: 1px; height: 4px;
+    background: #cbd5e1; margin: -3px auto 1px;
+  }
+  .tree-alt { padding: 0 4px; white-space: nowrap; }
+  .tree-alt .alt-prob { color: #cbd5e1; margin-left: 3px; font-variant-numeric: tabular-nums; }
+  /* Node states */
+  .tree-context     { background: #e2e8f0; color: #64748b; }                     /* seeded prefix (grey) */
+  .tree-new         { background: #c7d2fe; color: #3730a3; border-color: #818cf8; font-weight: 600; }  /* freshly generated */
+  .tree-accepted    { background: #d1fae5; color: #065f46; border-color: #6ee7b7; font-weight: 600; }  /* speculative ✓ */
+  .tree-correction  { background: #dbeafe; color: #1e40af; border-color: #93c5fd; font-weight: 600; }  /* speculative reject→correction */
+  .tree-bonus       { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; font-weight: 700; }  /* speculative bonus */
+  @media (max-width: 540px) {
+    .tree-link { width: 14px; }
+    @keyframes tree-link-grow { from { width: 0; opacity: 0; } to { width: 14px; opacity: 1; } }
+    .tree-node { font-size: 0.7rem; padding: 2px 7px; }
+    .tree-link-wrap { padding: 0 2px; margin-top: 7px; }
+    .tree-link-wrap .prob-label { font-size: 0.55rem; }
+    .tree-alts { font-size: 0.55rem; line-height: 1.3; }
+  }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -68,7 +146,7 @@
     <div id="greedy-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="greedy-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="greedy-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+      <div id="greedy-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">x<sub>t</sub> = argmax<sub>v ∈ V</sub> P(v | x<sub>1..t-1</sub>)</div>
@@ -90,7 +168,7 @@
     <div id="temp-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="temp-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="temp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+      <div id="temp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">P<sub>T</sub>(v) = softmax(logit<sub>v</sub> / T)</div>
@@ -112,7 +190,7 @@
     <div id="topk-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="topk-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="topk-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+      <div id="topk-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">keep top-k tokens; mask the rest; renormalize; sample</div>
@@ -144,7 +222,7 @@
     <div id="topp-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="topp-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="topp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+      <div id="topp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">smallest set {v : Σ P(v) ≥ p} in descending P</div>
@@ -195,7 +273,7 @@
     </div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="cd-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="cd-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+      <div id="cd-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">score(v) = log P<sub>exp</sub>(v) − α · log P<sub>ama</sub>(v)</div>
@@ -228,7 +306,7 @@
     </div>
     <div class="mt-2">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Accepted sequence <span id="spec-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="spec-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] flex flex-wrap gap-1"></div>
+      <div id="spec-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">accept x̃<sub>t</sub> if U[0,1] &lt; min(1, P<sub>target</sub>(x̃<sub>t</sub>) / P<sub>draft</sub>(x̃<sub>t</sub>))<br>on reject: sample from normalize(max(0, P<sub>target</sub> − P<sub>draft</sub>))</div>
@@ -450,6 +528,8 @@ function renderBars(containerId, probs, states, scores, vocab) {
 }
 
 function appendToken(rowEl, text, cls) {
+  // Used for parallel/batch displays (e.g. speculative draft / verify rows)
+  // where tokens are independent entries, not a chain.
   const span = document.createElement('span');
   span.className = 'tok-new inline-block px-2 py-0.5 rounded font-mono text-xs ' + (cls || 'bg-slate-100 text-slate-700');
   span.textContent = text;
@@ -457,14 +537,88 @@ function appendToken(rowEl, text, cls) {
   return span;
 }
 
+function appendTreeStep(rowEl, chosenText, chosenProb, alternatives, kindCls) {
+  // Tree-step display:
+  //   - Inserts a horizontal connector to the previous step. If chosenProb is given
+  //     it labels the connector with the probability (e.g. "73%").
+  //   - The chosen pill goes on the main horizontal chain.
+  //   - alternatives [{text, prob}] are listed below the chosen pill in small
+  //     grey text, so students see what the model considered but didn't pick.
+  const last = rowEl.lastElementChild;
+  if (last) {
+    const linkWrap = document.createElement('span');
+    linkWrap.className = 'tree-link-wrap';
+    if (chosenProb !== undefined && chosenProb !== null) {
+      const probLabel = document.createElement('span');
+      probLabel.className = 'prob-label';
+      probLabel.textContent = (chosenProb * 100).toFixed(0) + '%';
+      linkWrap.appendChild(probLabel);
+    }
+    const link = document.createElement('span');
+    link.className = 'tree-link tree-link-new';
+    linkWrap.appendChild(link);
+    rowEl.appendChild(linkWrap);
+  }
+  const stepWrap = document.createElement('span');
+  stepWrap.className = 'tree-step';
+  const node = document.createElement('span');
+  node.className = 'tree-node tok-new ' + (kindCls || 'tree-new');
+  node.textContent = chosenText;
+  stepWrap.appendChild(node);
+  if (alternatives && alternatives.length) {
+    const altCol = document.createElement('span');
+    altCol.className = 'tree-alts';
+    alternatives.slice(0, 3).forEach(function (alt) {
+      const a = document.createElement('span');
+      a.className = 'tree-alt';
+      a.textContent = alt.text + ' ';
+      const probSpan = document.createElement('span');
+      probSpan.className = 'alt-prob';
+      probSpan.textContent = (alt.prob * 100).toFixed(0) + '%';
+      a.appendChild(probSpan);
+      altCol.appendChild(a);
+    });
+    stepWrap.appendChild(altCol);
+  }
+  rowEl.appendChild(stepWrap);
+  return stepWrap;
+}
+
+// Backward-compatible thin wrapper (no prob label, no alternatives column).
+// Used by the speculative section's accepted-sequence chain where each token
+// already carries its own colour-coded meaning (accepted / correction / bonus).
+function appendTreeNode(rowEl, text, kindCls) {
+  return appendTreeStep(rowEl, text, null, null, kindCls);
+}
+
+// Top-N alternatives by probability, excluding the chosen index.
+function topAlts(probs, vocab, chosenIdx, n) {
+  // Returns the alternatives that COULD have been picked but weren't.
+  //   - Tokens with prob === 0 are excluded automatically. For top-k / top-p
+  //     this means only pool / nucleus members appear (e.g. top-k = 3 yields
+  //     exactly 2 alternatives — the 2 non-chosen members of the pool).
+  //   - When `n` is undefined or null, no length cap is applied — show every
+  //     candidate that was actually in the sampling pool. For full-vocabulary
+  //     strategies (greedy / temperature / contrastive) callers should pass
+  //     n = 3 to keep the display compact.
+  let alts = probs
+    .map(function (p, i) { return { text: vocab[i], prob: p, i: i }; })
+    .filter(function (x) { return x.i !== chosenIdx && x.prob > 0; })
+    .sort(function (a, b) { return b.prob - a.prob; });
+  if (n !== undefined && n !== null) alts = alts.slice(0, n);
+  return alts;
+}
+
 function seqWithContext(seqId) {
-  // Render the seeded decoder context ["The", "cat", "sat"] as grey preamble
-  // (matches the Part 2 lecture's running GPT-2 example).
+  // Render the seeded decoder context ["The", "cat", "sat"] as the start of
+  // the tree chain (matches the Part 2 lecture's running GPT-2 example).
+  // Context tokens carry no probability or alternatives — they're seed input.
   const seq = document.getElementById(seqId);
   seq.innerHTML = '';
-  appendToken(seq, 'The', 'bg-slate-200 text-slate-500');
-  appendToken(seq, 'cat', 'bg-slate-200 text-slate-500');
-  appendToken(seq, 'sat', 'bg-slate-200 text-slate-500');
+  seq.classList.add('tree-row');
+  appendTreeStep(seq, 'The', null, null, 'tree-context');
+  appendTreeStep(seq, 'cat', null, null, 'tree-context');
+  appendTreeStep(seq, 'sat', null, null, 'tree-context');
   return seq;
 }
 
@@ -506,7 +660,7 @@ function greedyNext() {
   const probs = softmax(P.expertLogits);
   const idx = argmax(probs);
   const token = P.vocab[idx];
-  appendToken(document.getElementById('greedy-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  appendTreeStep(document.getElementById('greedy-seq'), token, probs[idx], topAlts(probs, P.vocab, idx, 3), 'tree-new');
   greedyPos++;
   if (token === EOS_TOKEN) { greedyStopped = true; setStopped('greedy-stopped', 'EOS'); return; }
   if (greedyPos >= MAX_LENGTH) { greedyStopped = true; setStopped('greedy-stopped', 'max'); return; }
@@ -534,7 +688,9 @@ function tempSample() {
   const probs = softmax(P.expertLogits, T);
   const idx = sample(probs);
   const token = P.vocab[idx];
-  appendToken(document.getElementById('temp-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  // Display probability under the chosen sample's actual T-distribution so the
+  // probability label honestly reflects the distribution we sampled from.
+  appendTreeStep(document.getElementById('temp-seq'), token, probs[idx], topAlts(probs, P.vocab, idx, 3), 'tree-new');
   tempPos++;
   if (token === EOS_TOKEN) { tempStopped = true; setStopped('temp-stopped', 'EOS'); return; }
   if (tempPos >= MAX_LENGTH) { tempStopped = true; setStopped('temp-stopped', 'max'); return; }
@@ -573,7 +729,12 @@ function topkSample() {
   const f = topkFilter(base, k);
   const idx = sample(f.probs);
   const token = P.vocab[idx];
-  appendToken(document.getElementById('topk-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  // Show the renormalized P inside the top-k pool for the chosen token; alternatives
+  // come from the same renormalized pool, so masked tokens show 0% (clearly excluded).
+  // No n cap → show every other token in the top-k pool. With k = 3 you'll
+  // see exactly 2 grey alternatives; with k = 1 you'll see 0; with k = 10
+  // you'll see all 9. This honestly reflects what the strategy considered.
+  appendTreeStep(document.getElementById('topk-seq'), token, f.probs[idx], topAlts(f.probs, P.vocab, idx, null), 'tree-new');
   topkPos++;
   if (token === EOS_TOKEN) { topkStopped = true; setStopped('topk-stopped', 'EOS'); return; }
   if (topkPos >= MAX_LENGTH) { topkStopped = true; setStopped('topk-stopped', 'max'); return; }
@@ -616,7 +777,9 @@ function toppSample() {
   const f = toppFilter(base, p);
   const idx = sample(f.probs);
   const token = P.vocab[idx];
-  appendToken(document.getElementById('topp-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  // Renormalized P inside the nucleus for the chosen token.
+  // No n cap → show every other token in the nucleus, no more, no less.
+  appendTreeStep(document.getElementById('topp-seq'), token, f.probs[idx], topAlts(f.probs, P.vocab, idx, null), 'tree-new');
   toppPos++;
   if (token === EOS_TOKEN) { toppStopped = true; setStopped('topp-stopped', 'EOS'); return; }
   if (toppPos >= MAX_LENGTH) { toppStopped = true; setStopped('topp-stopped', 'max'); return; }
@@ -852,7 +1015,10 @@ function cdNext() {
   });
   const idx = argmax(cdScores);
   const token = P.vocab[idx];
-  appendToken(document.getElementById('cd-seq'), token, 'bg-indigo-100 text-indigo-800 font-semibold');
+  // Use base expert P for the displayed probability — pedagogically richer than
+  // the CD-score because it lets students see "I chose a word the expert thought
+  // was only 22% likely" when α flips the argmax.
+  appendTreeStep(document.getElementById('cd-seq'), token, expertP[idx], topAlts(expertP, P.vocab, idx, 3), 'tree-new');
   cdPos++;
   if (token === EOS_TOKEN) { cdStopped = true; setStopped('cd-stopped', 'EOS'); return; }
   if (cdPos >= MAX_LENGTH) { cdStopped = true; setStopped('cd-stopped', 'max'); return; }
@@ -996,15 +1162,19 @@ function specStep() {
     appendToken(resultRow, bonusTok, 'bg-indigo-100 text-indigo-800 font-semibold');
   }
 
-  // Append final accepted tokens to the running sequence.
+  // Append final accepted tokens to the running sequence (tree-style chain),
+  // visually distinguishing accepted (green) / correction (blue) / bonus (purple).
   const seq = document.getElementById('spec-seq');
   for (let i = 0; i < verified.length; i++) {
     const v = verified[i];
-    const tok = v.accepted ? v.d.token : v.corrToken;
-    appendToken(seq, tok, 'bg-indigo-100 text-indigo-800 font-semibold');
+    if (v.accepted) {
+      appendTreeNode(seq, v.d.token,    'tree-accepted');
+    } else {
+      appendTreeNode(seq, v.corrToken,  'tree-correction');
+    }
   }
   if (bonusTok !== null) {
-    appendToken(seq, bonusTok, 'bg-indigo-100 text-indigo-800 font-semibold');
+    appendTreeNode(seq, bonusTok, 'tree-bonus');
   }
 
   // Stats.
