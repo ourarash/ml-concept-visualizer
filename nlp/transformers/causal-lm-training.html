@@ -1,0 +1,1672 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Causal LM Training Lab: From Mask to Loss</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #eef4f8;
+            --ink: #0f172a;
+            --muted: #526173;
+            --soft: #f8fafc;
+            --panel: #ffffff;
+            --panel-strong: #f1f7fb;
+            --line: #d8e5ef;
+            --line-strong: #9cc9ec;
+            --blue: #2563eb;
+            --cyan: #0891b2;
+            --green: #059669;
+            --amber: #d97706;
+            --red: #dc2626;
+            --purple: #7c3aed;
+            --shadow: 0 18px 42px rgba(15, 23, 42, 0.1);
+            --radius: 8px;
+            --mono: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            margin: 0;
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 8% 4%, rgba(37, 99, 235, 0.14), transparent 24rem),
+                radial-gradient(circle at 92% 10%, rgba(5, 150, 105, 0.13), transparent 22rem),
+                linear-gradient(180deg, #f8fbfd 0%, var(--bg) 100%);
+            color: var(--ink);
+            font-family: var(--sans);
+            line-height: 1.5;
+        }
+
+        a {
+            color: var(--blue);
+            text-decoration-thickness: 0.08em;
+            text-underline-offset: 0.18em;
+        }
+
+        button,
+        input,
+        select,
+        textarea {
+            font: inherit;
+        }
+
+        button {
+            border: 0;
+            cursor: pointer;
+        }
+
+        button:disabled {
+            cursor: not-allowed;
+            opacity: 0.55;
+        }
+
+        .hero {
+            background: linear-gradient(135deg, #0f172a 0%, #15396b 50%, #0f766e 100%);
+            color: #f8fafc;
+            padding: 42px 20px 34px;
+        }
+
+        .hero-inner,
+        main,
+        footer {
+            width: min(1200px, calc(100% - 32px));
+            margin: 0 auto;
+        }
+
+        .hero-inner {
+            display: grid;
+            grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+            gap: 28px;
+            align-items: end;
+        }
+
+        .eyebrow {
+            display: inline-flex;
+            gap: 8px;
+            align-items: center;
+            padding: 7px 11px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #dbeafe;
+            font-size: 0.76rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        h1 {
+            margin: 18px 0 10px;
+            max-width: 880px;
+            font-size: clamp(2rem, 5vw, 4.6rem);
+            line-height: 0.98;
+            letter-spacing: 0;
+        }
+
+        .subtitle {
+            margin: 0;
+            max-width: 780px;
+            color: #dbeafe;
+            font-size: clamp(1rem, 1.7vw, 1.25rem);
+        }
+
+        .goal-card {
+            display: grid;
+            gap: 10px;
+            padding: 16px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: var(--radius);
+            background: rgba(15, 23, 42, 0.25);
+        }
+
+        .goal-card h2,
+        .goal-card p {
+            margin: 0;
+        }
+
+        .goal-card h2 {
+            font-size: 0.9rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: #bae6fd;
+        }
+
+        .goal-card p {
+            color: #edf6ff;
+            font-size: 0.95rem;
+        }
+
+        main {
+            padding: 26px 0 44px;
+        }
+
+        .lab-grid {
+            display: grid;
+            grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+            gap: 18px;
+            align-items: start;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--shadow);
+            overflow: clip;
+        }
+
+        .controls {
+            position: sticky;
+            top: 14px;
+            padding: 16px;
+        }
+
+        .panel-header {
+            padding: 16px 18px 0;
+        }
+
+        .panel-header h2,
+        .section-title {
+            margin: 0;
+            color: #12233f;
+            font-size: 1.1rem;
+        }
+
+        .panel-header p,
+        .section-note,
+        .muted {
+            margin: 6px 0 0;
+            color: var(--muted);
+            font-size: 0.92rem;
+        }
+
+        .control-stack {
+            display: grid;
+            gap: 14px;
+            margin-top: 14px;
+        }
+
+        .field {
+            display: grid;
+            gap: 7px;
+        }
+
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 12px;
+            color: #27364a;
+            font-size: 0.86rem;
+            font-weight: 800;
+        }
+
+        .label-row output {
+            color: var(--blue);
+            font-family: var(--mono);
+            font-weight: 800;
+        }
+
+        select,
+        textarea,
+        input[type="number"] {
+            width: 100%;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #fff;
+            color: var(--ink);
+            padding: 10px 11px;
+        }
+
+        textarea {
+            min-height: 74px;
+            resize: vertical;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--blue);
+        }
+
+        .button-row,
+        .toggle-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 8px;
+        }
+
+        .button-row.three {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .btn {
+            min-height: 40px;
+            border-radius: var(--radius);
+            background: #e8f1fb;
+            color: #17406f;
+            font-weight: 800;
+            transition: transform 0.18s ease, background 0.18s ease, color 0.18s ease;
+        }
+
+        .btn:hover,
+        .btn:focus-visible {
+            transform: translateY(-1px);
+            outline: 2px solid transparent;
+        }
+
+        .btn.primary {
+            background: var(--blue);
+            color: white;
+        }
+
+        .btn.warning {
+            background: #fff4df;
+            color: #8a4b00;
+        }
+
+        .toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            min-height: 38px;
+            padding: 8px 9px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #fff;
+            color: #27364a;
+            font-size: 0.84rem;
+            font-weight: 700;
+        }
+
+        .toggle input {
+            accent-color: var(--blue);
+        }
+
+        .content {
+            display: grid;
+            gap: 18px;
+        }
+
+        .section {
+            padding: 18px;
+        }
+
+        .section + .section {
+            border-top: 1px solid var(--line);
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .metric {
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: linear-gradient(180deg, #fff 0%, var(--soft) 100%);
+        }
+
+        .metric span {
+            display: block;
+            color: var(--muted);
+            font-size: 0.74rem;
+            font-weight: 800;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            display: block;
+            margin-top: 5px;
+            color: #102238;
+            font-family: var(--mono);
+            font-size: 1.05rem;
+        }
+
+        .token-stage {
+            display: grid;
+            gap: 16px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .token-row,
+        .label-row-viz {
+            display: grid;
+            grid-auto-flow: column;
+            grid-auto-columns: minmax(88px, 1fr);
+            gap: 8px;
+            min-width: max-content;
+        }
+
+        .token-card,
+        .label-card {
+            position: relative;
+            min-height: 76px;
+            padding: 10px 8px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #fff;
+            text-align: center;
+            transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+        }
+
+        .token-card.prefix {
+            border-color: #93c5fd;
+            background: #eff6ff;
+        }
+
+        .token-card.current,
+        .label-card.current {
+            transform: translateY(-2px);
+            border-color: var(--blue);
+            box-shadow: 0 10px 24px rgba(37, 99, 235, 0.18);
+        }
+
+        .token-card.future {
+            opacity: 0.48;
+        }
+
+        .label-card.ignored {
+            border-style: dashed;
+            color: #7f1d1d;
+            background: #fff1f2;
+        }
+
+        .token-index {
+            color: #64748b;
+            font-family: var(--mono);
+            font-size: 0.72rem;
+            font-weight: 800;
+        }
+
+        .token-text {
+            margin-top: 6px;
+            color: #102238;
+            font-weight: 850;
+            overflow-wrap: anywhere;
+        }
+
+        .role-pill {
+            display: inline-block;
+            margin-top: 7px;
+            padding: 2px 7px;
+            border-radius: 999px;
+            background: #e0f2fe;
+            color: #075985;
+            font-size: 0.68rem;
+            font-weight: 850;
+            text-transform: uppercase;
+        }
+
+        .role-pill.assistant {
+            background: #dcfce7;
+            color: #166534;
+        }
+
+        .role-pill.user {
+            background: #fef3c7;
+            color: #92400e;
+        }
+
+        .label-arrow {
+            position: absolute;
+            top: -16px;
+            left: 50%;
+            width: calc(100% + 8px);
+            height: 22px;
+            color: #64748b;
+            transform: translateX(-50%);
+            font-size: 0.86rem;
+        }
+
+        .matrix-wrap {
+            overflow-x: auto;
+            margin-top: 14px;
+        }
+
+        .mask-matrix {
+            display: grid;
+            gap: 4px;
+            width: max-content;
+            min-width: 100%;
+        }
+
+        .mask-cell {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 52px;
+            min-height: 44px;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            background: #f8fafc;
+            color: #334155;
+            font-family: var(--mono);
+            font-size: 0.76rem;
+            font-weight: 800;
+            transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease;
+        }
+
+        .mask-cell.header {
+            background: #e8f1fb;
+            color: #17406f;
+        }
+
+        .mask-cell.allowed {
+            background: #ecfdf5;
+            color: #166534;
+        }
+
+        .mask-cell.blocked {
+            background: #f1f5f9;
+            color: #94a3b8;
+            text-decoration: line-through;
+        }
+
+        .mask-cell.active-row {
+            border-color: var(--blue);
+            box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
+        }
+
+        .flow {
+            display: grid;
+            grid-template-columns: repeat(5, minmax(120px, 1fr));
+            gap: 10px;
+            align-items: center;
+            margin-top: 14px;
+        }
+
+        .flow-node {
+            min-height: 76px;
+            padding: 12px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #fff;
+            text-align: center;
+            position: relative;
+        }
+
+        .flow-node::after {
+            content: "";
+            position: absolute;
+            top: 50%;
+            right: -10px;
+            width: 10px;
+            height: 2px;
+            background: var(--line-strong);
+            transform: translateY(-50%);
+        }
+
+        .flow-node:last-child::after {
+            display: none;
+        }
+
+        .flow-node.active {
+            border-color: var(--purple);
+            background: #f5f3ff;
+            animation: pulse 0.85s ease;
+        }
+
+        .flow-node strong {
+            display: block;
+            color: #102238;
+        }
+
+        .flow-node span {
+            display: block;
+            margin-top: 5px;
+            color: var(--muted);
+            font-size: 0.82rem;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.025); }
+            100% { transform: scale(1); }
+        }
+
+        .bars-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 14px;
+            margin-top: 14px;
+        }
+
+        .bar-panel {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--soft);
+            padding: 12px;
+        }
+
+        .bar-panel h3 {
+            margin: 0 0 10px;
+            font-size: 0.96rem;
+        }
+
+        .bar {
+            display: grid;
+            grid-template-columns: minmax(72px, 108px) minmax(0, 1fr) 62px;
+            gap: 9px;
+            align-items: center;
+            min-height: 30px;
+            margin: 8px 0;
+            font-size: 0.84rem;
+        }
+
+        .bar-label {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-weight: 800;
+        }
+
+        .bar-track {
+            height: 12px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            overflow: hidden;
+        }
+
+        .bar-fill {
+            height: 100%;
+            min-width: 2px;
+            border-radius: 999px;
+            background: var(--cyan);
+            transition: width 0.25s ease, transform 0.25s ease;
+        }
+
+        .bar.target .bar-fill {
+            background: var(--green);
+        }
+
+        .bar.ignored {
+            opacity: 0.5;
+        }
+
+        .bar-value {
+            color: var(--muted);
+            font-family: var(--mono);
+            text-align: right;
+        }
+
+        .loss-grid {
+            display: grid;
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+            gap: 10px;
+            margin-top: 14px;
+        }
+
+        .formula-box {
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #f8fafc;
+        }
+
+        .formula-box code {
+            font-family: var(--mono);
+            font-size: 0.92rem;
+            color: #1e3a8a;
+        }
+
+        .gradient-row {
+            display: grid;
+            grid-template-columns: minmax(70px, 104px) minmax(0, 1fr) 74px;
+            gap: 10px;
+            align-items: center;
+            margin: 8px 0;
+            font-size: 0.84rem;
+        }
+
+        .gradient-track {
+            position: relative;
+            height: 16px;
+            border-radius: 999px;
+            background: linear-gradient(90deg, #fee2e2 0 49%, #cbd5e1 49% 51%, #dbeafe 51% 100%);
+            overflow: hidden;
+        }
+
+        .gradient-fill {
+            position: absolute;
+            top: 0;
+            height: 100%;
+            border-radius: 999px;
+            transition: left 0.25s ease, width 0.25s ease;
+        }
+
+        .gradient-fill.negative {
+            background: var(--green);
+        }
+
+        .gradient-fill.positive {
+            background: var(--red);
+        }
+
+        .side-by-side {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin-top: 14px;
+        }
+
+        .compare-card,
+        .chat-card {
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--soft);
+        }
+
+        .compare-card h3,
+        .chat-card h3 {
+            margin: 0 0 10px;
+            font-size: 0.98rem;
+        }
+
+        .mini-tokens {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 7px;
+            margin-top: 9px;
+        }
+
+        .mini-token {
+            padding: 6px 8px;
+            border: 1px solid var(--line);
+            border-radius: 999px;
+            background: #fff;
+            font-size: 0.82rem;
+            font-weight: 750;
+        }
+
+        .mini-token.error {
+            border-color: #fecaca;
+            background: #fff1f2;
+            color: #991b1b;
+        }
+
+        .mini-token.good {
+            border-color: #bbf7d0;
+            background: #ecfdf5;
+            color: #166534;
+        }
+
+        .mini-token.ignored {
+            border-style: dashed;
+            opacity: 0.56;
+        }
+
+        details {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: #fff;
+            padding: 12px 14px;
+        }
+
+        details + details {
+            margin-top: 8px;
+        }
+
+        summary {
+            cursor: pointer;
+            color: #102238;
+            font-weight: 850;
+        }
+
+        details p {
+            margin: 8px 0 0;
+            color: var(--muted);
+        }
+
+        footer {
+            padding: 22px 0 34px;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+
+        .refs {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px 16px;
+            padding: 0;
+            margin: 10px 0 0;
+            list-style: none;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+
+        @media (max-width: 980px) {
+            .hero-inner,
+            .lab-grid,
+            .bars-grid,
+            .side-by-side,
+            .loss-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .controls {
+                position: static;
+            }
+
+            .dashboard {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .flow {
+                grid-template-columns: 1fr;
+            }
+
+            .flow-node::after {
+                top: auto;
+                right: 50%;
+                bottom: -10px;
+                width: 2px;
+                height: 10px;
+                transform: translateX(50%);
+            }
+        }
+
+        @media (max-width: 620px) {
+            .hero-inner,
+            main,
+            footer {
+                width: min(100% - 22px, 1200px);
+            }
+
+            .hero {
+                padding: 30px 0 26px;
+            }
+
+            .button-row,
+            .button-row.three,
+            .toggle-grid,
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .section {
+                padding: 14px;
+            }
+
+            .bar,
+            .gradient-row {
+                grid-template-columns: 1fr;
+                gap: 5px;
+            }
+
+            .bar-value,
+            .gradient-row .bar-value {
+                text-align: left;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header class="hero">
+        <div class="hero-inner">
+            <div>
+                <span class="eyebrow">Decoder-only training objective</span>
+                <h1>Causal LM Training Lab: From Mask to Loss</h1>
+                <p class="subtitle">Watch a decoder-only Transformer turn text into shifted labels, causal attention, cross-entropy loss, and gradient signals.</p>
+            </div>
+            <section class="goal-card" aria-labelledby="goals-title">
+                <h2 id="goals-title">Learning goals</h2>
+                <p>See how next-token prediction creates labels by shifting the sequence.</p>
+                <p>Understand why causal masks prevent future-token leakage.</p>
+                <p>Trace how logits, softmax, cross-entropy, and gradients train the model.</p>
+            </section>
+        </div>
+    </header>
+
+    <main>
+        <div class="lab-grid">
+            <aside class="panel controls" aria-label="Controls">
+                <div class="panel-header">
+                    <h2>Controls</h2>
+                    <p>Change the sequence, loss mask, position, and softmax settings.</p>
+                </div>
+
+                <div class="control-stack">
+                    <label class="field">
+                        <span class="label-row"><span>Example</span></span>
+                        <select id="example-select">
+                            <option value="normal">the cat sat on the mat</option>
+                            <option value="ml">machine learning models predict tokens</option>
+                            <option value="chat">User/Assistant instruction tuning example</option>
+                            <option value="custom">Custom editable sentence</option>
+                        </select>
+                    </label>
+
+                    <label class="field" id="custom-field">
+                        <span class="label-row"><span>Custom sentence</span></span>
+                        <textarea id="custom-sentence">large language models learn from token sequences</textarea>
+                    </label>
+
+                    <label class="field">
+                        <span class="label-row"><span>Current position</span><output id="position-output">0</output></span>
+                        <input id="position-range" type="range" min="0" max="1" value="0">
+                    </label>
+
+                    <label class="field">
+                        <span class="label-row"><span>Animation mode</span></span>
+                        <select id="animation-mode">
+                            <option value="step">Step through positions</option>
+                            <option value="pass">Play full training pass</option>
+                        </select>
+                    </label>
+
+                    <div class="button-row three">
+                        <button class="btn primary" id="play-button" type="button">Play</button>
+                        <button class="btn" id="step-button" type="button">Step</button>
+                        <button class="btn" id="reset-button" type="button">Reset</button>
+                    </div>
+                    <button class="btn warning" id="randomize-button" type="button">Randomize logits</button>
+
+                    <label class="field">
+                        <span class="label-row"><span>Temperature</span><output id="temperature-output">1.00</output></span>
+                        <input id="temperature-range" type="range" min="0.25" max="2.5" step="0.05" value="1">
+                    </label>
+
+                    <label class="field">
+                        <span class="label-row"><span>Label smoothing</span><output id="smoothing-output">0.00</output></span>
+                        <input id="smoothing-range" type="range" min="0" max="0.4" step="0.01" value="0">
+                    </label>
+
+                    <label class="field">
+                        <span class="label-row"><span>Loss masking mode</span></span>
+                        <select id="mask-mode">
+                            <option value="all">Train on all tokens</option>
+                            <option value="first-n">Ignore first N prompt tokens</option>
+                            <option value="assistant">Assistant-only loss for chat example</option>
+                        </select>
+                    </label>
+
+                    <label class="field" id="ignore-field">
+                        <span class="label-row"><span>Ignore first N labels</span><output id="ignore-output">2</output></span>
+                        <input id="ignore-range" type="range" min="0" max="6" value="2">
+                    </label>
+
+                    <div class="toggle-grid" aria-label="Visualization toggles">
+                        <label class="toggle"><input id="toggle-mask" type="checkbox" checked> Causal mask</label>
+                        <label class="toggle"><input id="toggle-logits" type="checkbox" checked> Logits</label>
+                        <label class="toggle"><input id="toggle-probs" type="checkbox" checked> Probabilities</label>
+                        <label class="toggle"><input id="toggle-grad" type="checkbox" checked> Gradients</label>
+                        <label class="toggle"><input id="toggle-teacher" type="checkbox" checked> Teacher vs inference</label>
+                    </div>
+                </div>
+            </aside>
+
+            <div class="content">
+                <section class="panel section" aria-labelledby="metrics-title">
+                    <h2 class="section-title" id="metrics-title">Metrics dashboard</h2>
+                    <p class="section-note">Every value recomputes from the toy logits, label smoothing, and active loss mask.</p>
+                    <div class="dashboard" id="metrics-grid"></div>
+                </section>
+
+                <section class="panel section" aria-labelledby="shift-title">
+                    <h2 class="section-title" id="shift-title">1. Shifted next-token labels</h2>
+                    <p class="section-note">The model receives token x_i and learns to predict label y_i = x_{i+1}. The final token has no next-token label, so it is ignored.</p>
+                    <div class="token-stage">
+                        <div class="token-row" id="input-token-row" aria-label="Input tokens"></div>
+                        <div class="label-row-viz" id="label-token-row" aria-label="Shifted labels"></div>
+                    </div>
+                </section>
+
+                <section class="panel section" id="mask-section" aria-labelledby="mask-title">
+                    <h2 class="section-title" id="mask-title">2. Causal attention mask</h2>
+                    <p class="section-note">Position i can only use tokens at positions &lt;= i. If it could see future tokens, the training task would leak the answer.</p>
+                    <div class="matrix-wrap">
+                        <div class="mask-matrix" id="mask-matrix"></div>
+                    </div>
+                </section>
+
+                <section class="panel section" aria-labelledby="flow-title">
+                    <h2 class="section-title" id="flow-title">3. Mini Transformer training flow</h2>
+                    <p class="section-note">This is a conceptual software flow: the toy simulation does not run a real Transformer, but it follows the training objective.</p>
+                    <div class="flow" id="flow-diagram">
+                        <div class="flow-node" data-flow="ids"><strong>token ids</strong><span>current prefix</span></div>
+                        <div class="flow-node" data-flow="embed"><strong>embeddings + position</strong><span>token and order info</span></div>
+                        <div class="flow-node" data-flow="mask"><strong>masked self-attention</strong><span>future blocked</span></div>
+                        <div class="flow-node" data-flow="hidden"><strong>hidden states</strong><span>one per position</span></div>
+                        <div class="flow-node" data-flow="logits"><strong>LM head -> logits</strong><span>vocabulary scores</span></div>
+                    </div>
+                </section>
+
+                <section class="panel section" aria-labelledby="softmax-title">
+                    <h2 class="section-title" id="softmax-title">4. Logits and softmax</h2>
+                    <p class="section-note">Softmax uses p_i = exp(logit_i / T) / sum_j exp(logit_j / T). Lower temperature sharpens the distribution; higher temperature flattens it.</p>
+                    <div class="bars-grid">
+                        <div class="bar-panel" id="logits-panel">
+                            <h3>Raw logits</h3>
+                            <div id="logit-bars"></div>
+                        </div>
+                        <div class="bar-panel" id="probability-panel">
+                            <h3>Softmax probabilities</h3>
+                            <div id="probability-bars"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel section" aria-labelledby="loss-title">
+                    <h2 class="section-title" id="loss-title">5. Cross-entropy loss</h2>
+                    <p class="section-note">Training compares the probability distribution to the shifted label at the current position.</p>
+                    <div class="loss-grid" id="loss-grid"></div>
+                    <div class="formula-box" id="target-distribution"></div>
+                </section>
+
+                <section class="panel section" id="gradient-section" aria-labelledby="gradient-title">
+                    <h2 class="section-title" id="gradient-title">6. Gradient microscope</h2>
+                    <p class="section-note">For logits z, the gradient is dL/dz_i = p_i - y_i. Gradient descent subtracts this gradient, so the target logit increases and overconfident wrong logits decrease.</p>
+                    <div class="formula-box"><code>dL/dz_i = p_i - y_i</code></div>
+                    <div id="gradient-bars"></div>
+                </section>
+
+                <section class="panel section" id="teacher-section" aria-labelledby="teacher-title">
+                    <h2 class="section-title" id="teacher-title">7. Teacher forcing vs inference</h2>
+                    <p class="section-note">Training uses gold previous tokens. Inference uses the model's previous generations, so an early mistake changes future context. This mismatch is often called exposure bias.</p>
+                    <div class="side-by-side">
+                        <div class="compare-card">
+                            <h3>Training / teacher forcing</h3>
+                            <p class="muted">The prefix always follows the gold sequence.</p>
+                            <div class="mini-tokens" id="teacher-tokens"></div>
+                        </div>
+                        <div class="compare-card">
+                            <h3>Inference / free running</h3>
+                            <p class="muted">The prefix includes the model's generated tokens.</p>
+                            <div class="mini-tokens" id="inference-tokens"></div>
+                        </div>
+                    </div>
+                </section>
+
+                <section class="panel section" aria-labelledby="chat-title">
+                    <h2 class="section-title" id="chat-title">8. Instruction tuning loss masking</h2>
+                    <p class="section-note">Modern chat fine-tuning often ignores prompt labels and trains only on assistant completion tokens.</p>
+                    <div class="chat-card">
+                        <h3>User: Explain attention.</h3>
+                        <p><strong>Assistant:</strong> Attention weights values by relevance.</p>
+                        <div class="mini-tokens" id="chat-mask-tokens"></div>
+                    </div>
+                </section>
+
+                <section class="panel section" aria-labelledby="quiz-title">
+                    <h2 class="section-title" id="quiz-title">Mini quiz</h2>
+                    <details>
+                        <summary>Why are labels shifted by one position?</summary>
+                        <p>Because causal language modeling trains position i to predict the next token, x_{i+1}, from the prefix ending at x_i.</p>
+                    </details>
+                    <details>
+                        <summary>Why does the causal mask matter during training?</summary>
+                        <p>It prevents the model from attending to future tokens that contain the answer it is supposed to predict.</p>
+                    </details>
+                    <details>
+                        <summary>What happens to loss if the target probability is very small?</summary>
+                        <p>The loss grows because cross-entropy uses -log(p_target). Small target probabilities create large penalties.</p>
+                    </details>
+                    <details>
+                        <summary>Why might we ignore prompt tokens during instruction tuning?</summary>
+                        <p>Ignoring prompt labels focuses the loss on assistant responses instead of teaching the model to reproduce user or system prompts.</p>
+                    </details>
+                </section>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <strong>References</strong>
+        <ul class="refs">
+            <li><a href="https://arxiv.org/abs/1706.03762">Attention Is All You Need</a></li>
+            <li><a href="https://huggingface.co/docs/transformers/tasks/language_modeling">Hugging Face causal language modeling docs</a></li>
+            <li><a href="https://docs.pytorch.org/docs/stable/generated/torch.nn.functional.cross_entropy.html">PyTorch cross_entropy docs</a></li>
+            <li><a href="https://aclanthology.org/P19-2049/">Scheduled Sampling for Transformers</a></li>
+        </ul>
+    </footer>
+
+    <script>
+        (() => {
+            "use strict";
+
+            const BASE_VOCAB = ["the", "cat", "sat", "on", "mat", "models", "predict", "tokens", "machine", "learning", "Attention", "weights", "values", "by", "relevance.", "<eos>"];
+            const EXAMPLES = {
+                normal: { mode: "plain", text: "the cat sat on the mat" },
+                ml: { mode: "plain", text: "machine learning models predict tokens" },
+                chat: { mode: "chat" },
+                custom: { mode: "plain", text: "large language models learn from token sequences" }
+            };
+
+            const state = {
+                example: "normal",
+                customText: "large language models learn from token sequences",
+                tokens: [],
+                vocab: [],
+                logits: [],
+                position: 0,
+                temperature: 1,
+                smoothing: 0,
+                maskMode: "all",
+                ignoreFirst: 2,
+                playing: false,
+                playTimer: null,
+                stepTick: 0,
+                rngSeed: 11,
+                toggles: {
+                    mask: true,
+                    logits: true,
+                    probs: true,
+                    grad: true,
+                    teacher: true
+                }
+            };
+
+            const els = {
+                exampleSelect: document.getElementById("example-select"),
+                customField: document.getElementById("custom-field"),
+                customSentence: document.getElementById("custom-sentence"),
+                positionRange: document.getElementById("position-range"),
+                positionOutput: document.getElementById("position-output"),
+                animationMode: document.getElementById("animation-mode"),
+                playButton: document.getElementById("play-button"),
+                stepButton: document.getElementById("step-button"),
+                resetButton: document.getElementById("reset-button"),
+                randomizeButton: document.getElementById("randomize-button"),
+                temperatureRange: document.getElementById("temperature-range"),
+                temperatureOutput: document.getElementById("temperature-output"),
+                smoothingRange: document.getElementById("smoothing-range"),
+                smoothingOutput: document.getElementById("smoothing-output"),
+                maskMode: document.getElementById("mask-mode"),
+                ignoreField: document.getElementById("ignore-field"),
+                ignoreRange: document.getElementById("ignore-range"),
+                ignoreOutput: document.getElementById("ignore-output"),
+                inputTokenRow: document.getElementById("input-token-row"),
+                labelTokenRow: document.getElementById("label-token-row"),
+                maskMatrix: document.getElementById("mask-matrix"),
+                flowDiagram: document.getElementById("flow-diagram"),
+                logitBars: document.getElementById("logit-bars"),
+                probabilityBars: document.getElementById("probability-bars"),
+                logitsPanel: document.getElementById("logits-panel"),
+                probabilityPanel: document.getElementById("probability-panel"),
+                lossGrid: document.getElementById("loss-grid"),
+                targetDistribution: document.getElementById("target-distribution"),
+                gradientBars: document.getElementById("gradient-bars"),
+                metricsGrid: document.getElementById("metrics-grid"),
+                teacherSection: document.getElementById("teacher-section"),
+                maskSection: document.getElementById("mask-section"),
+                gradientSection: document.getElementById("gradient-section"),
+                teacherTokens: document.getElementById("teacher-tokens"),
+                inferenceTokens: document.getElementById("inference-tokens"),
+                chatMaskTokens: document.getElementById("chat-mask-tokens"),
+                toggleMask: document.getElementById("toggle-mask"),
+                toggleLogits: document.getElementById("toggle-logits"),
+                toggleProbs: document.getElementById("toggle-probs"),
+                toggleGrad: document.getElementById("toggle-grad"),
+                toggleTeacher: document.getElementById("toggle-teacher")
+            };
+
+            function tokenize(text) {
+                return text.trim().split(/\s+/).filter(Boolean);
+            }
+
+            function makeTokens() {
+                const example = EXAMPLES[state.example];
+                let rawTokens;
+
+                if (example.mode === "chat") {
+                    rawTokens = [
+                        { text: "<BOS>", role: "bos" },
+                        { text: "User:", role: "user" },
+                        { text: "Explain", role: "user" },
+                        { text: "attention.", role: "user" },
+                        { text: "Assistant:", role: "assistant" },
+                        { text: "Attention", role: "assistant" },
+                        { text: "weights", role: "assistant" },
+                        { text: "values", role: "assistant" },
+                        { text: "by", role: "assistant" },
+                        { text: "relevance.", role: "assistant" },
+                        { text: "<eos>", role: "assistant" }
+                    ];
+                } else {
+                    const text = state.example === "custom" ? state.customText : example.text;
+                    rawTokens = [{ text: "<BOS>", role: "bos" }].concat(tokenize(text).map((word) => ({ text: word, role: "normal" })));
+                    rawTokens.push({ text: "<eos>", role: "normal" });
+                }
+
+                state.tokens = rawTokens.map((token, index, array) => ({
+                    text: token.text,
+                    role: token.role,
+                    inputIndex: index,
+                    labelText: index < array.length - 1 ? array[index + 1].text : null,
+                    ignored: false
+                }));
+                applyMasking();
+                buildVocab();
+                buildLogits(false);
+                state.position = Math.min(state.position, Math.max(0, state.tokens.length - 2));
+            }
+
+            function applyMasking() {
+                state.tokens.forEach((token, index) => {
+                    if (!token.labelText) {
+                        token.ignored = true;
+                    } else if (state.maskMode === "first-n") {
+                        token.ignored = index < state.ignoreFirst;
+                    } else if (state.maskMode === "assistant") {
+                        token.ignored = state.example === "chat" ? state.tokens[index + 1].role !== "assistant" : false;
+                    } else {
+                        token.ignored = false;
+                    }
+                });
+            }
+
+            function buildVocab() {
+                const vocab = new Set(BASE_VOCAB);
+                state.tokens.forEach((token) => {
+                    vocab.add(token.text);
+                    if (token.labelText) {
+                        vocab.add(token.labelText);
+                    }
+                });
+                state.vocab = Array.from(vocab);
+            }
+
+            function deterministicLogit(position, vocabIndex, targetIndex) {
+                const wave = Math.sin((position + 1) * 1.7 + (vocabIndex + 2) * 0.9) * 0.9;
+                const slope = ((position + vocabIndex) % 5) * 0.18 - 0.36;
+                const targetBoost = vocabIndex === targetIndex ? 1.1 + (position % 3) * 0.22 : 0;
+                return Number((wave + slope + targetBoost).toFixed(3));
+            }
+
+            function seededRandom() {
+                state.rngSeed = (state.rngSeed * 1664525 + 1013904223) >>> 0;
+                return state.rngSeed / 4294967296;
+            }
+
+            function buildLogits(randomized) {
+                state.logits = state.tokens.map((token, position) => {
+                    const targetIndex = token.labelText ? state.vocab.indexOf(token.labelText) : -1;
+                    return state.vocab.map((_, vocabIndex) => {
+                        if (randomized) {
+                            const randomBase = (seededRandom() - 0.5) * 3.4;
+                            const boost = vocabIndex === targetIndex ? seededRandom() * 1.6 : 0;
+                            return Number((randomBase + boost).toFixed(3));
+                        }
+                        return deterministicLogit(position, vocabIndex, targetIndex);
+                    });
+                });
+            }
+
+            function softmax(logits, temperature) {
+                const safeTemperature = Math.max(0.05, temperature);
+                const scaled = logits.map((z) => z / safeTemperature);
+                const maxLogit = Math.max(...scaled);
+                const exps = scaled.map((z) => Math.exp(z - maxLogit));
+                const sum = exps.reduce((a, b) => a + b, 0);
+                return exps.map((e) => e / sum);
+            }
+
+            function distributionFor(targetIndex) {
+                const n = state.vocab.length;
+                const epsilon = state.smoothing;
+                return state.vocab.map((_, index) => {
+                    if (targetIndex < 0) {
+                        return 0;
+                    }
+                    return index === targetIndex ? 1 - epsilon + epsilon / n : epsilon / n;
+                });
+            }
+
+            function positionStats(position) {
+                const token = state.tokens[position];
+                const logits = state.logits[position] || [];
+                const probs = logits.length ? softmax(logits, state.temperature) : [];
+                const targetIndex = token && token.labelText ? state.vocab.indexOf(token.labelText) : -1;
+                const q = distributionFor(targetIndex);
+                const ignored = !token || token.ignored || targetIndex < 0;
+
+                let loss = 0;
+                if (!ignored) {
+                    loss = q.reduce((sum, qi, index) => {
+                        if (qi === 0) {
+                            return sum;
+                        }
+                        return sum - qi * Math.log(Math.max(probs[index], 1e-12));
+                    }, 0);
+                }
+
+                const gradients = probs.map((p, index) => ignored ? 0 : p - q[index]);
+                return {
+                    token,
+                    logits,
+                    probs,
+                    targetIndex,
+                    targetProb: targetIndex >= 0 ? probs[targetIndex] || 0 : 0,
+                    q,
+                    ignored,
+                    loss,
+                    gradients
+                };
+            }
+
+            function allLossStats() {
+                const positions = state.tokens.slice(0, -1).map((_, index) => positionStats(index));
+                const valid = positions.filter((item) => !item.ignored);
+                const sumLoss = valid.reduce((sum, item) => sum + item.loss, 0);
+                const avgLoss = valid.length ? sumLoss / valid.length : 0;
+                return {
+                    positions,
+                    validCount: valid.length,
+                    ignoredCount: state.tokens.filter((token) => token.ignored).length,
+                    avgLoss,
+                    perplexity: Math.exp(avgLoss)
+                };
+            }
+
+            function fmt(value, digits) {
+                if (!Number.isFinite(value)) {
+                    return "0";
+                }
+                return value.toFixed(digits);
+            }
+
+            function escapeText(value) {
+                return String(value).replace(/[&<>"']/g, (char) => ({
+                    "&": "&amp;",
+                    "<": "&lt;",
+                    ">": "&gt;",
+                    "\"": "&quot;",
+                    "'": "&#39;"
+                }[char]));
+            }
+
+            function roleLabel(role) {
+                return role === "bos" ? "BOS" : role;
+            }
+
+            function renderTokens() {
+                els.inputTokenRow.innerHTML = state.tokens.map((token, index) => {
+                    const classes = ["token-card"];
+                    if (index <= state.position) classes.push("prefix");
+                    if (index === state.position) classes.push("current");
+                    if (index > state.position) classes.push("future");
+                    return `
+                        <div class="${classes.join(" ")}">
+                            <div class="token-index">x_${index}</div>
+                            <div class="token-text">${escapeText(token.text)}</div>
+                            <span class="role-pill ${escapeText(token.role)}">${escapeText(roleLabel(token.role))}</span>
+                        </div>
+                    `;
+                }).join("");
+
+                els.labelTokenRow.innerHTML = state.tokens.map((token, index) => {
+                    const classes = ["label-card"];
+                    if (index === state.position) classes.push("current");
+                    if (token.ignored) classes.push("ignored");
+                    const label = token.labelText ? token.labelText : "no next token";
+                    const display = token.ignored ? "ignored / -100" : label;
+                    return `
+                        <div class="${classes.join(" ")}">
+                            <div class="label-arrow">${index < state.tokens.length - 1 ? "shift +1" : ""}</div>
+                            <div class="token-index">y_${index}</div>
+                            <div class="token-text">${escapeText(display)}</div>
+                            <span class="role-pill ${token.ignored ? "" : "assistant"}">${token.ignored ? "ignored" : "target"}</span>
+                        </div>
+                    `;
+                }).join("");
+            }
+
+            function renderMask() {
+                els.maskSection.classList.toggle("hidden", !state.toggles.mask);
+                const n = state.tokens.length;
+                els.maskMatrix.style.gridTemplateColumns = `repeat(${n + 1}, minmax(52px, 1fr))`;
+                let html = "<div class=\"mask-cell header\">q \\ k</div>";
+                state.tokens.forEach((token, index) => {
+                    html += `<div class="mask-cell header">k_${index}<br>${escapeText(token.text)}</div>`;
+                });
+                state.tokens.forEach((rowToken, row) => {
+                    html += `<div class="mask-cell header">q_${row}<br>${escapeText(rowToken.text)}</div>`;
+                    state.tokens.forEach((_, col) => {
+                        const allowed = col <= row;
+                        const classes = ["mask-cell", allowed ? "allowed" : "blocked"];
+                        if (row === state.position) classes.push("active-row");
+                        html += `<div class="${classes.join(" ")}">${allowed ? "use" : "no"}</div>`;
+                    });
+                });
+                els.maskMatrix.innerHTML = html;
+            }
+
+            function renderFlow() {
+                const nodes = Array.from(els.flowDiagram.querySelectorAll(".flow-node"));
+                const activeIndex = state.stepTick % nodes.length;
+                nodes.forEach((node, index) => {
+                    node.classList.toggle("active", index === activeIndex || index === nodes.length - 1);
+                });
+            }
+
+            function renderBars(container, values, options) {
+                const maxAbs = Math.max(...values.map((item) => Math.abs(item.value)), 1);
+                const maxProb = Math.max(...values.map((item) => item.value), 1e-12);
+                container.innerHTML = values.map((item) => {
+                    const width = options.kind === "logit"
+                        ? Math.max(2, Math.abs(item.value) / maxAbs * 100)
+                        : Math.max(2, item.value / maxProb * 100);
+                    const classes = ["bar"];
+                    if (item.target) classes.push("target");
+                    if (item.ignored) classes.push("ignored");
+                    return `
+                        <div class="${classes.join(" ")}">
+                            <div class="bar-label" title="${escapeText(item.label)}">${escapeText(item.label)}</div>
+                            <div class="bar-track"><div class="bar-fill" style="width:${width}%"></div></div>
+                            <div class="bar-value">${escapeText(item.display)}</div>
+                        </div>
+                    `;
+                }).join("");
+            }
+
+            function renderLogitsAndProbabilities(stats) {
+                els.logitsPanel.classList.toggle("hidden", !state.toggles.logits);
+                els.probabilityPanel.classList.toggle("hidden", !state.toggles.probs);
+                const logitValues = state.vocab.map((label, index) => ({
+                    label,
+                    value: stats.logits[index] || 0,
+                    display: fmt(stats.logits[index] || 0, 2),
+                    target: index === stats.targetIndex,
+                    ignored: stats.ignored
+                }));
+                const probValues = state.vocab.map((label, index) => ({
+                    label,
+                    value: stats.probs[index] || 0,
+                    display: `${fmt((stats.probs[index] || 0) * 100, 1)}%`,
+                    target: index === stats.targetIndex,
+                    ignored: stats.ignored
+                }));
+                renderBars(els.logitBars, logitValues, { kind: "logit" });
+                renderBars(els.probabilityBars, probValues, { kind: "prob" });
+            }
+
+            function renderLoss(stats, totals) {
+                const label = stats.token && stats.token.labelText ? stats.token.labelText : "none";
+                const currentLoss = stats.ignored ? 0 : stats.loss;
+                els.lossGrid.innerHTML = [
+                    ["Target token", escapeText(label)],
+                    ["Target probability", `${fmt(stats.targetProb * 100, 2)}%`],
+                    ["Current loss", stats.ignored ? "ignored: 0.000" : fmt(currentLoss, 3)],
+                    ["Average CE loss", fmt(totals.avgLoss, 3)],
+                    ["Valid positions", String(totals.validCount)],
+                    ["Perplexity estimate", fmt(totals.perplexity, 2)]
+                ].map(([labelText, value]) => `
+                    <div class="metric">
+                        <span>${labelText}</span>
+                        <strong>${value}</strong>
+                    </div>
+                `).join("");
+
+                if (stats.ignored) {
+                    els.targetDistribution.innerHTML = "<code>loss ignored for this position; contribution = 0 and gradient = 0</code>";
+                    return;
+                }
+
+                if (state.smoothing === 0) {
+                    els.targetDistribution.innerHTML = `<code>loss = -log(max(p_target, 1e-12)) = ${fmt(stats.loss, 4)}</code>`;
+                } else {
+                    const targetMass = stats.targetIndex >= 0 ? stats.q[stats.targetIndex] : 0;
+                    const otherMass = state.vocab.length > 1 ? state.smoothing / state.vocab.length : 0;
+                    els.targetDistribution.innerHTML = `<code>smoothed q: target=${fmt(targetMass, 4)}, each other=${fmt(otherMass, 4)}; loss = -sum_i q_i log(p_i) = ${fmt(stats.loss, 4)}</code>`;
+                }
+            }
+
+            function renderGradients(stats) {
+                els.gradientSection.classList.toggle("hidden", !state.toggles.grad);
+                const maxAbs = Math.max(...stats.gradients.map((value) => Math.abs(value)), 1e-8);
+                els.gradientBars.innerHTML = state.vocab.map((label, index) => {
+                    const grad = stats.gradients[index] || 0;
+                    const magnitude = Math.abs(grad) / maxAbs * 50;
+                    const left = grad < 0 ? 50 - magnitude : 50;
+                    const fillClass = grad < 0 ? "negative" : "positive";
+                    return `
+                        <div class="gradient-row">
+                            <div class="bar-label" title="${escapeText(label)}">${escapeText(label)}</div>
+                            <div class="gradient-track">
+                                <div class="gradient-fill ${fillClass}" style="left:${left}%;width:${magnitude}%"></div>
+                            </div>
+                            <div class="bar-value">${fmt(grad, 3)}</div>
+                        </div>
+                    `;
+                }).join("");
+            }
+
+            function renderTeacherForcing() {
+                els.teacherSection.classList.toggle("hidden", !state.toggles.teacher);
+                const gold = ["the", "cat", "sat", "on", "the", "mat"];
+                const generated = ["the", "dog", "ran", "after", "a", "toy"];
+                const cutoff = Math.min(state.position + 1, gold.length);
+                els.teacherTokens.innerHTML = gold.map((token, index) => {
+                    const cls = index < cutoff ? "mini-token good" : "mini-token";
+                    return `<span class="${cls}">${escapeText(token)}</span>`;
+                }).join("");
+                els.inferenceTokens.innerHTML = generated.map((token, index) => {
+                    const cls = index === 1 ? "mini-token error" : (index < cutoff ? "mini-token good" : "mini-token");
+                    return `<span class="${cls}">${escapeText(token)}</span>`;
+                }).join("");
+            }
+
+            function renderChatMask() {
+                const chat = [
+                    { text: "User:", role: "user" },
+                    { text: "Explain", role: "user" },
+                    { text: "attention.", role: "user" },
+                    { text: "Assistant:", role: "assistant" },
+                    { text: "Attention", role: "assistant" },
+                    { text: "weights", role: "assistant" },
+                    { text: "values", role: "assistant" },
+                    { text: "by", role: "assistant" },
+                    { text: "relevance.", role: "assistant" }
+                ];
+                els.chatMaskTokens.innerHTML = chat.map((token, index) => {
+                    const ignored = state.maskMode === "assistant" && token.role !== "assistant";
+                    const cls = ["mini-token", token.role === "assistant" ? "good" : "", ignored ? "ignored" : ""].filter(Boolean).join(" ");
+                    const suffix = ignored ? " -100" : "";
+                    return `<span class="${cls}">${escapeText(token.text)}${suffix}</span>`;
+                }).join("");
+            }
+
+            function renderMetrics(stats, totals) {
+                const predictedPositions = Math.max(0, state.tokens.length - 1);
+                const items = [
+                    ["Tokens", state.tokens.length],
+                    ["Predicted positions", predictedPositions],
+                    ["Ignored labels", totals.ignoredCount],
+                    ["Average CE loss", fmt(totals.avgLoss, 3)],
+                    ["Perplexity estimate", fmt(totals.perplexity, 2)],
+                    ["Target prob", `${fmt(stats.targetProb * 100, 2)}%`],
+                    ["Position loss", stats.ignored ? "0.000 ignored" : fmt(stats.loss, 3)],
+                    ["Context length", state.position + 1],
+                    ["Future leakage", state.toggles.mask ? "prevented" : "hidden"]
+                ];
+                els.metricsGrid.innerHTML = items.map(([label, value]) => `
+                    <div class="metric">
+                        <span>${escapeText(label)}</span>
+                        <strong>${escapeText(value)}</strong>
+                    </div>
+                `).join("");
+            }
+
+            function syncControls() {
+                const maxPosition = Math.max(0, state.tokens.length - 2);
+                els.positionRange.max = String(maxPosition);
+                els.positionRange.value = String(state.position);
+                els.positionOutput.value = `${state.position} -> ${state.tokens[state.position]?.labelText || "ignored"}`;
+                els.temperatureRange.value = String(state.temperature);
+                els.temperatureOutput.value = fmt(state.temperature, 2);
+                els.smoothingRange.value = String(state.smoothing);
+                els.smoothingOutput.value = fmt(state.smoothing, 2);
+                els.ignoreRange.max = String(Math.max(0, state.tokens.length - 1));
+                els.ignoreRange.value = String(state.ignoreFirst);
+                els.ignoreOutput.value = String(state.ignoreFirst);
+                els.customField.classList.toggle("hidden", state.example !== "custom");
+                els.ignoreField.classList.toggle("hidden", state.maskMode !== "first-n");
+                els.playButton.textContent = state.playing ? "Pause" : "Play";
+                els.maskMode.value = state.maskMode;
+                els.exampleSelect.value = state.example;
+            }
+
+            function render() {
+                applyMasking();
+                syncControls();
+                const stats = positionStats(state.position);
+                const totals = allLossStats();
+                renderTokens();
+                renderMask();
+                renderFlow();
+                renderLogitsAndProbabilities(stats);
+                renderLoss(stats, totals);
+                renderGradients(stats);
+                renderTeacherForcing();
+                renderChatMask();
+                renderMetrics(stats, totals);
+            }
+
+            function stopPlaying() {
+                state.playing = false;
+                if (state.playTimer) {
+                    clearInterval(state.playTimer);
+                    state.playTimer = null;
+                }
+                render();
+            }
+
+            function stepPosition() {
+                const maxPosition = Math.max(0, state.tokens.length - 2);
+                if (state.position >= maxPosition) {
+                    state.position = 0;
+                } else {
+                    state.position += 1;
+                }
+                state.stepTick += 1;
+                render();
+            }
+
+            function startPlaying() {
+                state.playing = true;
+                state.playTimer = setInterval(() => {
+                    stepPosition();
+                    if (els.animationMode.value === "step") {
+                        stopPlaying();
+                    }
+                }, els.animationMode.value === "pass" ? 1100 : 750);
+                render();
+            }
+
+            els.exampleSelect.addEventListener("change", () => {
+                stopPlaying();
+                state.example = els.exampleSelect.value;
+                if (state.example === "chat") {
+                    state.maskMode = "assistant";
+                }
+                state.position = 0;
+                makeTokens();
+                render();
+            });
+
+            els.customSentence.addEventListener("input", () => {
+                state.customText = els.customSentence.value;
+                if (state.example === "custom") {
+                    state.position = 0;
+                    makeTokens();
+                    render();
+                }
+            });
+
+            els.positionRange.addEventListener("input", () => {
+                stopPlaying();
+                state.position = Number(els.positionRange.value);
+                state.stepTick += 1;
+                render();
+            });
+
+            els.playButton.addEventListener("click", () => {
+                if (state.playing) {
+                    stopPlaying();
+                } else {
+                    startPlaying();
+                }
+            });
+
+            els.stepButton.addEventListener("click", () => {
+                stopPlaying();
+                stepPosition();
+            });
+
+            els.resetButton.addEventListener("click", () => {
+                stopPlaying();
+                state.position = 0;
+                state.temperature = 1;
+                state.smoothing = 0;
+                state.ignoreFirst = 2;
+                state.stepTick = 0;
+                makeTokens();
+                render();
+            });
+
+            els.randomizeButton.addEventListener("click", () => {
+                stopPlaying();
+                state.rngSeed += 97;
+                buildLogits(true);
+                state.stepTick += 1;
+                render();
+            });
+
+            els.temperatureRange.addEventListener("input", () => {
+                state.temperature = Number(els.temperatureRange.value);
+                render();
+            });
+
+            els.smoothingRange.addEventListener("input", () => {
+                state.smoothing = Number(els.smoothingRange.value);
+                render();
+            });
+
+            els.maskMode.addEventListener("change", () => {
+                state.maskMode = els.maskMode.value;
+                render();
+            });
+
+            els.ignoreRange.addEventListener("input", () => {
+                state.ignoreFirst = Number(els.ignoreRange.value);
+                render();
+            });
+
+            [
+                [els.toggleMask, "mask"],
+                [els.toggleLogits, "logits"],
+                [els.toggleProbs, "probs"],
+                [els.toggleGrad, "grad"],
+                [els.toggleTeacher, "teacher"]
+            ].forEach(([el, key]) => {
+                el.addEventListener("change", () => {
+                    state.toggles[key] = el.checked;
+                    render();
+                });
+            });
+
+            window.addEventListener("beforeunload", stopPlaying);
+
+            makeTokens();
+            render();
+        })();
+    </script>
+</body>
+</html>
