@@ -144,7 +144,7 @@
       <label class="text-sm text-slate-700">α = <span id="ls-alpha-label" class="font-mono font-semibold">0.10</span></label>
       <input id="ls-alpha" type="range" min="0.01" max="0.5" step="0.01" value="0.10" oninput="lsSyncAlpha()" class="flex-1 min-w-[160px]">
       <label class="text-sm text-slate-700">Mini-batch B = <span id="ls-b-label" class="font-mono font-semibold">8</span></label>
-      <input id="ls-b" type="range" min="2" max="19" step="1" value="8" class="flex-1 min-w-[120px]">
+      <input id="ls-b" type="range" min="2" max="19" step="1" value="8" oninput="lsSyncB()" class="flex-1 min-w-[120px]">
       <button onclick="lsRun()"   class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶ Run</button>
       <button onclick="lsPause()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">⏸ Pause</button>
       <button onclick="lsReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
@@ -498,6 +498,13 @@ const ls = {
 function lsSyncAlpha() {
   const a = parseFloat(document.getElementById('ls-alpha').value);
   document.getElementById('ls-alpha-label').textContent = a.toFixed(2);
+}
+function lsSyncB() {
+  // Live-update the two B readouts as the user drags the mini-batch slider.
+  // The running animation, if any, picks up the new B value at its next step.
+  const B = document.getElementById('ls-b').value;
+  document.getElementById('ls-b-label').textContent = B;
+  document.getElementById('ls-b-show').textContent  = B;
 }
 function lsReset() {
   ls.wBatch = W0; ls.wMini = W0; ls.wSGD = W0;
