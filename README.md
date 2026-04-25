@@ -115,6 +115,7 @@ Hardware execution patterns for neural networks
 - Weight-stationary dataflow
 - Weight-stationary accelerator (8 PE parallel)
 - Simplified NVDLA convolution dataflow
+- Eyeriss cycle-accurate trace (per-cycle MAC, psum forwarding, output emission)
 
 ### 📈 Performance Modeling
 
