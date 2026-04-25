@@ -1,0 +1,906 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Tokenizer & BPE Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            color-scheme: light;
+            --bg: #f3f7fb;
+            --surface: rgba(255, 255, 255, 0.92);
+            --surface-strong: #ffffff;
+            --border: #d9e3ef;
+            --text: #122033;
+            --muted: #5d6b7d;
+            --accent: #0f766e;
+            --accent-soft: #ccfbf1;
+            --accent-strong: #0f766e;
+            --secondary: #1d4ed8;
+            --secondary-soft: #dbeafe;
+            --highlight: #f97316;
+            --highlight-soft: #ffedd5;
+            --shadow: 0 22px 50px rgba(15, 23, 42, 0.08);
+            --shadow-soft: 0 12px 26px rgba(15, 23, 42, 0.06);
+        }
+
+        body {
+            font-family: 'Manrope', sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(45, 212, 191, 0.16), transparent 26%),
+                radial-gradient(circle at top right, rgba(59, 130, 246, 0.12), transparent 22%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--bg) 100%);
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .glass-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(16px);
+        }
+
+        .pill {
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.86);
+            border-radius: 999px;
+        }
+
+        .token-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 2.75rem;
+            min-height: 2.75rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 1rem;
+            border: 1px solid #d8e2ec;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            box-shadow: 0 6px 16px rgba(15, 23, 42, 0.05);
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.92rem;
+            font-weight: 700;
+            transition: transform 0.22s ease, box-shadow 0.22s ease, border-color 0.22s ease, background-color 0.22s ease;
+        }
+
+        .token-chip.boundary {
+            background: #f8fafc;
+            color: #64748b;
+            border-style: dashed;
+        }
+
+        .token-chip.active-left,
+        .token-chip.active-right {
+            border-color: #fb923c;
+            background: var(--highlight-soft);
+            transform: translateY(-2px);
+            box-shadow: 0 14px 28px rgba(249, 115, 22, 0.16);
+        }
+
+        .token-chip.just-merged {
+            border-color: #0f766e;
+            background: var(--accent-soft);
+            animation: mergedPulse 0.9s ease;
+        }
+
+        @keyframes mergedPulse {
+            0% {
+                transform: scale(0.92);
+                box-shadow: 0 0 0 rgba(15, 118, 110, 0.25);
+            }
+            50% {
+                transform: scale(1.05);
+                box-shadow: 0 0 0 18px rgba(15, 118, 110, 0);
+            }
+            100% {
+                transform: scale(1);
+                box-shadow: 0 12px 24px rgba(15, 118, 110, 0.08);
+            }
+        }
+
+        .path-arrow {
+            color: #94a3b8;
+            font-weight: 800;
+        }
+
+        .rule-row {
+            display: grid;
+            grid-template-columns: auto 1fr auto;
+            gap: 0.75rem;
+            align-items: center;
+            padding: 0.85rem 0.95rem;
+            border-radius: 1rem;
+            border: 1px solid #e2e8f0;
+            background: rgba(255, 255, 255, 0.84);
+            transition: border-color 0.2s ease, transform 0.2s ease, background-color 0.2s ease;
+        }
+
+        .rule-row.next {
+            border-color: #fb923c;
+            background: #fff7ed;
+            transform: translateX(4px);
+        }
+
+        .rule-row.used {
+            border-color: #99f6e4;
+            background: #f0fdfa;
+        }
+
+        .compare-column {
+            border: 1px solid var(--border);
+            border-radius: 1.25rem;
+            background: rgba(255, 255, 255, 0.88);
+            padding: 1rem;
+            min-height: 100%;
+        }
+
+        .compare-strip {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.45rem;
+            align-items: flex-start;
+        }
+
+        .compare-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-height: 2.1rem;
+            padding: 0.35rem 0.55rem;
+            border-radius: 0.85rem;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.76rem;
+            font-weight: 700;
+        }
+
+        .compare-chip.space {
+            background: #eff6ff;
+            border-style: dashed;
+            color: #1d4ed8;
+        }
+
+        .metric-card {
+            border-radius: 1.2rem;
+            border: 1px solid var(--border);
+            background: rgba(255, 255, 255, 0.88);
+            padding: 1rem;
+            box-shadow: var(--shadow-soft);
+        }
+
+        textarea:focus,
+        select:focus,
+        button:focus {
+            outline: 2px solid rgba(29, 78, 216, 0.16);
+            outline-offset: 2px;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-6 lg:p-8">
+    <div class="max-w-7xl mx-auto flex flex-col gap-6">
+        <header class="glass-card rounded-[1.75rem] p-6 md:p-8">
+            <div class="flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between">
+                <div class="max-w-3xl">
+                    <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-teal-50 text-teal-800 text-xs font-extrabold uppercase tracking-[0.2em]">
+                        NLP Foundations
+                    </div>
+                    <h1 class="mt-4 text-4xl md:text-5xl font-extrabold tracking-tight text-slate-950">Tokenizer & BPE Visualizer</h1>
+                    <p class="mt-4 text-base md:text-lg text-slate-600 leading-relaxed">
+                        Watch raw text turn into tokens. Step through a toy Byte Pair Encoding pipeline, see which adjacent pair gets merged next, and compare character, word, and BPE token counts side by side.
+                    </p>
+                </div>
+                <div class="grid grid-cols-2 gap-3 min-[520px]:grid-cols-4 xl:min-w-[32rem]">
+                    <div class="metric-card">
+                        <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Focus Word</div>
+                        <div id="hero-focus-word" class="mt-2 text-lg font-extrabold text-slate-900 mono">tokenizer</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Merge Step</div>
+                        <div id="hero-step" class="mt-2 text-lg font-extrabold text-slate-900">0 / 0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">BPE Tokens</div>
+                        <div id="hero-bpe-count" class="mt-2 text-lg font-extrabold text-slate-900">0</div>
+                    </div>
+                    <div class="metric-card">
+                        <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Length Savings</div>
+                        <div id="hero-savings" class="mt-2 text-lg font-extrabold text-teal-700">0%</div>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main class="grid grid-cols-1 xl:grid-cols-[1.2fr_0.8fr] gap-6">
+            <section class="flex flex-col gap-6">
+                <div class="glass-card rounded-[1.5rem] p-5 md:p-6">
+                    <div class="flex flex-col gap-5">
+                        <div class="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+                            <div>
+                                <h2 class="text-2xl font-extrabold text-slate-900">1. Build a tokenization example</h2>
+                                <p class="mt-2 text-sm text-slate-600 max-w-2xl">
+                                    This demo uses a small lowercase toy vocabulary. It is not a full production tokenizer, but it shows the core BPE idea used in modern subword tokenization: repeatedly merge the highest-priority adjacent pair.
+                                </p>
+                            </div>
+                            <div class="flex flex-wrap gap-2">
+                                <button class="preset-btn pill px-3 py-2 text-sm font-bold text-slate-700" data-preset="tokenizer enables efficient transformers">LLM Pipeline</button>
+                                <button class="preset-btn pill px-3 py-2 text-sm font-bold text-slate-700" data-preset="lowest newer wider">Classic BPE</button>
+                                <button class="preset-btn pill px-3 py-2 text-sm font-bold text-slate-700" data-preset="attention needs tokens before embeddings">Attention</button>
+                            </div>
+                        </div>
+
+                        <div class="grid grid-cols-1 lg:grid-cols-[1fr_auto] gap-4">
+                            <label class="block">
+                                <span class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Input Text</span>
+                                <textarea id="input-text" rows="3" class="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-4 py-3 text-base text-slate-900 shadow-sm focus:border-blue-500">tokenizer enables efficient transformers</textarea>
+                            </label>
+                            <div class="grid grid-cols-2 gap-3 lg:grid-cols-1 lg:w-52">
+                                <label class="block">
+                                    <span class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Focus Word</span>
+                                    <select id="focus-word" class="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-900 shadow-sm"></select>
+                                </label>
+                                <label class="block">
+                                    <span class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Animation Speed</span>
+                                    <select id="speed-select" class="mt-2 w-full rounded-2xl border border-slate-300 bg-white px-3 py-3 text-sm font-bold text-slate-900 shadow-sm">
+                                        <option value="1400">Slow</option>
+                                        <option value="850" selected>Normal</option>
+                                        <option value="450">Fast</option>
+                                    </select>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div class="flex flex-wrap gap-3">
+                            <button id="apply-btn" class="rounded-full bg-slate-950 px-5 py-3 text-sm font-extrabold text-white shadow-lg shadow-slate-900/10 hover:bg-slate-800 transition-colors">Apply Input</button>
+                            <button id="prev-btn" class="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">Previous Step</button>
+                            <button id="next-btn" class="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">Next Step</button>
+                            <button id="play-btn" class="rounded-full bg-teal-600 px-5 py-3 text-sm font-extrabold text-white hover:bg-teal-700 transition-colors">Play</button>
+                            <button id="reset-btn" class="rounded-full border border-slate-300 bg-white px-5 py-3 text-sm font-extrabold text-slate-700 hover:bg-slate-50 transition-colors">Reset Focus Word</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card rounded-[1.5rem] p-5 md:p-6">
+                    <div class="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <h2 class="text-2xl font-extrabold text-slate-900">2. Step through merges</h2>
+                            <p id="step-caption" class="mt-2 text-sm text-slate-600 max-w-3xl">
+                                Step 0 shows the focus word split into characters plus an end-of-word marker.
+                            </p>
+                        </div>
+                        <div class="pill px-4 py-2 text-sm font-bold text-slate-700">
+                            Current merge:
+                            <span id="current-merge-label" class="mono text-slate-950 ml-2">None yet</span>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 grid grid-cols-1 lg:grid-cols-[1.2fr_0.8fr] gap-6">
+                        <div class="space-y-5">
+                            <div class="rounded-[1.25rem] border border-slate-200 bg-white/80 p-4">
+                                <div class="flex items-center justify-between gap-3 mb-4">
+                                    <div>
+                                        <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Current Symbol Stream</div>
+                                        <div class="mt-1 text-sm text-slate-600">The highlighted pair is the next adjacent pair chosen by BPE.</div>
+                                    </div>
+                                    <div id="step-indicator-badge" class="pill px-3 py-1.5 text-xs font-extrabold text-slate-700">Step 0</div>
+                                </div>
+                                <div id="token-stream" class="flex flex-wrap items-center gap-3 min-h-[8rem]"></div>
+                            </div>
+
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div class="rounded-[1.25rem] border border-orange-200 bg-orange-50/80 p-4">
+                                    <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-orange-700">Chosen Pair</div>
+                                    <div id="merge-pair-visual" class="mt-4 flex items-center gap-3 min-h-[3rem]"></div>
+                                </div>
+                                <div class="rounded-[1.25rem] border border-teal-200 bg-teal-50/80 p-4">
+                                    <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-teal-700">Merged Result</div>
+                                    <div id="merge-result-visual" class="mt-4 flex items-center gap-3 min-h-[3rem]"></div>
+                                </div>
+                            </div>
+
+                            <div class="rounded-[1.25rem] border border-slate-200 bg-slate-50/80 p-4">
+                                <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Why This Matters</div>
+                                <div id="educational-note" class="mt-3 text-sm text-slate-700 leading-relaxed">
+                                    Character-level tokenization is flexible, but it creates long sequences. BPE compresses frequent patterns into larger subword units while keeping the ability to fall back to characters for unfamiliar words.
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="rounded-[1.25rem] border border-slate-200 bg-white/80 p-4">
+                            <div class="flex items-center justify-between gap-3 mb-4">
+                                <div>
+                                    <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Merge Rules</div>
+                                    <div class="mt-1 text-sm text-slate-600">Toy merge ranks. Lower rank means the pair gets priority earlier.</div>
+                                </div>
+                                <div class="pill px-3 py-1.5 text-xs font-extrabold text-slate-700 mono" id="visible-rule-count">0 rules</div>
+                            </div>
+                            <div id="rules-list" class="space-y-3 max-h-[34rem] overflow-y-auto pr-1"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card rounded-[1.5rem] p-5 md:p-6">
+                    <div>
+                        <h2 class="text-2xl font-extrabold text-slate-900">3. Compare tokenization strategies</h2>
+                        <p class="mt-2 text-sm text-slate-600">
+                            The exact numbers here come from the toy vocabulary used in this page, but the tradeoff is the same in real tokenizers: BPE usually lands between pure characters and whole words.
+                        </p>
+                    </div>
+
+                    <div class="mt-6 grid grid-cols-1 lg:grid-cols-3 gap-4">
+                        <div class="compare-column">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="text-lg font-extrabold text-slate-900">Character-Level</div>
+                                <div id="char-count" class="pill px-3 py-1 text-xs font-extrabold text-slate-700">0 tokens</div>
+                            </div>
+                            <p class="mt-2 text-sm text-slate-600">Maximum flexibility, but the longest sequence length.</p>
+                            <div id="char-strip" class="compare-strip mt-4"></div>
+                        </div>
+                        <div class="compare-column">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="text-lg font-extrabold text-slate-900">Word-Level</div>
+                                <div id="word-count" class="pill px-3 py-1 text-xs font-extrabold text-slate-700">0 tokens</div>
+                            </div>
+                            <p class="mt-2 text-sm text-slate-600">Shorter sequences, but brittle on unseen words and spelling variants.</p>
+                            <div id="word-strip" class="compare-strip mt-4"></div>
+                        </div>
+                        <div class="compare-column">
+                            <div class="flex items-center justify-between gap-3">
+                                <div class="text-lg font-extrabold text-slate-900">Toy BPE</div>
+                                <div id="bpe-count" class="pill px-3 py-1 text-xs font-extrabold text-slate-700">0 tokens</div>
+                            </div>
+                            <p class="mt-2 text-sm text-slate-600">Reusable subwords reduce sequence length while still backing off to smaller pieces.</p>
+                            <div id="bpe-strip" class="compare-strip mt-4"></div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <aside class="flex flex-col gap-6">
+                <div class="glass-card rounded-[1.5rem] p-5 md:p-6">
+                    <h2 class="text-2xl font-extrabold text-slate-900">What students should notice</h2>
+                    <div class="mt-5 space-y-4 text-sm text-slate-700 leading-relaxed">
+                        <div class="rounded-2xl border border-teal-100 bg-teal-50/80 p-4">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-teal-700">1. Text is not consumed raw</div>
+                            <p class="mt-2">Transformers do not read strings directly. They read token IDs, so tokenization is the front door to embeddings, attention, and context length.</p>
+                        </div>
+                        <div class="rounded-2xl border border-blue-100 bg-blue-50/80 p-4">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-blue-700">2. BPE is greedy and local</div>
+                            <p class="mt-2">At each step, the tokenizer looks at adjacent symbol pairs and picks the best-ranked merge rule that exists in its learned vocabulary.</p>
+                        </div>
+                        <div class="rounded-2xl border border-orange-100 bg-orange-50/80 p-4">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-orange-700">3. Token count affects cost</div>
+                            <p class="mt-2">Longer token sequences mean more attention work and more KV-cache memory. Better compression can lower inference cost, although vocabulary size also matters.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card rounded-[1.5rem] p-5 md:p-6">
+                    <h2 class="text-2xl font-extrabold text-slate-900">Token count summary</h2>
+                    <div class="mt-5 space-y-4">
+                        <div class="metric-card">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Characters</div>
+                            <div id="summary-char" class="mt-2 text-3xl font-extrabold text-slate-900">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Words</div>
+                            <div id="summary-word" class="mt-2 text-3xl font-extrabold text-slate-900">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">Toy BPE</div>
+                            <div id="summary-bpe" class="mt-2 text-3xl font-extrabold text-teal-700">0</div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="text-xs font-extrabold uppercase tracking-[0.18em] text-slate-500">BPE vs Characters</div>
+                            <div id="summary-delta" class="mt-2 text-3xl font-extrabold text-blue-700">0%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="glass-card rounded-[1.5rem] p-5 md:p-6">
+                    <h2 class="text-2xl font-extrabold text-slate-900">Toy vocabulary</h2>
+                    <p class="mt-3 text-sm text-slate-600 leading-relaxed">
+                        The merge rules below are intentionally small and human-readable. They cover recurring English fragments such as <span class="mono">ing</span>, <span class="mono">er</span>, <span class="mono">tion</span>, and <span class="mono">token</span>.
+                    </p>
+                    <div class="mt-4 flex flex-wrap gap-2" id="vocab-preview"></div>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <script>
+        const endToken = "</w>";
+        const mergeRulePairs = [
+            ["e", "r"], ["i", "n"], ["t", "h"], ["a", "t"], ["o", "n"], ["s", "t"], ["th", "e"],
+            ["e", "n"], ["e", "s"], ["r", "e"], ["l", "o"], ["lo", "w"], ["n", "e"], ["ne", "w"],
+            ["w", "i"], ["wi", "d"], ["e", "f"], ["ef", "f"], ["eff", "i"], ["effi", "c"], ["effic", "i"],
+            ["effici", "e"], ["efficie", "n"], ["efficien", "t"], ["t", "o"], ["to", "k"], ["tok", "e"],
+            ["toke", "n"], ["token", "i"], ["tokeni", "z"], ["tokeniz", "e"], ["tokenize", "r"],
+            ["t", "r"], ["tr", "a"], ["tra", "n"], ["tran", "s"], ["trans", "f"], ["transf", "o"],
+            ["transfo", "r"], ["transfor", "m"], ["transform", "e"], ["transforme", "r"], ["transformer", "s"],
+            ["i", "t"], ["it", "y"], ["a", "n"], ["an", "d"], ["ing", endToken], ["er", endToken],
+            ["low", "e"], ["lowe", "s"], ["lowes", "t"], ["lowest", endToken], ["new", "er"], ["newer", endToken],
+            ["wid", "er"], ["wider", endToken], ["en", "a"], ["ena", "b"], ["enab", "l"], ["enabl", "e"],
+            ["enable", "s"], ["enables", endToken], ["e", "m"], ["em", "b"], ["emb", "e"], ["embe", "d"],
+            ["embed", "d"], ["embedd", "i"], ["embeddi", "n"], ["embeddin", "g"], ["embedding", "s"],
+            ["embeddings", endToken], ["a", "tt"], ["att", "e"], ["atte", "n"], ["atten", "t"], ["attent", "i"],
+            ["attenti", "o"], ["attentio", "n"], ["attention", endToken], ["n", "eeds"], ["needs", endToken]
+        ];
+
+        const mergeRules = mergeRulePairs.map(([left, right], index) => ({
+            left,
+            right,
+            merged: left + right,
+            rank: index + 1,
+            key: `${left} ${right}`
+        }));
+        const mergeRuleMap = new Map(mergeRules.map((rule) => [rule.key, rule]));
+
+        const state = {
+            inputText: "tokenizer enables efficient transformers",
+            words: [],
+            focusWord: "",
+            focusHistory: [],
+            currentStep: 0,
+            playTimer: null,
+            speedMs: 850,
+            fullBpeTokens: []
+        };
+
+        const elements = {
+            inputText: document.getElementById("input-text"),
+            focusWord: document.getElementById("focus-word"),
+            speedSelect: document.getElementById("speed-select"),
+            applyBtn: document.getElementById("apply-btn"),
+            prevBtn: document.getElementById("prev-btn"),
+            nextBtn: document.getElementById("next-btn"),
+            playBtn: document.getElementById("play-btn"),
+            resetBtn: document.getElementById("reset-btn"),
+            tokenStream: document.getElementById("token-stream"),
+            stepCaption: document.getElementById("step-caption"),
+            currentMergeLabel: document.getElementById("current-merge-label"),
+            mergePairVisual: document.getElementById("merge-pair-visual"),
+            mergeResultVisual: document.getElementById("merge-result-visual"),
+            educationalNote: document.getElementById("educational-note"),
+            rulesList: document.getElementById("rules-list"),
+            visibleRuleCount: document.getElementById("visible-rule-count"),
+            stepIndicatorBadge: document.getElementById("step-indicator-badge"),
+            charStrip: document.getElementById("char-strip"),
+            wordStrip: document.getElementById("word-strip"),
+            bpeStrip: document.getElementById("bpe-strip"),
+            charCount: document.getElementById("char-count"),
+            wordCount: document.getElementById("word-count"),
+            bpeCount: document.getElementById("bpe-count"),
+            heroFocusWord: document.getElementById("hero-focus-word"),
+            heroStep: document.getElementById("hero-step"),
+            heroBpeCount: document.getElementById("hero-bpe-count"),
+            heroSavings: document.getElementById("hero-savings"),
+            summaryChar: document.getElementById("summary-char"),
+            summaryWord: document.getElementById("summary-word"),
+            summaryBpe: document.getElementById("summary-bpe"),
+            summaryDelta: document.getElementById("summary-delta"),
+            vocabPreview: document.getElementById("vocab-preview")
+        };
+
+        function normalizeText(text) {
+            return text
+                .toLowerCase()
+                .replace(/[^a-z\s]+/g, " ")
+                .replace(/\s+/g, " ")
+                .trim();
+        }
+
+        function splitWords(text) {
+            const normalized = normalizeText(text);
+            return normalized ? normalized.split(" ") : [];
+        }
+
+        function tokenizeCharacters(text) {
+            const normalized = normalizeText(text);
+            if (!normalized) return [];
+
+            const tokens = [];
+            for (const char of normalized) {
+                tokens.push(char === " " ? "space" : char);
+            }
+            return tokens;
+        }
+
+        function tokenizeWords(text) {
+            const normalized = normalizeText(text);
+            return normalized ? normalized.split(" ") : [];
+        }
+
+        function wordToSymbols(word) {
+            return [...word, endToken];
+        }
+
+        function findBestMerge(symbols) {
+            let bestRule = null;
+            let bestIndex = -1;
+
+            for (let index = 0; index < symbols.length - 1; index += 1) {
+                const key = `${symbols[index]} ${symbols[index + 1]}`;
+                const rule = mergeRuleMap.get(key);
+                if (!rule) continue;
+                if (!bestRule || rule.rank < bestRule.rank) {
+                    bestRule = rule;
+                    bestIndex = index;
+                }
+            }
+
+            return bestRule ? { rule: bestRule, index: bestIndex } : null;
+        }
+
+        function buildWordHistory(word) {
+            const history = [];
+            let symbols = wordToSymbols(word);
+
+            while (true) {
+                const merge = findBestMerge(symbols);
+                if (!merge) break;
+
+                const after = [
+                    ...symbols.slice(0, merge.index),
+                    merge.rule.merged,
+                    ...symbols.slice(merge.index + 2)
+                ];
+
+                history.push({
+                    before: [...symbols],
+                    after: [...after],
+                    mergeIndex: merge.index,
+                    mergeRule: merge.rule
+                });
+
+                symbols = after;
+            }
+
+            return history;
+        }
+
+        function encodeWord(word) {
+            const history = buildWordHistory(word);
+            if (!history.length) {
+                return wordToSymbols(word);
+            }
+            return history[history.length - 1].after;
+        }
+
+        function encodeSentenceWithBpe(words) {
+            const tokens = [];
+            words.forEach((word, wordIndex) => {
+                tokens.push(...encodeWord(word));
+                if (wordIndex < words.length - 1) {
+                    tokens.push("space");
+                }
+            });
+            return tokens;
+        }
+
+        function stopPlayback() {
+            if (state.playTimer) {
+                clearInterval(state.playTimer);
+                state.playTimer = null;
+            }
+            elements.playBtn.textContent = "Play";
+        }
+
+        function getFocusHistory() {
+            return state.focusHistory;
+        }
+
+        function getCurrentSymbols() {
+            const history = getFocusHistory();
+            if (!state.focusWord) return [];
+            if (state.currentStep === 0) {
+                return wordToSymbols(state.focusWord);
+            }
+            return history[state.currentStep - 1]?.after ?? wordToSymbols(state.focusWord);
+        }
+
+        function renderChip(token, className = "") {
+            const chip = document.createElement("div");
+            chip.className = `token-chip ${className}`.trim();
+            chip.textContent = token === "space" ? "␠" : token;
+            if (token === endToken || token === "space") {
+                chip.classList.add("boundary");
+            }
+            return chip;
+        }
+
+        function updateWordOptions() {
+            const previous = state.focusWord;
+            elements.focusWord.innerHTML = "";
+
+            state.words.forEach((word) => {
+                const option = document.createElement("option");
+                option.value = word;
+                option.textContent = word;
+                elements.focusWord.appendChild(option);
+            });
+
+            if (state.words.includes(previous)) {
+                state.focusWord = previous;
+            } else {
+                state.focusWord = state.words.sort((a, b) => b.length - a.length)[0] || "";
+            }
+
+            elements.focusWord.value = state.focusWord;
+        }
+
+        function rebuildStateFromInput() {
+            stopPlayback();
+            state.inputText = elements.inputText.value;
+            state.words = splitWords(state.inputText);
+            updateWordOptions();
+            state.focusHistory = state.focusWord ? buildWordHistory(state.focusWord) : [];
+            state.currentStep = 0;
+            state.fullBpeTokens = encodeSentenceWithBpe(state.words);
+            renderAll();
+        }
+
+        function setFocusWord(word) {
+            stopPlayback();
+            state.focusWord = word;
+            state.focusHistory = word ? buildWordHistory(word) : [];
+            state.currentStep = 0;
+            renderAll();
+        }
+
+        function renderTokenStream() {
+            const history = getFocusHistory();
+            const currentSymbols = getCurrentSymbols();
+            const nextEntry = history[state.currentStep];
+            const previousEntry = state.currentStep > 0 ? history[state.currentStep - 1] : null;
+
+            elements.tokenStream.innerHTML = "";
+
+            currentSymbols.forEach((token, index) => {
+                const chip = renderChip(token);
+
+                if (nextEntry) {
+                    if (index === nextEntry.mergeIndex) chip.classList.add("active-left");
+                    if (index === nextEntry.mergeIndex + 1) chip.classList.add("active-right");
+                } else if (previousEntry && state.currentStep === history.length) {
+                    if (index === previousEntry.mergeIndex) chip.classList.add("just-merged");
+                }
+
+                elements.tokenStream.appendChild(chip);
+                if (index < currentSymbols.length - 1) {
+                    const arrow = document.createElement("div");
+                    arrow.className = "path-arrow";
+                    arrow.textContent = "→";
+                    elements.tokenStream.appendChild(arrow);
+                }
+            });
+        }
+
+        function renderMergePanels() {
+            const history = getFocusHistory();
+            const nextEntry = history[state.currentStep];
+            const previousEntry = state.currentStep > 0 ? history[state.currentStep - 1] : null;
+
+            elements.mergePairVisual.innerHTML = "";
+            elements.mergeResultVisual.innerHTML = "";
+
+            if (nextEntry) {
+                elements.currentMergeLabel.textContent = `${nextEntry.mergeRule.left} + ${nextEntry.mergeRule.right}`;
+                elements.mergePairVisual.appendChild(renderChip(nextEntry.mergeRule.left, "active-left"));
+                const plus = document.createElement("div");
+                plus.className = "text-orange-500 font-extrabold text-xl";
+                plus.textContent = "+";
+                elements.mergePairVisual.appendChild(plus);
+                elements.mergePairVisual.appendChild(renderChip(nextEntry.mergeRule.right, "active-right"));
+
+                elements.mergeResultVisual.appendChild(renderChip(nextEntry.mergeRule.merged, "just-merged"));
+            } else if (previousEntry) {
+                elements.currentMergeLabel.textContent = "No more merges";
+                elements.mergePairVisual.appendChild(renderChip(previousEntry.mergeRule.left));
+                const plus = document.createElement("div");
+                plus.className = "text-slate-400 font-extrabold text-xl";
+                plus.textContent = "+";
+                elements.mergePairVisual.appendChild(plus);
+                elements.mergePairVisual.appendChild(renderChip(previousEntry.mergeRule.right));
+                elements.mergeResultVisual.appendChild(renderChip(previousEntry.mergeRule.merged, "just-merged"));
+            } else {
+                elements.currentMergeLabel.textContent = "None yet";
+                const note = document.createElement("div");
+                note.className = "text-sm text-slate-500";
+                note.textContent = state.focusWord ? "No merge has happened yet." : "Enter some text first.";
+                elements.mergePairVisual.appendChild(note.cloneNode(true));
+                elements.mergeResultVisual.appendChild(note);
+            }
+        }
+
+        function renderRulesList() {
+            const history = getFocusHistory();
+            const usedRanks = new Set(history.slice(0, state.currentStep).map((entry) => entry.mergeRule.rank));
+            const nextRank = history[state.currentStep]?.mergeRule.rank ?? null;
+            const visibleRules = mergeRules.filter((rule) => {
+                if (rule.rank <= 24) return true;
+                return usedRanks.has(rule.rank) || rule.rank === nextRank;
+            });
+
+            elements.rulesList.innerHTML = "";
+            elements.visibleRuleCount.textContent = `${visibleRules.length} rules`;
+
+            visibleRules.forEach((rule) => {
+                const row = document.createElement("div");
+                row.className = "rule-row";
+                if (usedRanks.has(rule.rank)) row.classList.add("used");
+                if (rule.rank === nextRank) row.classList.add("next");
+
+                row.innerHTML = `
+                    <div class="pill px-3 py-1.5 text-xs font-extrabold text-slate-700 mono">#${rule.rank}</div>
+                    <div class="mono text-sm font-bold text-slate-900">${rule.left} + ${rule.right} <span class="text-slate-400">→</span> ${rule.merged}</div>
+                    <div class="text-[11px] font-bold uppercase tracking-[0.18em] ${rule.rank === nextRank ? "text-orange-600" : usedRanks.has(rule.rank) ? "text-teal-700" : "text-slate-400"}">
+                        ${rule.rank === nextRank ? "Next" : usedRanks.has(rule.rank) ? "Used" : "Rule"}
+                    </div>
+                `;
+                elements.rulesList.appendChild(row);
+            });
+        }
+
+        function renderCompareStrip(target, tokens) {
+            target.innerHTML = "";
+            tokens.forEach((token) => {
+                const chip = document.createElement("div");
+                chip.className = `compare-chip ${token === "space" ? "space" : ""}`.trim();
+                chip.textContent = token === "space" ? "space" : token;
+                target.appendChild(chip);
+            });
+        }
+
+        function updateCounts() {
+            const charTokens = tokenizeCharacters(state.inputText);
+            const wordTokens = tokenizeWords(state.inputText);
+            const bpeTokens = state.fullBpeTokens;
+
+            renderCompareStrip(elements.charStrip, charTokens);
+            renderCompareStrip(elements.wordStrip, wordTokens);
+            renderCompareStrip(elements.bpeStrip, bpeTokens);
+
+            elements.charCount.textContent = `${charTokens.length} tokens`;
+            elements.wordCount.textContent = `${wordTokens.length} tokens`;
+            elements.bpeCount.textContent = `${bpeTokens.length} tokens`;
+
+            elements.summaryChar.textContent = String(charTokens.length);
+            elements.summaryWord.textContent = String(wordTokens.length);
+            elements.summaryBpe.textContent = String(bpeTokens.length);
+
+            const savings = charTokens.length ? Math.round(((charTokens.length - bpeTokens.length) / charTokens.length) * 100) : 0;
+            elements.summaryDelta.textContent = `${savings}% shorter`;
+            elements.heroBpeCount.textContent = String(bpeTokens.length);
+            elements.heroSavings.textContent = `${savings}%`;
+        }
+
+        function updateNarrative() {
+            const history = getFocusHistory();
+            const nextEntry = history[state.currentStep];
+            const lastEntry = state.currentStep > 0 ? history[state.currentStep - 1] : null;
+
+            elements.heroFocusWord.textContent = state.focusWord || "none";
+            elements.heroStep.textContent = `${state.currentStep} / ${history.length}`;
+            elements.stepIndicatorBadge.textContent = `Step ${state.currentStep}`;
+
+            if (!state.focusWord) {
+                elements.stepCaption.textContent = "Add some text, choose a focus word, and the page will build a merge trace.";
+                elements.educationalNote.textContent = "The main educational point is that tokenizers choose a sequence of subword units before any embedding lookup or attention happens.";
+                return;
+            }
+
+            if (!history.length) {
+                elements.stepCaption.textContent = `The toy vocabulary has no merge rules for "${state.focusWord}", so the word stays at character level.`;
+                elements.educationalNote.textContent = "This is the fallback behavior subword tokenizers rely on: unfamiliar words can still be represented by smaller pieces instead of being dropped entirely.";
+                return;
+            }
+
+            if (nextEntry) {
+                elements.stepCaption.textContent = `Step ${state.currentStep}: the best adjacent pair available is "${nextEntry.mergeRule.left} + ${nextEntry.mergeRule.right}" because its rank (#${nextEntry.mergeRule.rank}) beats every other merge candidate still visible in the stream.`;
+                elements.educationalNote.textContent = "BPE is greedy. It does not search every global segmentation. It just merges the highest-priority adjacent pair it can currently see, then repeats from the updated stream.";
+                return;
+            }
+
+            elements.stepCaption.textContent = `Step ${state.currentStep}: "${state.focusWord}" cannot be compressed further with this toy vocabulary, so the final token sequence is stable.`;
+            elements.educationalNote.textContent = `The final subword sequence for "${state.focusWord}" is ${getCurrentSymbols().filter((token) => token !== endToken).join(" | ")}. In a full tokenizer these units would be mapped to token IDs for embedding lookup.`;
+        }
+
+        function renderVocabPreview() {
+            const samples = ["th", "the", "er", "ing", "token", "tokenizer", "transformers", "lowest", "newer", "wider", "attention", "embeddings"];
+            elements.vocabPreview.innerHTML = "";
+            samples.forEach((sample) => {
+                const chip = document.createElement("div");
+                chip.className = "pill px-3 py-2 text-sm font-bold text-slate-700 mono";
+                chip.textContent = sample;
+                elements.vocabPreview.appendChild(chip);
+            });
+        }
+
+        function renderAll() {
+            renderTokenStream();
+            renderMergePanels();
+            renderRulesList();
+            updateCounts();
+            updateNarrative();
+        }
+
+        function stepForward() {
+            const maxStep = getFocusHistory().length;
+            if (state.currentStep < maxStep) {
+                state.currentStep += 1;
+                renderAll();
+            } else {
+                stopPlayback();
+            }
+        }
+
+        function stepBackward() {
+            if (state.currentStep > 0) {
+                state.currentStep -= 1;
+                renderAll();
+            }
+        }
+
+        elements.applyBtn.addEventListener("click", rebuildStateFromInput);
+        elements.focusWord.addEventListener("change", (event) => setFocusWord(event.target.value));
+        elements.nextBtn.addEventListener("click", () => {
+            stopPlayback();
+            stepForward();
+        });
+        elements.prevBtn.addEventListener("click", () => {
+            stopPlayback();
+            stepBackward();
+        });
+        elements.resetBtn.addEventListener("click", () => {
+            stopPlayback();
+            state.currentStep = 0;
+            renderAll();
+        });
+        elements.speedSelect.addEventListener("change", (event) => {
+            state.speedMs = Number(event.target.value);
+            if (state.playTimer) {
+                stopPlayback();
+                elements.playBtn.click();
+            }
+        });
+        elements.playBtn.addEventListener("click", () => {
+            if (state.playTimer) {
+                stopPlayback();
+                return;
+            }
+
+            if (state.currentStep >= getFocusHistory().length) {
+                state.currentStep = 0;
+                renderAll();
+            }
+
+            elements.playBtn.textContent = "Pause";
+            state.playTimer = setInterval(() => {
+                if (state.currentStep >= getFocusHistory().length) {
+                    stopPlayback();
+                    return;
+                }
+                stepForward();
+            }, state.speedMs);
+        });
+
+        document.querySelectorAll(".preset-btn").forEach((button) => {
+            button.addEventListener("click", () => {
+                elements.inputText.value = button.dataset.preset;
+                rebuildStateFromInput();
+            });
+        });
+
+        renderVocabPreview();
+        rebuildStateFromInput();
+    </script>
+</body>
+</html>
