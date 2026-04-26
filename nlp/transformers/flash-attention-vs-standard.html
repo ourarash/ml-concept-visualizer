@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<!-- Brief: Side-by-side interactive comparison of Standard Attention vs FlashAttention, focused on HBM I/O and the online-softmax tiling that avoids materializing the N×N attention matrix. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashAttention vs Standard Attention</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}]});"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .cell {
+            display: flex; align-items: center; justify-content: center;
+            font-size: 10px; font-weight: 600;
+            border: 1px solid #cbd5e1;
+            transition: background-color .25s, border-color .25s, transform .25s, box-shadow .25s;
+            border-radius: 2px;
+        }
+        .matrix-grid { display: grid; gap: 1px; }
+        .label-tag { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 11px; }
+        .stage-pill {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 999px;
+            font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+        }
+        .hbm-region {
+            background: repeating-linear-gradient(45deg, #f8fafc 0 6px, #f1f5f9 6px 12px);
+            border: 2px dashed #cbd5e1;
+        }
+        .sram-region {
+            background: linear-gradient(135deg, #ecfeff, #f0f9ff);
+            border: 2px solid #38bdf8;
+            box-shadow: 0 0 0 2px rgba(56,189,248,.15) inset;
+        }
+        .compute-region {
+            background: linear-gradient(135deg, #fff7ed, #fef3c7);
+            border: 2px solid #f59e0b;
+        }
+        .pulse-write { animation: pulseWrite 1s ease-in-out 1; }
+        @keyframes pulseWrite {
+            0%   { box-shadow: 0 0 0 0 rgba(244,63,94,.7); transform: scale(1); }
+            50%  { box-shadow: 0 0 0 6px rgba(244,63,94,0); transform: scale(1.04); }
+            100% { box-shadow: 0 0 0 0 rgba(244,63,94,0); transform: scale(1); }
+        }
+        .pulse-read { animation: pulseRead 1s ease-in-out 1; }
+        @keyframes pulseRead {
+            0%   { box-shadow: 0 0 0 0 rgba(56,189,248,.7); transform: scale(1); }
+            50%  { box-shadow: 0 0 0 6px rgba(56,189,248,0); transform: scale(1.04); }
+            100% { box-shadow: 0 0 0 0 rgba(56,189,248,0); transform: scale(1); }
+        }
+        .ghost { opacity: .25; filter: grayscale(.6); }
+        .active-block { outline: 3px solid #3b82f6; outline-offset: 2px; border-radius: 4px; }
+        .active-block-flash { outline: 3px solid #f43f5e; outline-offset: 2px; border-radius: 4px; }
+        .bar-fill { height: 100%; transition: width .35s ease, background-color .35s ease; border-radius: 4px; }
+        .bar-track { background-color: #e2e8f0; border-radius: 4px; height: 10px; overflow: hidden; }
+        .narration-line { animation: fadeIn .4s ease-out; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+        .matrix-wrapper {
+            display: inline-flex; flex-direction: column; align-items: center; gap: 4px;
+            padding: 6px; background: white; border-radius: 6px;
+        }
+        .pill-q   { background: #dbeafe; color: #1d4ed8; }
+        .pill-k   { background: #d1fae5; color: #047857; }
+        .pill-v   { background: #ede9fe; color: #6d28d9; }
+        .pill-s   { background: #fef3c7; color: #92400e; }
+        .pill-p   { background: #fef9c3; color: #854d0e; }
+        .pill-o   { background: #ffe4e6; color: #be123c; }
+        .pill-ml  { background: #e2e8f0; color: #334155; }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+    <div class="max-w-7xl mx-auto p-4 lg:p-8">
+
+        <!-- ========== HEADER ========== -->
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold text-slate-900">FlashAttention vs Standard Attention</h1>
+            <p class="mt-2 text-slate-600 leading-relaxed">
+                An interactive walkthrough of why standard attention is bottlenecked by GPU memory
+                and how <span class="font-semibold text-rose-600">FlashAttention</span> rewrites the algorithm
+                — with tiling and an <em>online softmax</em> — so the full $N \times N$ attention matrix is
+                <span class="font-semibold">never written to HBM</span>. Press <span class="font-mono bg-slate-200 px-1 rounded">Step</span>
+                to advance both algorithms in lock-step and watch the HBM I/O counters diverge.
+            </p>
+        </header>
+
+        <!-- ========== CONTEXT / WHY IT MATTERS ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Why this matters: attention is memory-bound</h2>
+            <div class="grid md:grid-cols-3 gap-4 text-sm">
+                <div class="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-1">The cost of standard attention</div>
+                    <p>Computing $S = QK^\top$ produces an $N \times N$ score matrix. For a sequence length of
+                        $N=8192$ in fp16, that's <span class="font-mono">8192 × 8192 × 2B ≈ 128&nbsp;MB</span> per head, written to
+                        HBM, read back for softmax, written again, then read once more for $PV$.</p>
+                </div>
+                <div class="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-1">The GPU memory wall</div>
+                    <p>An A100 has ~40&nbsp;MB of on-chip <span class="font-semibold text-sky-600">SRAM</span> but
+                        ~1.5&nbsp;TB/s of HBM bandwidth vs ~19&nbsp;TB/s of SRAM bandwidth. Attention spends most
+                        of its time waiting on HBM, not on math.</p>
+                </div>
+                <div class="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-1">FlashAttention's idea</div>
+                    <p>Tile $Q$, $K$, $V$ into blocks small enough to fit in SRAM. Compute attention block-by-block
+                        and combine the partial softmaxes with an <em>online</em> rescaling trick. The full $S$
+                        and $P$ matrices never exist in HBM.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== MATH SECTION ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">The math, side by side</h2>
+            <div class="grid md:grid-cols-2 gap-6 text-sm">
+                <div>
+                    <div class="text-xs font-bold uppercase text-slate-500 mb-2">Standard attention</div>
+                    <div class="space-y-2">
+                        <div>$$ S = \frac{QK^\top}{\sqrt{d}} \in \mathbb{R}^{N\times N} $$</div>
+                        <div>$$ P = \mathrm{softmax}(S) $$</div>
+                        <div>$$ O = PV $$</div>
+                    </div>
+                    <p class="mt-3 text-slate-600">Each line is a separate kernel; each materialises its full output to HBM
+                        before the next can start. Memory traffic is $\mathcal{O}(N^2 + Nd)$.</p>
+                </div>
+                <div>
+                    <div class="text-xs font-bold uppercase text-slate-500 mb-2">FlashAttention (online softmax)</div>
+                    <div class="space-y-2">
+                        <div>For each block $S_{ij} = Q_i K_j^\top / \sqrt{d}$ kept in SRAM:</div>
+                        <div>$$ \tilde m_{ij} = \mathrm{rowmax}(S_{ij}),\quad \tilde P_{ij} = \exp(S_{ij} - \tilde m_{ij}) $$</div>
+                        <div>$$ m_i^{\text{new}} = \max(m_i,\, \tilde m_{ij}) $$</div>
+                        <div>$$ \ell_i^{\text{new}} = e^{m_i - m_i^{\text{new}}} \ell_i + e^{\tilde m_{ij} - m_i^{\text{new}}} \mathrm{rowsum}(\tilde P_{ij}) $$</div>
+                        <div>$$ O_i \leftarrow \mathrm{diag}(e^{m_i - m_i^{\text{new}}}) O_i + e^{\tilde m_{ij} - m_i^{\text{new}}} \tilde P_{ij} V_j $$</div>
+                    </div>
+                    <p class="mt-3 text-slate-600">Only $O$, the running max $m$, and the running normaliser $\ell$ live in HBM
+                        — all $\mathcal{O}(N)$. Total HBM traffic drops to $\mathcal{O}(N^2 d^2 / M)$ where $M$ is the SRAM size.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== CONTROLS + COUNTERS ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-4 mb-6 sticky top-2 z-20 border border-slate-200">
+            <div class="flex flex-wrap items-center justify-between gap-4">
+                <div class="flex items-center gap-2">
+                    <button id="reset-btn" class="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200">Reset</button>
+                    <button id="back-btn"  class="px-3 py-2 text-sm font-semibold text-slate-700 bg-slate-100 rounded-lg hover:bg-slate-200">◀ Back</button>
+                    <button id="step-btn"  class="px-3 py-2 text-sm font-semibold text-white bg-sky-600 rounded-lg hover:bg-sky-700">Step ▶</button>
+                    <button id="play-btn"  class="px-3 py-2 text-sm font-semibold text-white bg-emerald-600 rounded-lg hover:bg-emerald-700">Play ▶▶</button>
+                    <label class="text-xs text-slate-500 ml-2">Speed
+                        <input id="speed" type="range" min="200" max="2000" step="100" value="900" class="align-middle">
+                    </label>
+                </div>
+                <div class="flex items-center gap-3 text-xs text-slate-600">
+                    <label>N=
+                        <select id="N-select" class="border rounded px-2 py-1 ml-1 text-xs">
+                            <option value="8" selected>8</option>
+                            <option value="4">4</option>
+                        </select>
+                    </label>
+                    <label>Block B=
+                        <select id="B-select" class="border rounded px-2 py-1 ml-1 text-xs">
+                            <option value="4" selected>4</option>
+                            <option value="2">2</option>
+                        </select>
+                    </label>
+                    <span class="text-slate-400">d = 4 (fixed)</span>
+                </div>
+            </div>
+            <div class="mt-3 text-sm">
+                <span class="font-semibold text-slate-700">Phase:</span>
+                <span id="phase-label" class="font-mono text-slate-900"></span>
+            </div>
+            <div id="narration" class="mt-2 text-sm text-slate-700 narration-line"></div>
+        </section>
+
+        <!-- ========== SIDE-BY-SIDE VIZ ========== -->
+        <section class="grid lg:grid-cols-2 gap-6 mb-6">
+
+            <!-- ===== Standard panel ===== -->
+            <div class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-amber-500">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-slate-900">Standard Attention</h3>
+                    <span class="stage-pill bg-amber-100 text-amber-800">Materialises N×N</span>
+                </div>
+
+                <!-- HBM region -->
+                <div class="hbm-region rounded-xl p-3 mb-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-bold uppercase text-slate-500">HBM (off-chip, slow)</span>
+                        <span class="text-xs font-mono text-slate-500">peak: <span id="std-hbm-peak" class="text-slate-900 font-bold">0</span> cells</span>
+                    </div>
+                    <div id="std-hbm" class="flex flex-wrap gap-3 items-start min-h-[120px]"></div>
+                </div>
+                <!-- SRAM + Compute -->
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="sram-region rounded-xl p-3">
+                        <div class="text-xs font-bold uppercase text-sky-700 mb-2">SRAM (on-chip)</div>
+                        <div id="std-sram" class="flex flex-wrap gap-2 items-start min-h-[60px]"></div>
+                    </div>
+                    <div class="compute-region rounded-xl p-3">
+                        <div class="text-xs font-bold uppercase text-amber-700 mb-2">Compute</div>
+                        <div id="std-compute" class="text-xs text-slate-700 min-h-[60px] font-mono"></div>
+                    </div>
+                </div>
+
+                <!-- Counters -->
+                <div class="mt-4 space-y-2 text-xs">
+                    <div>
+                        <div class="flex justify-between"><span class="font-semibold text-slate-600">HBM bytes read</span>
+                            <span class="font-mono"><span id="std-read" class="text-slate-900 font-bold">0</span> cells</span></div>
+                        <div class="bar-track mt-1"><div id="std-read-bar" class="bar-fill bg-sky-500" style="width:0%"></div></div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between"><span class="font-semibold text-slate-600">HBM bytes written</span>
+                            <span class="font-mono"><span id="std-write" class="text-slate-900 font-bold">0</span> cells</span></div>
+                        <div class="bar-track mt-1"><div id="std-write-bar" class="bar-fill bg-rose-500" style="width:0%"></div></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- ===== Flash panel ===== -->
+            <div class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-rose-500">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-slate-900">FlashAttention</h3>
+                    <span class="stage-pill bg-rose-100 text-rose-800">Tiled · Online Softmax</span>
+                </div>
+
+                <div class="hbm-region rounded-xl p-3 mb-3">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="text-xs font-bold uppercase text-slate-500">HBM (off-chip, slow)</span>
+                        <span class="text-xs font-mono text-slate-500">peak: <span id="fa-hbm-peak" class="text-slate-900 font-bold">0</span> cells</span>
+                    </div>
+                    <div id="fa-hbm" class="flex flex-wrap gap-3 items-start min-h-[120px]"></div>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div class="sram-region rounded-xl p-3">
+                        <div class="text-xs font-bold uppercase text-sky-700 mb-2">SRAM (on-chip)</div>
+                        <div id="fa-sram" class="flex flex-wrap gap-2 items-start min-h-[60px]"></div>
+                    </div>
+                    <div class="compute-region rounded-xl p-3">
+                        <div class="text-xs font-bold uppercase text-amber-700 mb-2">Compute</div>
+                        <div id="fa-compute" class="text-xs text-slate-700 min-h-[60px] font-mono"></div>
+                    </div>
+                </div>
+
+                <div class="mt-4 space-y-2 text-xs">
+                    <div>
+                        <div class="flex justify-between"><span class="font-semibold text-slate-600">HBM bytes read</span>
+                            <span class="font-mono"><span id="fa-read" class="text-slate-900 font-bold">0</span> cells</span></div>
+                        <div class="bar-track mt-1"><div id="fa-read-bar" class="bar-fill bg-sky-500" style="width:0%"></div></div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between"><span class="font-semibold text-slate-600">HBM bytes written</span>
+                            <span class="font-mono"><span id="fa-write" class="text-slate-900 font-bold">0</span> cells</span></div>
+                        <div class="bar-track mt-1"><div id="fa-write-bar" class="bar-fill bg-rose-500" style="width:0%"></div></div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== SUMMARY TABLE ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Live comparison (in matrix-cells of HBM traffic)</h2>
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs uppercase text-slate-500 border-b">
+                        <th class="py-2">Metric</th>
+                        <th class="py-2">Standard</th>
+                        <th class="py-2">FlashAttention</th>
+                        <th class="py-2">Improvement</th>
+                    </tr>
+                </thead>
+                <tbody class="font-mono">
+                    <tr class="border-b">
+                        <td class="py-2 font-sans text-slate-700">Total HBM I/O (R+W)</td>
+                        <td><span id="sum-std-io">0</span></td>
+                        <td><span id="sum-fa-io">0</span></td>
+                        <td><span id="sum-io-ratio" class="font-bold text-emerald-600">—</span></td>
+                    </tr>
+                    <tr class="border-b">
+                        <td class="py-2 font-sans text-slate-700">Peak HBM intermediates (N×N matrix?)</td>
+                        <td><span id="sum-std-peak">0</span></td>
+                        <td><span id="sum-fa-peak">0</span></td>
+                        <td><span id="sum-peak-ratio" class="font-bold text-emerald-600">—</span></td>
+                    </tr>
+                    <tr>
+                        <td class="py-2 font-sans text-slate-700">Asymptotic HBM</td>
+                        <td>$\mathcal{O}(N^2 + Nd)$</td>
+                        <td>$\mathcal{O}(N^2 d^2 / M)$</td>
+                        <td class="font-bold text-emerald-600">~M / d× fewer</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- ========== KEY TAKEAWAYS ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-10">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Key takeaways</h2>
+            <ol class="list-decimal list-inside space-y-2 text-sm text-slate-700">
+                <li><span class="font-semibold">Attention is memory-bound, not compute-bound.</span> The win comes from
+                    fewer HBM round-trips, not faster matmuls — the GPU's compute units were already idle waiting on memory.</li>
+                <li><span class="font-semibold">The N×N matrix never needs to leave SRAM.</span> Standard attention writes
+                    $S$ and $P$ to HBM purely as a programming convenience; FlashAttention proves you don't have to.</li>
+                <li><span class="font-semibold">Online softmax is the enabling math.</span> By tracking the running max
+                    $m$ and normaliser $\ell$ per row, partial softmaxes from different K/V tiles can be combined
+                    <em>exactly</em> — the result is bit-equivalent to the standard formulation, not an approximation.</li>
+                <li><span class="font-semibold">Memory savings → longer contexts.</span> Going from $\mathcal{O}(N^2)$ to
+                    $\mathcal{O}(N)$ HBM for intermediates is what unlocks 32k, 128k, 1M-token context windows on the
+                    same hardware.</li>
+                <li><span class="font-semibold">It's not free.</span> FlashAttention does more FLOPs (recomputes $S_{ij}$
+                    for the backward pass instead of caching $P$), but those extra FLOPs cost ~0 in wall-clock because
+                    the kernel was waiting on memory anyway. Roofline-wise, you're moving left toward the compute-bound
+                    regime.</li>
+            </ol>
+        </section>
+
+        <footer class="text-xs text-slate-400 text-center pb-4">
+            Reference: Dao, Fu, Ermon, Rudra, Ré — <em>FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness</em> (NeurIPS 2022).
+        </footer>
+    </div>
+
+    <script>
+    // ============================================================
+    //  Visualization state and helpers
+    // ============================================================
+    const state = {
+        N: 8,            // sequence length
+        d: 4,            // head dim (fixed for clarity)
+        B: 4,            // block size for FlashAttention (Br = Bc = B)
+        stepIdx: 0,
+        playing: false,
+        playTimer: null,
+        speed: 900,
+    };
+
+    // Counters per algorithm
+    const std = { read: 0, write: 0, peak: 0, hbm: new Set(), sram: new Set(), narration: '', compute: '' };
+    const fa  = { read: 0, write: 0, peak: 0, hbm: new Set(), sram: new Set(), narration: '', compute: '',
+                  i: 0, j: 0 };  // current Q-block / K-block index
+
+    // ============================================================
+    //  Step generation: lock-step "frames" for both panels
+    //  Each frame returns commands that mutate std / fa state.
+    //  We pre-compute all frames so Back/Step/Reset are deterministic.
+    // ============================================================
+    function buildFrames() {
+        const N = state.N, d = state.d, B = state.B;
+        const blocks = Math.ceil(N / B);  // number of row/col blocks
+        const cellsNN = N * N;            // attention matrix size
+        const cellsNd = N * d;            // each of Q, K, V, O size
+
+        const frames = [];
+
+        // ---------- helpers ----------
+        const f = (phase, std_n, fa_n, std_op, fa_op) => frames.push({ phase, std_n, fa_n, std_op, fa_op });
+
+        // === FRAME 0: initial state ===
+        f('Init',
+          'Q, K, V live in HBM. SRAM and on-chip compute are idle.',
+          'Q, K, V live in HBM. Initialise O = 0, m = -∞, ℓ = 0 (also in HBM).',
+          { kind:'init', hbm:['Q','K','V'] },
+          { kind:'init', hbm:['Q','K','V','O','m','l'] }
+        );
+
+        // ============================================================
+        //  STANDARD ATTENTION timeline
+        // ============================================================
+        // We'll synchronise frames against FlashAttention's outer/inner loops.
+        // Standard runs as 4 "macro" steps; we pad to align with Flash's loop count.
+        const stdSteps = [
+            { phase:'Std-1: Read Q, K from HBM',
+              narr:`Read Q (${N}×${d}) and K (${N}×${d}) from HBM into SRAM/registers. ${2*cellsNd} cells of HBM read.`,
+              op:{ kind:'read', from:['Q','K'], cells: 2*cellsNd, sram:['Q','K'] } },
+            { phase:'Std-2: Compute S = QKᵀ/√d (on-chip → HBM)',
+              narr:`Multiply to get S (${N}×${N}). The result is too big to keep on-chip, so it spills back to HBM. ${cellsNN} cells of HBM write.`,
+              op:{ kind:'write', to:['S'], cells: cellsNN, peakAdd:'S' } },
+            { phase:'Std-3: Read S, apply softmax, write P',
+              narr:`Read S (${cellsNN}) from HBM, apply row-wise softmax to get P (${N}×${N}), write P (${cellsNN}) back. The full N×N matrix lives in HBM twice.`,
+              op:{ kind:'rw', read:['S'], readCells: cellsNN, write:['P'], writeCells: cellsNN, peakAdd:'P' } },
+            { phase:'Std-4: Read P and V, compute O = PV, write O',
+              narr:`Read P (${cellsNN}) and V (${cellsNd}). Compute O = PV. Write O (${cellsNd}) to HBM. Standard attention is done.`,
+              op:{ kind:'rw', read:['P','V'], readCells: cellsNN + cellsNd, write:['O'], writeCells: cellsNd, peakAdd:null, sramSet:['P','V'] } },
+        ];
+
+        // ============================================================
+        //  FLASHATTENTION timeline — outer over j (K/V blocks), inner over i (Q blocks)
+        // ============================================================
+        const faSteps = [];
+        for (let j = 0; j < blocks; j++) {
+            faSteps.push({
+                phase:`Flash-Outer j=${j+1}: load Kⱼ, Vⱼ to SRAM`,
+                narr:`Load tile K_${j+1} and V_${j+1} (each ${B}×${d}) from HBM into SRAM. ${2*B*d} cells of HBM read.`,
+                op:{ kind:'fa-outer', j, cells: 2*B*d, sram:[`K${j+1}`,`V${j+1}`] }
+            });
+            for (let i = 0; i < blocks; i++) {
+                faSteps.push({
+                    phase:`Flash-Inner i=${i+1}, j=${j+1}: load Qᵢ, Oᵢ, mᵢ, ℓᵢ`,
+                    narr:`Load Q_${i+1} (${B}×${d}), and the running O_${i+1}, m_${i+1}, ℓ_${i+1}. ${B*d + B*d + 2*B} cells of HBM read.`,
+                    op:{ kind:'fa-inner-load', i, j, cells: B*d + B*d + 2*B, sram:[`Q${i+1}`,`O${i+1}`,`m${i+1}`,`l${i+1}`] }
+                });
+                faSteps.push({
+                    phase:`Flash-Inner i=${i+1}, j=${j+1}: compute Sᵢⱼ on-chip`,
+                    narr:`Compute S_${i+1}${j+1} = Q_${i+1} K_${j+1}ᵀ / √d entirely in SRAM. The N×N attention matrix is never assembled.`,
+                    op:{ kind:'fa-compute-s', i, j }
+                });
+                faSteps.push({
+                    phase:`Flash-Inner i=${i+1}, j=${j+1}: online softmax + accumulate O`,
+                    narr:`Take rowmax & exp to get P̃, update m_${i+1}ⁿᵉʷ = max(m, m̃), rescale ℓ and O by exp(m_old − m_new), then O_${i+1} += exp(m̃ − m_new) · P̃ · V_${j+1}.`,
+                    op:{ kind:'fa-update', i, j }
+                });
+                faSteps.push({
+                    phase:`Flash-Inner i=${i+1}, j=${j+1}: write back O, m, ℓ`,
+                    narr:`Write the updated O_${i+1}, m_${i+1}, ℓ_${i+1} back to HBM. ${B*d + 2*B} cells of HBM write. No N×N matrix written.`,
+                    op:{ kind:'fa-writeback', i, j, cells: B*d + 2*B }
+                });
+            }
+        }
+        faSteps.push({
+            phase:`Flash-Final: O ← O / ℓ`,
+            narr:`Final normalisation: divide each row of O by its accumulated ℓ. FlashAttention is done — and the answer is bit-equivalent to standard attention.`,
+            op:{ kind:'fa-finalize' }
+        });
+
+        // Now interleave stdSteps and faSteps into one timeline.
+        // We let each side "tick" independently — when one side has fewer
+        // steps, we advance only the other side on those frames.
+        const total = Math.max(stdSteps.length, faSteps.length);
+        for (let k = 0; k < total; k++) {
+            const s = stdSteps[k] || null;
+            const fStep = faSteps[k] || null;
+            f(
+                (s ? s.phase : '— (Standard idle, already finished)') + '   ||   ' + (fStep ? fStep.phase : '— (Flash idle)'),
+                s ? s.narr : 'Standard attention finished earlier; nothing more to do.',
+                fStep ? fStep.narr : 'FlashAttention finished earlier; nothing more to do.',
+                s ? s.op : { kind:'noop' },
+                fStep ? fStep.op : { kind:'noop' }
+            );
+        }
+        return frames;
+    }
+
+    let frames = [];
+
+    // ============================================================
+    //  Apply a single frame to the (std, fa) state machines
+    //  Going forward we mutate; for Back we re-derive by replaying from 0.
+    // ============================================================
+    function applyOp(side, op) {
+        if (op.kind === 'init') {
+            side.hbm = new Set(op.hbm);
+            side.sram = new Set();
+            side.read = 0; side.write = 0;
+            side.peak = side.hbm.size;
+            side.compute = 'idle';
+            return;
+        }
+        if (op.kind === 'noop') return;
+
+        // Standard ops
+        if (op.kind === 'read') {
+            side.read += op.cells;
+            side.sram = new Set(op.sram);
+            side.compute = 'reading from HBM → SRAM';
+        } else if (op.kind === 'write') {
+            side.write += op.cells;
+            op.to.forEach(t => side.hbm.add(t));
+            side.compute = `wrote ${op.to.join(', ')} to HBM`;
+            if (op.peakAdd) side.peak = Math.max(side.peak, hbmCellCount(side.hbm));
+        } else if (op.kind === 'rw') {
+            side.read += op.readCells;
+            side.write += op.writeCells;
+            op.write.forEach(t => side.hbm.add(t));
+            if (op.sramSet) side.sram = new Set(op.sramSet);
+            side.compute = `R:${op.read.join(',')} → W:${op.write.join(',')}`;
+            if (op.peakAdd) side.peak = Math.max(side.peak, hbmCellCount(side.hbm));
+        }
+        // Flash ops
+        else if (op.kind === 'fa-outer') {
+            side.read += op.cells;
+            side.sram = new Set(op.sram);
+            side.j = op.j;
+            side.compute = `loaded K${op.j+1}, V${op.j+1}`;
+        } else if (op.kind === 'fa-inner-load') {
+            side.read += op.cells;
+            // keep K_j, V_j in SRAM, add Q_i, O_i, m_i, l_i
+            side.sram = new Set([...side.sram, ...op.sram]);
+            side.i = op.i;
+            side.compute = `loaded Q${op.i+1}, O${op.i+1}, m${op.i+1}, ℓ${op.i+1}`;
+        } else if (op.kind === 'fa-compute-s') {
+            side.compute = `S${op.i+1}${op.j+1} = Q${op.i+1}·K${op.j+1}ᵀ/√d (SRAM only)`;
+        } else if (op.kind === 'fa-update') {
+            side.compute = `online softmax: m←max, ℓ rescaled, O += P̃·V${op.j+1}`;
+        } else if (op.kind === 'fa-writeback') {
+            side.write += op.cells;
+            // O, m, l were already in HBM since init; updating in-place doesn't change peak
+            side.peak = Math.max(side.peak, hbmCellCount(side.hbm));
+            side.compute = `wrote O${op.i+1}, m${op.i+1}, ℓ${op.i+1} back to HBM`;
+        } else if (op.kind === 'fa-finalize') {
+            side.compute = 'O ← O / ℓ — done';
+        }
+    }
+
+    function hbmCellCount(set) {
+        const N = state.N, d = state.d;
+        let total = 0;
+        for (const t of set) {
+            if (t === 'Q' || t === 'K' || t === 'V' || t === 'O') total += N * d;
+            else if (t === 'S' || t === 'P')                       total += N * N;
+            else if (t === 'm' || t === 'l')                       total += N;
+        }
+        return total;
+    }
+
+    function rebuildAll() {
+        frames = buildFrames();
+        // reset to initial frame and re-apply
+        std.read = 0; std.write = 0; std.peak = 0; std.hbm = new Set(); std.sram = new Set(); std.compute=''; std.narration='';
+        fa.read = 0;  fa.write = 0;  fa.peak = 0;  fa.hbm = new Set();  fa.sram = new Set();  fa.compute='';  fa.narration='';
+        state.stepIdx = 0;
+        applyFrame(0);
+        render();
+    }
+
+    function applyFrame(idx) {
+        const fr = frames[idx];
+        applyOp(std, fr.std_op);
+        applyOp(fa,  fr.fa_op);
+        std.narration = fr.std_n;
+        fa.narration  = fr.fa_n;
+    }
+
+    function gotoFrame(target) {
+        // Replay from 0
+        std.read = 0; std.write = 0; std.peak = 0; std.hbm = new Set(); std.sram = new Set(); std.compute=''; std.narration='';
+        fa.read = 0;  fa.write = 0;  fa.peak = 0;  fa.hbm = new Set();  fa.sram = new Set();  fa.compute='';  fa.narration='';
+        for (let k = 0; k <= target; k++) applyOp(std, frames[k].std_op),
+                                          applyOp(fa,  frames[k].fa_op);
+        std.narration = frames[target].std_n;
+        fa.narration  = frames[target].fa_n;
+        state.stepIdx = target;
+        render();
+    }
+
+    // ============================================================
+    //  Rendering
+    // ============================================================
+    function makeMatrix(label, rows, cols, opts={}) {
+        const wrap = document.createElement('div');
+        wrap.className = 'matrix-wrapper';
+        const tag = document.createElement('span');
+        tag.className = 'label-tag stage-pill ' + (opts.pill || 'pill-q');
+        tag.textContent = label;
+        wrap.appendChild(tag);
+        const grid = document.createElement('div');
+        grid.className = 'matrix-grid';
+        const cellPx = opts.cellPx || 14;
+        grid.style.gridTemplateColumns = `repeat(${cols}, ${cellPx}px)`;
+        grid.style.gridTemplateRows    = `repeat(${rows}, ${cellPx}px)`;
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const cell = document.createElement('div');
+                cell.className = 'cell';
+                cell.style.background = opts.color || '#fff';
+                cell.style.height = `${cellPx}px`;
+                if (opts.activeRow != null && r === opts.activeRow) cell.style.outline = '1px solid #3b82f6';
+                if (opts.activeBlockRows && opts.activeBlockRows.includes(r)) cell.style.background = opts.activeColor || cell.style.background;
+                if (opts.activeBlockCols && opts.activeBlockCols.includes(c)) cell.style.borderColor = '#f43f5e';
+                grid.appendChild(cell);
+            }
+        }
+        if (opts.outline === 'flash') wrap.classList.add('active-block-flash');
+        if (opts.outline === 'std')   wrap.classList.add('active-block');
+        wrap.appendChild(grid);
+        const dim = document.createElement('span');
+        dim.className = 'text-[9px] font-mono text-slate-400';
+        dim.textContent = `(${rows}×${cols})`;
+        wrap.appendChild(dim);
+        return wrap;
+    }
+
+    const colorFor = {
+        Q:'#dbeafe', K:'#d1fae5', V:'#ede9fe', O:'#ffe4e6',
+        S:'#fef3c7', P:'#fef9c3', m:'#e2e8f0', l:'#e2e8f0',
+    };
+    const pillFor = {
+        Q:'pill-q', K:'pill-k', V:'pill-v', O:'pill-o',
+        S:'pill-s', P:'pill-p', m:'pill-ml', l:'pill-ml',
+    };
+
+    function renderHBM(containerId, side, isFlash) {
+        const el = document.getElementById(containerId);
+        el.innerHTML = '';
+        const N = state.N, d = state.d;
+        // canonical render order
+        const order = ['Q','K','V','S','P','O','m','l'];
+        for (const t of order) {
+            if (!side.hbm.has(t)) continue;
+            let rows, cols, label = t;
+            if (t === 'Q' || t === 'K' || t === 'V' || t === 'O') { rows = N; cols = d; }
+            else if (t === 'S' || t === 'P')                       { rows = N; cols = N; label = t + ` (N×N!)`; }
+            else if (t === 'm' || t === 'l')                       { rows = N; cols = 1; label = t === 'm' ? 'm (running max)' : 'ℓ (running sum)'; }
+            const wrap = makeMatrix(label, rows, cols, { color: colorFor[t], pill: pillFor[t], cellPx: (t==='S'||t==='P') ? 10 : 12 });
+            // highlight S/P as the bottleneck
+            if (t === 'S' || t === 'P') {
+                wrap.style.boxShadow = '0 0 0 3px rgba(245,158,11,.45)';
+                const note = document.createElement('span');
+                note.className = 'text-[9px] font-bold text-amber-700';
+                note.textContent = `${rows*cols} cells in HBM`;
+                wrap.appendChild(note);
+            }
+            el.appendChild(wrap);
+        }
+    }
+
+    function renderSRAM(containerId, side) {
+        const el = document.getElementById(containerId);
+        el.innerHTML = '';
+        if (side.sram.size === 0) {
+            el.innerHTML = '<span class="text-xs text-slate-400 italic">empty</span>';
+            return;
+        }
+        for (const t of side.sram) {
+            // Tile labels like Q1, K2, etc.
+            const base = t.replace(/[0-9]+$/, '');
+            const idx  = t.match(/[0-9]+$/);
+            let rows = state.B, cols = state.d;
+            if (base === 'm' || base === 'l') cols = 1;
+            // Standard side may put full Q/K/V/S/P/V in SRAM as logical view
+            if (!idx) {
+                if (base === 'Q' || base === 'K' || base === 'V' || base === 'O') { rows = state.N; cols = state.d; }
+                else if (base === 'S' || base === 'P')                            { rows = state.N; cols = state.N; }
+            }
+            const label = idx ? `${base}_${idx[0]}` : base;
+            const wrap = makeMatrix(label, rows, cols, { color: colorFor[base] || '#fff', pill: pillFor[base] || 'pill-q', cellPx: 10 });
+            wrap.classList.add('pulse-read');
+            el.appendChild(wrap);
+        }
+    }
+
+    function renderCompute(containerId, side) {
+        const el = document.getElementById(containerId);
+        el.innerHTML = side.compute || '<span class="text-slate-400 italic">idle</span>';
+    }
+
+    function renderCounters() {
+        const N = state.N, d = state.d;
+        // a "scale" max so bars are comparable: 4*N^2 covers worst case for both
+        const scale = 4 * N * N;
+        const set = (id, val) => document.getElementById(id).textContent = val;
+        const setBar = (id, val) => document.getElementById(id).style.width = Math.min(100, (val/scale)*100) + '%';
+        set('std-read', std.read); set('std-write', std.write); set('std-hbm-peak', std.peak);
+        set('fa-read',  fa.read);  set('fa-write',  fa.write);  set('fa-hbm-peak', fa.peak);
+        setBar('std-read-bar', std.read);   setBar('std-write-bar', std.write);
+        setBar('fa-read-bar',  fa.read);    setBar('fa-write-bar',  fa.write);
+
+        const stdIO = std.read + std.write, faIO = fa.read + fa.write;
+        set('sum-std-io', stdIO); set('sum-fa-io', faIO);
+        set('sum-std-peak', std.peak); set('sum-fa-peak', fa.peak);
+        document.getElementById('sum-io-ratio').textContent =
+            (faIO === 0 ? '—' : (stdIO/Math.max(1,faIO)).toFixed(2) + '×');
+        document.getElementById('sum-peak-ratio').textContent =
+            (fa.peak === 0 ? '—' : (std.peak/Math.max(1,fa.peak)).toFixed(2) + '×');
+    }
+
+    function render() {
+        const fr = frames[state.stepIdx];
+        document.getElementById('phase-label').textContent = fr.phase;
+        document.getElementById('narration').innerHTML =
+            `<div class="grid md:grid-cols-2 gap-3"><div><span class="font-bold text-amber-700">Standard:</span> ${std.narration}</div>` +
+            `<div><span class="font-bold text-rose-700">Flash:</span> ${fa.narration}</div></div>`;
+        renderHBM('std-hbm', std, false);
+        renderHBM('fa-hbm',  fa,  true);
+        renderSRAM('std-sram', std);
+        renderSRAM('fa-sram',  fa);
+        renderCompute('std-compute', std);
+        renderCompute('fa-compute',  fa);
+        renderCounters();
+    }
+
+    // ============================================================
+    //  Controls
+    // ============================================================
+    function stepForward() {
+        if (state.stepIdx >= frames.length - 1) { stopPlay(); return; }
+        state.stepIdx += 1;
+        applyFrame(state.stepIdx);
+        render();
+    }
+    function stepBack() {
+        if (state.stepIdx === 0) return;
+        gotoFrame(state.stepIdx - 1);
+    }
+    function reset() { stopPlay(); rebuildAll(); }
+    function startPlay() {
+        if (state.playing) return;
+        state.playing = true;
+        document.getElementById('play-btn').textContent = '⏸ Pause';
+        state.playTimer = setInterval(stepForward, state.speed);
+    }
+    function stopPlay() {
+        state.playing = false;
+        document.getElementById('play-btn').textContent = 'Play ▶▶';
+        if (state.playTimer) { clearInterval(state.playTimer); state.playTimer = null; }
+    }
+    function togglePlay() { state.playing ? stopPlay() : startPlay(); }
+
+    document.getElementById('reset-btn').addEventListener('click', reset);
+    document.getElementById('back-btn').addEventListener('click', stepBack);
+    document.getElementById('step-btn').addEventListener('click', stepForward);
+    document.getElementById('play-btn').addEventListener('click', togglePlay);
+    document.getElementById('speed').addEventListener('input', (e) => {
+        state.speed = parseInt(e.target.value);
+        if (state.playing) { stopPlay(); startPlay(); }
+    });
+    document.getElementById('N-select').addEventListener('change', (e) => {
+        state.N = parseInt(e.target.value);
+        if (state.B > state.N) state.B = state.N;
+        rebuildAll();
+    });
+    document.getElementById('B-select').addEventListener('change', (e) => {
+        state.B = parseInt(e.target.value);
+        rebuildAll();
+    });
+
+    // Boot
+    rebuildAll();
+    </script>
+</body>
+</html>
