@@ -1,0 +1,1238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mixture of Experts (MoE) Routing Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, { delimiters: [{left: '$$', right: '$$', display: true}, {left: '$', right: '$', display: false}] });"></script>
+    <style>
+        body {
+            font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(99, 102, 241, 0.10), transparent 30%),
+                radial-gradient(circle at top right, rgba(16, 185, 129, 0.08), transparent 28%),
+                linear-gradient(180deg, #f8fbfd 0%, #eef4f8 100%);
+            color: #0f172a;
+            min-height: 100vh;
+        }
+        .panel {
+            background: #ffffff;
+            border: 1px solid #e2e8f0;
+            border-radius: 1rem;
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+        }
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.25rem 0.65rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .pill-blue   { background: #e0f2fe; color: #0369a1; }
+        .pill-green  { background: #d1fae5; color: #047857; }
+        .pill-amber  { background: #fef3c7; color: #b45309; }
+        .pill-violet { background: #ede9fe; color: #6d28d9; }
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.4rem;
+            padding: 0.55rem 1rem;
+            border-radius: 0.6rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            transition: all 0.15s ease;
+            cursor: pointer;
+            user-select: none;
+            border: 1px solid transparent;
+        }
+        .btn-primary { background: #4f46e5; color: white; }
+        .btn-primary:hover { background: #4338ca; }
+        .btn-ghost {
+            background: white;
+            color: #334155;
+            border-color: #cbd5e1;
+        }
+        .btn-ghost:hover { background: #f1f5f9; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 4px;
+            background: #cbd5e1;
+            border-radius: 999px;
+            outline: none;
+        }
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #4f46e5;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+        input[type="range"]::-moz-range-thumb {
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            background: #4f46e5;
+            border: 2px solid white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            cursor: pointer;
+        }
+
+        .vec-cell {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 2.4rem;
+            height: 2rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, "Cascadia Mono", monospace;
+            font-size: 0.78rem;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            color: #334155;
+        }
+        .vec-cell:first-child { border-top-left-radius: 0.4rem; border-bottom-left-radius: 0.4rem; }
+        .vec-cell:last-child { border-top-right-radius: 0.4rem; border-bottom-right-radius: 0.4rem; }
+        .vec-cell + .vec-cell { border-left: 0; }
+
+        .bar-row {
+            display: grid;
+            grid-template-columns: 5.5rem 1fr 4rem;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.25rem 0;
+        }
+        .bar-track {
+            height: 0.85rem;
+            background: #f1f5f9;
+            border-radius: 999px;
+            overflow: hidden;
+            position: relative;
+        }
+        .bar-fill {
+            height: 100%;
+            border-radius: 999px;
+            transition: width 0.5s ease, background 0.2s ease;
+        }
+        .bar-fill.dim { opacity: 0.25; }
+
+        .expert-box {
+            border: 2px solid #e2e8f0;
+            border-radius: 0.75rem;
+            padding: 0.75rem;
+            background: white;
+            transition: all 0.3s ease;
+        }
+        .expert-box.active {
+            border-width: 2px;
+            box-shadow: 0 0 0 4px rgba(79, 70, 229, 0.15);
+            transform: translateY(-1px);
+        }
+        .expert-box.dropped {
+            background: #fef2f2;
+            border-color: #fecaca;
+        }
+        .util-track {
+            height: 0.55rem;
+            background: #f1f5f9;
+            border-radius: 999px;
+            overflow: hidden;
+            margin-top: 0.4rem;
+        }
+        .util-fill {
+            height: 100%;
+            transition: width 0.25s ease;
+        }
+        .capacity-marker {
+            position: absolute;
+            top: -3px;
+            bottom: -3px;
+            width: 2px;
+            background: #ef4444;
+            opacity: 0.85;
+        }
+
+        .token-tile {
+            width: 2.6rem;
+            height: 2.2rem;
+            border-radius: 0.5rem;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.78rem;
+            font-weight: 600;
+            background: #1e293b;
+            color: #f8fafc;
+            box-shadow: 0 4px 8px rgba(15, 23, 42, 0.18);
+            border: 2px solid #1e293b;
+            flex-shrink: 0;
+            transition: opacity 0.3s ease, transform 0.3s ease;
+        }
+        .token-tile.faded { opacity: 0.25; }
+
+        .step-pip {
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 50%;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+            background: #e2e8f0;
+            color: #475569;
+            transition: all 0.2s ease;
+        }
+        .step-pip.active { background: #4f46e5; color: white; }
+        .step-pip.done   { background: #10b981; color: white; }
+
+        .arrow {
+            stroke-dasharray: 1000;
+            stroke-dashoffset: 1000;
+            animation: dash 0.6s ease forwards;
+        }
+        @keyframes dash {
+            to { stroke-dashoffset: 0; }
+        }
+
+        @keyframes flyIn {
+            from { transform: translate(-30px, 0); opacity: 0; }
+            to   { transform: translate(0, 0); opacity: 1; }
+        }
+        .fly-in { animation: flyIn 0.35s ease forwards; }
+
+        .scroll-x {
+            overflow-x: auto;
+            scrollbar-width: thin;
+        }
+
+        .formula {
+            background: #0f172a;
+            color: #e2e8f0;
+            border-radius: 0.6rem;
+            padding: 0.85rem 1rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.85rem;
+            line-height: 1.5;
+        }
+        .formula .k { color: #fbbf24; }
+        .formula .v { color: #34d399; }
+
+        @media (max-width: 640px) {
+            .vec-cell { min-width: 1.9rem; height: 1.7rem; font-size: 0.7rem; }
+            .bar-row { grid-template-columns: 4.4rem 1fr 3rem; }
+            .token-tile { width: 2.2rem; height: 2rem; font-size: 0.7rem; }
+        }
+    </style>
+</head>
+<body class="text-slate-800">
+
+    <header class="max-w-6xl mx-auto px-4 pt-10 pb-6">
+        <div class="flex items-center gap-2 text-xs text-slate-500 font-semibold uppercase tracking-wider mb-3">
+            <a href="../../index.html" class="hover:text-indigo-600">Catalog</a>
+            <span>›</span>
+            <span>NLP &amp; Language Models</span>
+            <span>›</span>
+            <span class="text-slate-700">Mixture of Experts</span>
+        </div>
+        <h1 class="text-3xl md:text-4xl font-bold tracking-tight text-slate-900">
+            Mixture of Experts (MoE) Routing Visualizer
+        </h1>
+        <p class="mt-3 text-slate-600 max-w-3xl">
+            Modern LLMs like Mixtral and DeepSeek-V3 replace the dense feed-forward block with a <strong>router</strong>
+            that sends each token to only $K$ of $N$ experts. Watch a single token get routed step by step, then stream a
+            batch through and see what happens when one expert hogs the traffic.
+        </p>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 pb-20 space-y-8">
+
+        <!-- ============================================================ -->
+        <!-- SECTION 1 — Dense FFN vs MoE -->
+        <!-- ============================================================ -->
+        <section class="panel p-6 md:p-8">
+            <span class="pill pill-blue">Section 1 · Why MoE</span>
+            <h2 class="mt-3 text-2xl font-bold text-slate-900">From a dense FFN to a sparse mixture</h2>
+            <p class="mt-2 text-slate-600 max-w-3xl">
+                A transformer's feed-forward block is the dominant compute cost per token. MoE keeps the same
+                <em>per-token</em> work small by activating only $K$ experts, while letting the model's total parameter
+                count grow with $N$. The router is a tiny linear layer; the experts are full-size FFNs.
+            </p>
+
+            <div class="grid md:grid-cols-2 gap-6 mt-6">
+                <!-- Dense block -->
+                <div class="border border-slate-200 rounded-xl p-5 bg-slate-50/60">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Dense FFN</div>
+                    <div class="flex flex-col items-center gap-2">
+                        <div class="text-sm text-slate-600 font-medium">token $x$</div>
+                        <div class="w-2 h-4 bg-slate-300"></div>
+                        <div class="w-full max-w-xs px-4 py-6 rounded-lg bg-indigo-100 border-2 border-indigo-300 text-center">
+                            <div class="font-bold text-indigo-800">FFN</div>
+                            <div class="text-xs text-indigo-700 mt-1">$h_{ff}$ hidden, $\approx 2 d \cdot h_{ff}$ params</div>
+                        </div>
+                        <div class="w-2 h-4 bg-slate-300"></div>
+                        <div class="text-sm text-slate-600 font-medium">output $y$</div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-500 leading-relaxed">
+                        Every token passes through the same FFN. <strong>Activated params = total params.</strong>
+                    </div>
+                </div>
+
+                <!-- MoE block -->
+                <div class="border border-slate-200 rounded-xl p-5 bg-slate-50/60">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">MoE Layer</div>
+                    <div class="flex flex-col items-center gap-2">
+                        <div class="text-sm text-slate-600 font-medium">token $x$</div>
+                        <div class="w-2 h-4 bg-slate-300"></div>
+                        <div class="w-44 px-4 py-3 rounded-lg bg-amber-100 border-2 border-amber-300 text-center">
+                            <div class="font-bold text-amber-800">Router</div>
+                            <div class="text-xs text-amber-700 mt-1">$W_r \in \mathbb{R}^{N\times d}$, top-$K$</div>
+                        </div>
+                        <svg viewBox="0 0 240 36" class="w-full max-w-xs" aria-hidden="true">
+                            <line x1="120" y1="2" x2="40"  y2="34" stroke="#94a3b8" stroke-width="1.5" />
+                            <line x1="120" y1="2" x2="93"  y2="34" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,3" />
+                            <line x1="120" y1="2" x2="147" y2="34" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="3,3" />
+                            <line x1="120" y1="2" x2="200" y2="34" stroke="#94a3b8" stroke-width="1.5" />
+                        </svg>
+                        <div class="grid grid-cols-4 gap-2 w-full">
+                            <div class="px-2 py-3 rounded-md bg-indigo-200 border border-indigo-300 text-center text-xs font-semibold text-indigo-900">$E_1$</div>
+                            <div class="px-2 py-3 rounded-md bg-slate-100 border border-slate-200 text-center text-xs font-semibold text-slate-400">$E_2$</div>
+                            <div class="px-2 py-3 rounded-md bg-slate-100 border border-slate-200 text-center text-xs font-semibold text-slate-400">$E_3$</div>
+                            <div class="px-2 py-3 rounded-md bg-emerald-200 border border-emerald-300 text-center text-xs font-semibold text-emerald-900">$E_4$</div>
+                        </div>
+                        <div class="text-xs text-slate-500 mt-1">solid edge = chosen by top-$K$</div>
+                        <div class="w-2 h-4 bg-slate-300 mt-1"></div>
+                        <div class="text-sm text-slate-600 font-medium">$y = \sum_{i \in \text{top-}K} w_i \cdot E_i(x)$</div>
+                    </div>
+                    <div class="mt-4 text-xs text-slate-500 leading-relaxed">
+                        Each token activates only $K$ experts. <strong>Activated params $\approx \tfrac{K}{N} \cdot$ total params.</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Live FLOP / param calculator -->
+            <div class="mt-6 p-5 rounded-xl border border-slate-200 bg-white">
+                <div class="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+                    <div class="flex-1">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Compute calculator</div>
+                        <div class="text-sm text-slate-600">
+                            Compare an MoE layer to its dense baseline at the same per-expert hidden size.
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mt-5">
+                    <label class="text-sm">
+                        <div class="flex justify-between mb-1"><span class="font-medium text-slate-700">Experts $N$</span><span id="calc-N-val" class="font-mono text-indigo-600 font-bold">8</span></div>
+                        <input type="range" id="calc-N" min="2" max="32" step="1" value="8">
+                    </label>
+                    <label class="text-sm">
+                        <div class="flex justify-between mb-1"><span class="font-medium text-slate-700">Top-$K$</span><span id="calc-K-val" class="font-mono text-indigo-600 font-bold">2</span></div>
+                        <input type="range" id="calc-K" min="1" max="8" step="1" value="2">
+                    </label>
+                    <label class="text-sm">
+                        <div class="flex justify-between mb-1"><span class="font-medium text-slate-700">Model dim $d$</span><span id="calc-d-val" class="font-mono text-indigo-600 font-bold">4096</span></div>
+                        <input type="range" id="calc-d" min="512" max="8192" step="256" value="4096">
+                    </label>
+                    <label class="text-sm">
+                        <div class="flex justify-between mb-1"><span class="font-medium text-slate-700">Hidden $h_{ff}$</span><span id="calc-h-val" class="font-mono text-indigo-600 font-bold">14336</span></div>
+                        <input type="range" id="calc-h" min="1024" max="32768" step="512" value="14336">
+                    </label>
+                </div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3 mt-5 text-sm">
+                    <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider">Dense FFN total params</div>
+                        <div id="calc-dense" class="mt-1 font-mono text-base font-semibold text-slate-900">—</div>
+                    </div>
+                    <div class="p-3 rounded-lg bg-slate-50 border border-slate-200">
+                        <div class="text-xs text-slate-500 uppercase tracking-wider">MoE total params</div>
+                        <div id="calc-moe-total" class="mt-1 font-mono text-base font-semibold text-slate-900">—</div>
+                    </div>
+                    <div class="p-3 rounded-lg bg-emerald-50 border border-emerald-200">
+                        <div class="text-xs text-emerald-700 uppercase tracking-wider">Activated per token</div>
+                        <div id="calc-moe-active" class="mt-1 font-mono text-base font-semibold text-emerald-900">—</div>
+                        <div id="calc-savings" class="mt-1 text-xs text-emerald-700">—</div>
+                    </div>
+                </div>
+                <p class="mt-3 text-xs text-slate-500">
+                    Mixtral 8&times;7B uses $N=8, K=2$: ~47B total params but only ~13B activated per token.
+                    Param counts here use the SwiGLU-style estimate $3 \cdot d \cdot h_{ff}$ per FFN.
+                </p>
+            </div>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- SECTION 2 — Single-token routing step-through -->
+        <!-- ============================================================ -->
+        <section class="panel p-6 md:p-8">
+            <span class="pill pill-violet">Section 2 · The router, one token at a time</span>
+            <h2 class="mt-3 text-2xl font-bold text-slate-900">How the router decides</h2>
+            <p class="mt-2 text-slate-600 max-w-3xl">
+                The router is a single linear layer $W_r \in \mathbb{R}^{N \times d}$. For a token $x$ it produces
+                $N$ logits, softmaxes them, picks the top-$K$, and <em>renormalizes the kept weights so they sum to 1</em>.
+                Step through it below.
+            </p>
+
+            <!-- Controls -->
+            <div class="mt-5 flex flex-wrap items-center gap-3">
+                <div class="flex items-center gap-2 panel px-3 py-2 shadow-none border-slate-200">
+                    <button id="step-prev" class="btn btn-ghost px-2 py-1 text-xs">◀ Prev</button>
+                    <div class="text-xs font-semibold text-slate-600">Step <span id="step-num">0</span> / 5</div>
+                    <button id="step-next" class="btn btn-ghost px-2 py-1 text-xs">Next ▶</button>
+                    <button id="step-auto" class="btn btn-primary px-2 py-1 text-xs">▶ Auto</button>
+                </div>
+                <button id="new-token" class="btn btn-ghost text-xs">↻ Sample new token</button>
+                <label class="flex items-center gap-2 text-xs text-slate-700">
+                    <span class="font-medium">$N$</span>
+                    <input type="range" id="route-N" min="3" max="8" step="1" value="6" class="w-28">
+                    <span id="route-N-val" class="font-mono text-indigo-600 font-bold w-4">6</span>
+                </label>
+                <label class="flex items-center gap-2 text-xs text-slate-700">
+                    <span class="font-medium">$K$</span>
+                    <input type="range" id="route-K" min="1" max="4" step="1" value="2" class="w-24">
+                    <span id="route-K-val" class="font-mono text-indigo-600 font-bold w-4">2</span>
+                </label>
+            </div>
+
+            <!-- Step pips -->
+            <div class="mt-4 flex items-center gap-2 text-xs text-slate-600 flex-wrap">
+                <span class="step-pip" data-step="0">0</span><span class="hidden sm:inline">input</span>
+                <span class="text-slate-300">→</span>
+                <span class="step-pip" data-step="1">1</span><span class="hidden sm:inline">$W_r x$</span>
+                <span class="text-slate-300">→</span>
+                <span class="step-pip" data-step="2">2</span><span class="hidden sm:inline">softmax</span>
+                <span class="text-slate-300">→</span>
+                <span class="step-pip" data-step="3">3</span><span class="hidden sm:inline">top-$K$</span>
+                <span class="text-slate-300">→</span>
+                <span class="step-pip" data-step="4">4</span><span class="hidden sm:inline">renormalize</span>
+                <span class="text-slate-300">→</span>
+                <span class="step-pip" data-step="5">5</span><span class="hidden sm:inline">weighted sum</span>
+            </div>
+
+            <div class="grid md:grid-cols-5 gap-6 mt-6">
+                <!-- Left: token + router box -->
+                <div class="md:col-span-2 space-y-5">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Token vector $x$</div>
+                        <div id="token-vec" class="scroll-x flex"></div>
+                        <div id="token-id" class="mt-1 text-xs text-slate-500 font-mono">token #—</div>
+                    </div>
+
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Router weights $W_r$ (preview)</div>
+                        <div id="router-mat" class="grid gap-px bg-slate-200 rounded-md overflow-hidden border border-slate-200" style="grid-template-columns: repeat(8, minmax(0, 1fr)); width: max-content;"></div>
+                        <div class="mt-1 text-xs text-slate-500 font-mono">$N \times d$ shown; cell shade = magnitude</div>
+                    </div>
+
+                    <div class="formula">
+                        <div><span class="k">step</span>: <span id="step-label" class="v">input</span></div>
+                        <div class="mt-1" id="step-explain">A new token vector is sampled. It is the input to the router.</div>
+                    </div>
+                </div>
+
+                <!-- Right: bars + experts -->
+                <div class="md:col-span-3">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">
+                        <span id="bars-title">Logits / probabilities / weights</span>
+                    </div>
+                    <div id="route-bars" class="space-y-1"></div>
+
+                    <div class="mt-6">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Experts</div>
+                        <div id="route-experts" class="grid gap-2" style="grid-template-columns: repeat(auto-fit, minmax(7rem, 1fr));"></div>
+                    </div>
+
+                    <div class="mt-6 p-4 rounded-lg bg-slate-50 border border-slate-200 text-sm">
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1">Output</div>
+                        <div id="route-output" class="font-mono text-slate-700 text-sm leading-relaxed">$y = $ — (advance to step 5)</div>
+                    </div>
+                </div>
+            </div>
+
+            <details class="mt-6">
+                <summary class="cursor-pointer text-sm font-semibold text-indigo-700 hover:text-indigo-800">Why renormalize?</summary>
+                <p class="mt-2 text-sm text-slate-600 max-w-3xl leading-relaxed">
+                    After top-$K$ selection, the kept softmax probabilities no longer sum to 1. If we used them directly,
+                    the router would also be implicitly down-weighting <em>every</em> expert output. Renormalizing means
+                    "given the experts I picked, here is the relative confidence between them" — and gives the layer the
+                    same output magnitude as a dense FFN at initialization. Mixtral and Switch Transformer both renormalize.
+                </p>
+            </details>
+        </section>
+
+        <!-- ============================================================ -->
+        <!-- SECTION 3 — Batch routing + load balance -->
+        <!-- ============================================================ -->
+        <section class="panel p-6 md:p-8">
+            <span class="pill pill-amber">Section 3 · Batch routing &amp; load balance</span>
+            <h2 class="mt-3 text-2xl font-bold text-slate-900">Why load balancing matters</h2>
+            <p class="mt-2 text-slate-600 max-w-3xl">
+                Stream a batch of tokens through the router and watch the per-expert load fill up. A trained router
+                spreads tokens evenly. An untrained or collapsed router sends almost everything to one expert — so
+                you pay for $N$ experts but get the throughput of one. With a finite <strong>capacity factor</strong>,
+                tokens that overflow their expert are dropped.
+            </p>
+
+            <!-- Controls -->
+            <div class="mt-5 flex flex-wrap items-center gap-3">
+                <button id="batch-run" class="btn btn-primary text-xs">▶ Run batch</button>
+                <button id="batch-reset" class="btn btn-ghost text-xs">↻ Reset</button>
+                <label class="flex items-center gap-2 text-xs text-slate-700">
+                    <span class="font-medium">Tokens</span>
+                    <input type="range" id="batch-T" min="8" max="48" step="4" value="24" class="w-28">
+                    <span id="batch-T-val" class="font-mono text-indigo-600 font-bold w-6">24</span>
+                </label>
+                <label class="flex items-center gap-2 text-xs text-slate-700">
+                    <span class="font-medium">$N$</span>
+                    <input type="range" id="batch-N" min="3" max="8" step="1" value="6" class="w-24">
+                    <span id="batch-N-val" class="font-mono text-indigo-600 font-bold w-4">6</span>
+                </label>
+                <label class="flex items-center gap-2 text-xs text-slate-700">
+                    <span class="font-medium">$K$</span>
+                    <input type="range" id="batch-K" min="1" max="3" step="1" value="2" class="w-20">
+                    <span id="batch-K-val" class="font-mono text-indigo-600 font-bold w-4">2</span>
+                </label>
+                <label class="flex items-center gap-2 text-xs text-slate-700">
+                    <span class="font-medium">Capacity factor</span>
+                    <input type="range" id="batch-C" min="100" max="300" step="10" value="125" class="w-28">
+                    <span id="batch-C-val" class="font-mono text-indigo-600 font-bold w-10">1.25</span>
+                </label>
+            </div>
+
+            <div class="mt-4 flex flex-wrap items-center gap-2">
+                <span class="text-xs font-semibold text-slate-600 mr-1">Router mode:</span>
+                <button class="btn btn-ghost text-xs mode-btn" data-mode="balanced">Balanced (trained)</button>
+                <button class="btn btn-ghost text-xs mode-btn" data-mode="biased">Biased</button>
+                <button class="btn btn-ghost text-xs mode-btn" data-mode="collapsed">Collapsed</button>
+            </div>
+
+            <div class="grid lg:grid-cols-5 gap-6 mt-6">
+                <!-- Animation stage -->
+                <div class="lg:col-span-3">
+                    <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Routing stream</div>
+                    <div class="relative border border-slate-200 rounded-xl bg-slate-50 overflow-hidden" style="min-height: 320px;">
+                        <svg id="batch-svg" viewBox="0 0 600 320" preserveAspectRatio="xMidYMid meet" class="w-full h-auto block"></svg>
+                    </div>
+                    <div class="mt-2 text-xs text-slate-500">
+                        Each token is routed to its top-$K$ experts. Lines fade in as routing decisions are made.
+                    </div>
+                </div>
+
+                <!-- Load histogram -->
+                <div class="lg:col-span-2 space-y-4">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Per-expert load</div>
+                        <div id="batch-loads" class="space-y-2"></div>
+                        <div class="mt-2 text-[11px] text-slate-500 flex items-center gap-2">
+                            <span class="inline-block w-2 h-2 rounded-full bg-red-500"></span>
+                            <span>red marker = capacity = ⌈capacity_factor × T·K / N⌉</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 text-center">
+                        <div class="p-2 rounded-md bg-slate-50 border border-slate-200">
+                            <div class="text-[10px] uppercase tracking-wider text-slate-500">Routed</div>
+                            <div id="stat-routed" class="text-base font-bold text-slate-900">0</div>
+                        </div>
+                        <div class="p-2 rounded-md bg-rose-50 border border-rose-200">
+                            <div class="text-[10px] uppercase tracking-wider text-rose-600">Dropped</div>
+                            <div id="stat-dropped" class="text-base font-bold text-rose-700">0</div>
+                        </div>
+                        <div class="p-2 rounded-md bg-indigo-50 border border-indigo-200">
+                            <div class="text-[10px] uppercase tracking-wider text-indigo-600">Imbalance</div>
+                            <div id="stat-imb" class="text-base font-bold text-indigo-700">0.00</div>
+                        </div>
+                    </div>
+
+                    <div class="p-3 rounded-lg bg-slate-50 border border-slate-200 text-xs text-slate-600 leading-relaxed">
+                        <strong>Imbalance</strong> = coefficient of variation (std / mean) of the router's
+                        <em>pre-capacity</em> routing decisions. 0 is perfect. Computing it before capacity matters
+                        because capping by capacity hides the bias — the Switch Transformer aux loss penalizes the
+                        pre-capacity distribution directly.
+                    </div>
+                </div>
+            </div>
+
+            <details class="mt-6">
+                <summary class="cursor-pointer text-sm font-semibold text-indigo-700 hover:text-indigo-800">Try this</summary>
+                <ul class="mt-2 text-sm text-slate-600 list-disc pl-6 space-y-1">
+                    <li>Switch to <em>Collapsed</em>: one expert eats almost every token; capacity is hit fast and the rest are dropped.</li>
+                    <li>Switch to <em>Biased</em>: a single expert is over-preferred but others still see traffic.</li>
+                    <li>Lower the <em>capacity factor</em>: even a balanced router drops a few tokens because of variance — the cost of guaranteed throughput.</li>
+                    <li>Raise $K$ from 1→2: redundant routing absorbs imbalance at the cost of more compute per token.</li>
+                </ul>
+            </details>
+        </section>
+
+        <footer class="text-xs text-slate-500 text-center pt-6 pb-2">
+            All routing math runs live in your browser — softmax, top-$K$, renormalization, and capacity are computed
+            from a deterministic seeded random router for reproducibility.
+        </footer>
+    </main>
+
+    <script>
+        // ============================================================
+        // Utilities
+        // ============================================================
+
+        // Mulberry32 PRNG — deterministic, seeded
+        function makeRNG(seed) {
+            let s = seed >>> 0;
+            return function () {
+                s = (s + 0x6D2B79F5) >>> 0;
+                let t = s;
+                t = Math.imul(t ^ (t >>> 15), t | 1);
+                t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+                return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+        function gauss(rng) {
+            // Box-Muller
+            let u = 1 - rng(), v = rng();
+            return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+        }
+        function matVec(W, x) {
+            // W: N x d, x: d → returns N
+            const N = W.length, d = x.length;
+            const out = new Array(N).fill(0);
+            for (let i = 0; i < N; i++) {
+                let s = 0;
+                for (let j = 0; j < d; j++) s += W[i][j] * x[j];
+                out[i] = s;
+            }
+            return out;
+        }
+        function softmax(z) {
+            const m = Math.max(...z);
+            const e = z.map(v => Math.exp(v - m));
+            const s = e.reduce((a, b) => a + b, 0);
+            return e.map(v => v / s);
+        }
+        function topKIndices(arr, K) {
+            return arr
+                .map((v, i) => [v, i])
+                .sort((a, b) => b[0] - a[0])
+                .slice(0, K)
+                .map(p => p[1]);
+        }
+        function fmt(n) {
+            if (Math.abs(n) >= 1e9) return (n / 1e9).toFixed(2) + 'B';
+            if (Math.abs(n) >= 1e6) return (n / 1e6).toFixed(2) + 'M';
+            if (Math.abs(n) >= 1e3) return (n / 1e3).toFixed(2) + 'K';
+            return n.toFixed(0);
+        }
+
+        // 8-color palette for experts (consistent across sections)
+        const EXPERT_COLORS = [
+            '#6366f1', // indigo
+            '#10b981', // emerald
+            '#f59e0b', // amber
+            '#ef4444', // red
+            '#0ea5e9', // sky
+            '#8b5cf6', // violet
+            '#84cc16', // lime
+            '#f97316', // orange
+        ];
+
+        // Shared model dim for live router math
+        const MODEL_D = 8;
+        const MAX_N = 8;
+
+        // Seeded random router weights, regenerated when "balanced" / "biased" / "collapsed" mode is chosen
+        function buildRouter(seed, mode, N, d) {
+            const rng = makeRNG(seed);
+            const W = [];
+            for (let i = 0; i < N; i++) {
+                const row = [];
+                for (let j = 0; j < d; j++) row.push(gauss(rng) * 0.6);
+                W.push(row);
+            }
+            const bias = new Array(N).fill(0);
+            if (mode === 'biased') {
+                // One expert is clearly preferred; others still see real traffic.
+                bias[0] = 2.0;
+                bias[1] = 0.6;
+            } else if (mode === 'collapsed') {
+                // Severe collapse: traffic concentrates on a small clique of experts (E0, E1)
+                // and the remaining experts effectively die — what aux-loss training is designed to prevent.
+                for (let j = 0; j < d; j++) W[0][j] = 1.5;
+                bias[0] = 5.5;
+                bias[1] = 4.0;
+            }
+            return { W, bias };
+        }
+
+        function routerLogits(router, x) {
+            const z = matVec(router.W, x);
+            for (let i = 0; i < z.length; i++) z[i] += router.bias[i];
+            return z;
+        }
+
+        // Sample a synthetic input token vector
+        function sampleToken(seed, d) {
+            const rng = makeRNG(seed);
+            const v = [];
+            for (let i = 0; i < d; i++) v.push(gauss(rng));
+            return v;
+        }
+
+        // ============================================================
+        // Section 1 — compute calculator
+        // ============================================================
+        const calcN = document.getElementById('calc-N');
+        const calcK = document.getElementById('calc-K');
+        const calcD = document.getElementById('calc-d');
+        const calcH = document.getElementById('calc-h');
+        const calcDense = document.getElementById('calc-dense');
+        const calcMoeTotal = document.getElementById('calc-moe-total');
+        const calcMoeActive = document.getElementById('calc-moe-active');
+        const calcSavings = document.getElementById('calc-savings');
+
+        function refreshCalc() {
+            const N = +calcN.value;
+            let K = +calcK.value;
+            if (K > N) { K = N; calcK.value = K; }
+            const d = +calcD.value;
+            const h = +calcH.value;
+
+            const ffnPerExpert = 3 * d * h; // SwiGLU has 3 weight matrices
+            const dense = ffnPerExpert;
+            const moeTotal = N * ffnPerExpert + N * d; // experts + router
+            const moeActive = K * ffnPerExpert + N * d; // K experts touched + tiny router
+
+            document.getElementById('calc-N-val').textContent = N;
+            document.getElementById('calc-K-val').textContent = K;
+            document.getElementById('calc-d-val').textContent = d;
+            document.getElementById('calc-h-val').textContent = h;
+            calcDense.textContent = fmt(dense);
+            calcMoeTotal.textContent = fmt(moeTotal);
+            calcMoeActive.textContent = fmt(moeActive);
+            const ratio = moeActive / dense;
+            calcSavings.textContent = `${ratio.toFixed(2)}× of dense FFN compute, ${(moeTotal / dense).toFixed(1)}× the params`;
+        }
+        [calcN, calcK, calcD, calcH].forEach(el => el.addEventListener('input', refreshCalc));
+        refreshCalc();
+
+        // ============================================================
+        // Section 2 — single-token routing step-through
+        // ============================================================
+        const routeNSlider = document.getElementById('route-N');
+        const routeKSlider = document.getElementById('route-K');
+        const routeNVal = document.getElementById('route-N-val');
+        const routeKVal = document.getElementById('route-K-val');
+        const stepNum = document.getElementById('step-num');
+        const stepLabel = document.getElementById('step-label');
+        const stepExplain = document.getElementById('step-explain');
+        const barsTitle = document.getElementById('bars-title');
+        const routeBars = document.getElementById('route-bars');
+        const routeExperts = document.getElementById('route-experts');
+        const routeOutput = document.getElementById('route-output');
+        const tokenVec = document.getElementById('token-vec');
+        const tokenId = document.getElementById('token-id');
+        const routerMat = document.getElementById('router-mat');
+        const stepPips = document.querySelectorAll('.step-pip');
+
+        const STEP_INFO = [
+            { label: 'input', barsTitle: 'Logits / probabilities / weights',
+              explain: 'A token vector $x$ is sampled. It is the input to the router.' },
+            { label: 'logits = W_r · x', barsTitle: 'Logits $z = W_r x$',
+              explain: 'Multiply $x$ by the router weight matrix to get $N$ raw scores. No nonlinearity yet.' },
+            { label: 'softmax(z)', barsTitle: 'Probabilities $p = \\text{softmax}(z)$',
+              explain: 'Softmax converts logits into a probability distribution over experts. They sum to 1.' },
+            { label: 'top-K mask', barsTitle: 'Top-$K$ kept (others zeroed)',
+              explain: 'Keep only the $K$ largest probabilities; the remaining experts are not invoked at all.' },
+            { label: 'renormalize', barsTitle: 'Final routing weights $w_i$ (sum to 1 over the kept $K$)',
+              explain: 'Divide the kept probabilities by their sum so the chosen weights again sum to 1.' },
+            { label: 'weighted sum', barsTitle: 'Final routing weights $w_i$',
+              explain: 'Each chosen expert produces an output; the layer output is $y = \\sum w_i \\cdot E_i(x)$.' },
+        ];
+
+        let routeState = {
+            N: 6,
+            K: 2,
+            step: 0,
+            tokenSeed: 7,
+            routerSeed: 42,
+            x: null,
+            router: null,
+            logits: null,
+            probs: null,
+            topK: null,
+            weights: null,
+            autoTimer: null,
+        };
+
+        function recomputeRouting() {
+            routeState.x = sampleToken(routeState.tokenSeed, MODEL_D);
+            routeState.router = buildRouter(routeState.routerSeed, 'balanced', routeState.N, MODEL_D);
+            routeState.logits = routerLogits(routeState.router, routeState.x);
+            routeState.probs = softmax(routeState.logits);
+            routeState.topK = topKIndices(routeState.probs, routeState.K).sort((a, b) => a - b);
+            const kept = routeState.topK.map(i => routeState.probs[i]);
+            const s = kept.reduce((a, b) => a + b, 0);
+            routeState.weights = new Array(routeState.N).fill(0);
+            routeState.topK.forEach((idx, j) => { routeState.weights[idx] = kept[j] / s; });
+        }
+
+        function renderTokenVec() {
+            tokenVec.innerHTML = '';
+            routeState.x.forEach(v => {
+                const cell = document.createElement('div');
+                cell.className = 'vec-cell';
+                cell.textContent = v.toFixed(2);
+                tokenVec.appendChild(cell);
+            });
+            tokenId.textContent = `token #${routeState.tokenSeed}  (d=${MODEL_D})`;
+        }
+
+        function renderRouterMat() {
+            routerMat.innerHTML = '';
+            routerMat.style.gridTemplateColumns = `repeat(${MODEL_D}, minmax(0, 1fr))`;
+            const flat = routeState.router.W.flat();
+            const max = Math.max(...flat.map(Math.abs));
+            for (let i = 0; i < routeState.N; i++) {
+                for (let j = 0; j < MODEL_D; j++) {
+                    const v = routeState.router.W[i][j];
+                    const intensity = Math.min(1, Math.abs(v) / (max || 1));
+                    const cell = document.createElement('div');
+                    cell.style.background = v >= 0
+                        ? `rgba(79, 70, 229, ${0.15 + 0.7 * intensity})`
+                        : `rgba(244, 63, 94, ${0.15 + 0.7 * intensity})`;
+                    cell.style.aspectRatio = '1.6 / 1';
+                    cell.style.minWidth = '1.4rem';
+                    routerMat.appendChild(cell);
+                }
+            }
+        }
+
+        function renderBars() {
+            const step = routeState.step;
+            const N = routeState.N;
+            barsTitle.innerHTML = STEP_INFO[step].barsTitle;
+            routeBars.innerHTML = '';
+
+            // Determine values + colors per step
+            let values, maxV, label;
+            if (step === 0) {
+                values = new Array(N).fill(0);
+                maxV = 1;
+                label = '—';
+            } else if (step === 1) {
+                values = routeState.logits;
+                maxV = Math.max(...values.map(Math.abs)) || 1;
+                label = 'logit';
+            } else if (step === 2) {
+                values = routeState.probs;
+                maxV = 1;
+                label = 'p';
+            } else if (step === 3) {
+                values = routeState.probs.map((p, i) => routeState.topK.includes(i) ? p : 0);
+                maxV = Math.max(...routeState.probs);
+                label = 'p';
+            } else { // step 4 or 5
+                values = routeState.weights;
+                maxV = 1;
+                label = 'w';
+            }
+
+            for (let i = 0; i < N; i++) {
+                const row = document.createElement('div');
+                row.className = 'bar-row';
+                const isKept = routeState.topK.includes(i);
+                const dim = (step === 3 || step >= 4) && !isKept;
+
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'text-xs font-mono text-slate-700';
+                labelDiv.innerHTML = `<span style="display:inline-block;width:0.6rem;height:0.6rem;border-radius:50%;background:${EXPERT_COLORS[i % EXPERT_COLORS.length]};margin-right:0.35rem;vertical-align:middle;"></span>E<sub>${i}</sub>`;
+                row.appendChild(labelDiv);
+
+                const track = document.createElement('div');
+                track.className = 'bar-track';
+                const fill = document.createElement('div');
+                fill.className = 'bar-fill' + (dim ? ' dim' : '');
+                const w = step === 0 ? 0 : Math.max(0, (step === 1 ? Math.abs(values[i]) : values[i]) / maxV) * 100;
+                fill.style.width = w + '%';
+                fill.style.background = EXPERT_COLORS[i % EXPERT_COLORS.length];
+                if (step === 1 && values[i] < 0) fill.style.opacity = '0.45';
+                track.appendChild(fill);
+                row.appendChild(track);
+
+                const valSpan = document.createElement('div');
+                valSpan.className = 'text-xs font-mono text-right ' + (dim ? 'text-slate-300' : 'text-slate-700');
+                if (step === 0) valSpan.textContent = '—';
+                else if (step === 1) valSpan.textContent = values[i].toFixed(2);
+                else if (step === 3 && !isKept) valSpan.textContent = '0.00';
+                else valSpan.textContent = values[i].toFixed(3);
+                row.appendChild(valSpan);
+
+                routeBars.appendChild(row);
+            }
+        }
+
+        function renderExperts() {
+            routeExperts.innerHTML = '';
+            for (let i = 0; i < routeState.N; i++) {
+                const box = document.createElement('div');
+                box.className = 'expert-box text-center';
+                const isKept = routeState.topK.includes(i);
+                const active = routeState.step >= 3 && isKept;
+                if (active) {
+                    box.classList.add('active');
+                    box.style.borderColor = EXPERT_COLORS[i % EXPERT_COLORS.length];
+                }
+                box.innerHTML = `
+                    <div class="text-xs font-bold text-slate-800">$E_${i}$</div>
+                    <div class="text-[10px] text-slate-500 mt-0.5">SwiGLU FFN</div>
+                    <div class="mt-1 text-xs font-mono ${active ? 'text-slate-900' : 'text-slate-300'}">
+                        ${active ? 'w=' + routeState.weights[i].toFixed(3) : 'idle'}
+                    </div>
+                `;
+                routeExperts.appendChild(box);
+            }
+        }
+
+        function renderOutput() {
+            if (routeState.step < 5) {
+                routeOutput.innerHTML = '$y = $ — (advance to step 5)';
+                return;
+            }
+            const parts = routeState.topK.map(i => `<span style="color:${EXPERT_COLORS[i % EXPERT_COLORS.length]}">${routeState.weights[i].toFixed(3)} · E<sub>${i}</sub>(x)</span>`);
+            routeOutput.innerHTML = `$y = $ ${parts.join(' &nbsp;+&nbsp; ')}`;
+        }
+
+        function renderStepUI() {
+            stepNum.textContent = routeState.step;
+            stepLabel.textContent = STEP_INFO[routeState.step].label;
+            stepExplain.innerHTML = STEP_INFO[routeState.step].explain;
+            stepPips.forEach(pip => {
+                const s = +pip.dataset.step;
+                pip.classList.remove('active', 'done');
+                if (s < routeState.step) pip.classList.add('done');
+                else if (s === routeState.step) pip.classList.add('active');
+            });
+        }
+
+        function renderRoute() {
+            renderTokenVec();
+            renderRouterMat();
+            renderBars();
+            renderExperts();
+            renderOutput();
+            renderStepUI();
+            // Re-render KaTeX inside dynamic blocks
+            if (window.renderMathInElement) {
+                renderMathInElement(routeBars.parentElement, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+                renderMathInElement(routeExperts, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+                renderMathInElement(routeOutput, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+                renderMathInElement(stepExplain, { delimiters: [{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false}] });
+            }
+        }
+
+        function setStep(s) {
+            routeState.step = Math.max(0, Math.min(5, s));
+            renderRoute();
+        }
+        document.getElementById('step-prev').addEventListener('click', () => { stopAuto(); setStep(routeState.step - 1); });
+        document.getElementById('step-next').addEventListener('click', () => { stopAuto(); setStep(routeState.step + 1); });
+        document.getElementById('step-auto').addEventListener('click', () => {
+            if (routeState.autoTimer) { stopAuto(); return; }
+            document.getElementById('step-auto').textContent = '■ Stop';
+            routeState.step = 0;
+            renderRoute();
+            routeState.autoTimer = setInterval(() => {
+                if (routeState.step >= 5) { stopAuto(); return; }
+                setStep(routeState.step + 1);
+            }, 1000);
+        });
+        function stopAuto() {
+            if (routeState.autoTimer) {
+                clearInterval(routeState.autoTimer);
+                routeState.autoTimer = null;
+                document.getElementById('step-auto').textContent = '▶ Auto';
+            }
+        }
+
+        document.getElementById('new-token').addEventListener('click', () => {
+            routeState.tokenSeed = Math.floor(Math.random() * 100000) + 1;
+            recomputeRouting();
+            setStep(0);
+        });
+
+        routeNSlider.addEventListener('input', () => {
+            routeState.N = +routeNSlider.value;
+            routeNVal.textContent = routeState.N;
+            // clamp K
+            if (routeState.K > routeState.N) {
+                routeState.K = routeState.N;
+                routeKSlider.value = routeState.K;
+                routeKVal.textContent = routeState.K;
+            }
+            routeKSlider.max = Math.min(4, routeState.N);
+            recomputeRouting();
+            renderRoute();
+        });
+        routeKSlider.addEventListener('input', () => {
+            routeState.K = Math.min(+routeKSlider.value, routeState.N);
+            routeKVal.textContent = routeState.K;
+            recomputeRouting();
+            renderRoute();
+        });
+
+        recomputeRouting();
+        renderRoute();
+
+        // ============================================================
+        // Section 3 — batch routing & load balance
+        // ============================================================
+        const batchSvg = document.getElementById('batch-svg');
+        const batchLoadsDiv = document.getElementById('batch-loads');
+        const batchTSlider = document.getElementById('batch-T');
+        const batchNSlider = document.getElementById('batch-N');
+        const batchKSlider = document.getElementById('batch-K');
+        const batchCSlider = document.getElementById('batch-C');
+        const batchTVal = document.getElementById('batch-T-val');
+        const batchNVal = document.getElementById('batch-N-val');
+        const batchKVal = document.getElementById('batch-K-val');
+        const batchCVal = document.getElementById('batch-C-val');
+        const statRouted = document.getElementById('stat-routed');
+        const statDropped = document.getElementById('stat-dropped');
+        const statImb = document.getElementById('stat-imb');
+        const modeBtns = document.querySelectorAll('.mode-btn');
+
+        let batchState = {
+            T: 24,
+            N: 6,
+            K: 2,
+            capacityFactor: 1.25,
+            mode: 'balanced',
+            running: false,
+            loads: [],     // post-capacity (what actually runs through each expert)
+            requests: [],  // pre-capacity (what the router *wanted* — used for imbalance metric)
+            routed: 0,
+            dropped: 0,
+            timer: null,
+            tokenSeed: 1000,
+        };
+
+        function setMode(mode) {
+            batchState.mode = mode;
+            modeBtns.forEach(b => {
+                b.classList.toggle('btn-primary', b.dataset.mode === mode);
+                b.classList.toggle('btn-ghost', b.dataset.mode !== mode);
+            });
+            resetBatch();
+        }
+        modeBtns.forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
+        setMode('balanced');
+
+        function batchRouterSeed() {
+            return ({ balanced: 11, biased: 31, collapsed: 99 })[batchState.mode];
+        }
+        function capacity() {
+            return Math.ceil(batchState.capacityFactor * batchState.T * batchState.K / batchState.N);
+        }
+
+        function renderLoadHistogram() {
+            batchLoadsDiv.innerHTML = '';
+            const cap = capacity();
+            const maxBar = Math.max(cap, ...batchState.loads, 1);
+            for (let i = 0; i < batchState.N; i++) {
+                const row = document.createElement('div');
+                row.className = 'bar-row';
+                const labelDiv = document.createElement('div');
+                labelDiv.className = 'text-xs font-mono text-slate-700';
+                labelDiv.innerHTML = `<span style="display:inline-block;width:0.6rem;height:0.6rem;border-radius:50%;background:${EXPERT_COLORS[i % EXPERT_COLORS.length]};margin-right:0.35rem;vertical-align:middle;"></span>E${i}`;
+                row.appendChild(labelDiv);
+
+                const track = document.createElement('div');
+                track.className = 'bar-track';
+                track.style.position = 'relative';
+                const fill = document.createElement('div');
+                fill.className = 'bar-fill';
+                fill.style.width = (batchState.loads[i] / maxBar * 100) + '%';
+                fill.style.background = EXPERT_COLORS[i % EXPERT_COLORS.length];
+                if (batchState.loads[i] >= cap) fill.style.opacity = '1.0';
+                track.appendChild(fill);
+                const cm = document.createElement('div');
+                cm.className = 'capacity-marker';
+                cm.style.left = (cap / maxBar * 100) + '%';
+                track.appendChild(cm);
+                row.appendChild(track);
+
+                const valSpan = document.createElement('div');
+                valSpan.className = 'text-xs font-mono text-right text-slate-700';
+                valSpan.textContent = `${batchState.loads[i]}/${cap}`;
+                row.appendChild(valSpan);
+
+                batchLoadsDiv.appendChild(row);
+            }
+        }
+
+        function renderStats() {
+            statRouted.textContent = batchState.routed;
+            statDropped.textContent = batchState.dropped;
+            // Imbalance is computed on pre-capacity router requests so it isn't masked by capacity caps —
+            // this matches what an aux-loss (Switch Transformer eq. 4) actually penalizes.
+            const src = batchState.requests;
+            const mean = src.reduce((a, b) => a + b, 0) / batchState.N || 0;
+            const variance = src.reduce((a, b) => a + (b - mean) ** 2, 0) / batchState.N;
+            const cv = mean > 0 ? Math.sqrt(variance) / mean : 0;
+            statImb.textContent = cv.toFixed(2);
+        }
+
+        function drawBatchScaffold() {
+            const w = 600, h = 320;
+            const expertX = 510;
+            const expertCount = batchState.N;
+            const slotH = (h - 40) / expertCount;
+            batchSvg.innerHTML = '';
+            // Router box
+            batchSvg.insertAdjacentHTML('beforeend', `
+                <rect x="240" y="${h/2 - 30}" width="120" height="60" rx="12"
+                    fill="#fef3c7" stroke="#f59e0b" stroke-width="2"/>
+                <text x="300" y="${h/2 - 6}" text-anchor="middle"
+                    font-size="13" font-weight="700" fill="#92400e">Router</text>
+                <text x="300" y="${h/2 + 12}" text-anchor="middle"
+                    font-size="10" fill="#92400e">softmax → top-${batchState.K}</text>
+            `);
+            // Expert boxes (right)
+            for (let i = 0; i < expertCount; i++) {
+                const y = 20 + slotH * i + slotH / 2;
+                const color = EXPERT_COLORS[i % EXPERT_COLORS.length];
+                batchSvg.insertAdjacentHTML('beforeend', `
+                    <rect x="${expertX}" y="${y - 14}" width="70" height="28" rx="8"
+                        fill="white" stroke="${color}" stroke-width="2"/>
+                    <text x="${expertX + 35}" y="${y + 4}" text-anchor="middle"
+                        font-size="11" font-weight="700" fill="${color}">E${i}</text>
+                `);
+            }
+            // Token lane (left)
+            batchSvg.insertAdjacentHTML('beforeend', `
+                <rect x="20" y="${h/2 - 70}" width="180" height="140" rx="10"
+                    fill="white" stroke="#cbd5e1" stroke-dasharray="4,4"/>
+                <text x="110" y="${h/2 - 78}" text-anchor="middle"
+                    font-size="10" font-weight="700" fill="#64748b" letter-spacing="1">TOKEN STREAM</text>
+                <g id="batch-token-lane"></g>
+                <g id="batch-arrows"></g>
+            `);
+        }
+
+        function expertY(i) {
+            const h = 320, slotH = (h - 40) / batchState.N;
+            return 20 + slotH * i + slotH / 2;
+        }
+
+        function resetBatch() {
+            stopBatchTimer();
+            batchState.T = +batchTSlider.value;
+            batchState.N = +batchNSlider.value;
+            batchState.K = Math.min(+batchKSlider.value, batchState.N);
+            batchState.capacityFactor = +batchCSlider.value / 100;
+            batchKSlider.max = Math.min(3, batchState.N);
+            batchTVal.textContent = batchState.T;
+            batchNVal.textContent = batchState.N;
+            batchKVal.textContent = batchState.K;
+            batchCVal.textContent = batchState.capacityFactor.toFixed(2);
+            batchState.loads = new Array(batchState.N).fill(0);
+            batchState.requests = new Array(batchState.N).fill(0);
+            batchState.routed = 0;
+            batchState.dropped = 0;
+            drawBatchScaffold();
+            renderLoadHistogram();
+            renderStats();
+        }
+
+        function stopBatchTimer() {
+            if (batchState.timer) { clearInterval(batchState.timer); batchState.timer = null; }
+            batchState.running = false;
+            document.getElementById('batch-run').textContent = '▶ Run batch';
+        }
+
+        function runBatch() {
+            if (batchState.running) { stopBatchTimer(); return; }
+            resetBatch();
+            batchState.running = true;
+            document.getElementById('batch-run').textContent = '■ Stop';
+            const router = buildRouter(batchRouterSeed(), batchState.mode, batchState.N, MODEL_D);
+            const cap = capacity();
+            const lane = document.getElementById('batch-token-lane');
+            const arrows = document.getElementById('batch-arrows');
+            let i = 0;
+            batchState.timer = setInterval(() => {
+                if (i >= batchState.T) { stopBatchTimer(); return; }
+                const tokSeed = batchState.tokenSeed + i * 17;
+                const x = sampleToken(tokSeed, MODEL_D);
+                const logits = routerLogits(router, x);
+                const probs = softmax(logits);
+                const top = topKIndices(probs, batchState.K);
+
+                // Place token in lane (animated entry)
+                const slot = i % 5;
+                const tokY = 320 / 2 - 50 + slot * 22;
+                lane.insertAdjacentHTML('beforeend', `
+                    <g class="fly-in" data-tok="${i}">
+                        <rect x="60" y="${tokY - 8}" width="38" height="18" rx="4"
+                            fill="#1e293b" stroke="#0f172a"/>
+                        <text x="79" y="${tokY + 5}" text-anchor="middle" font-size="9" fill="white" font-family="ui-monospace, Menlo, monospace">t${i}</text>
+                    </g>
+                `);
+
+                top.forEach(eIdx => {
+                    batchState.requests[eIdx] += 1;
+                    if (batchState.loads[eIdx] >= cap) {
+                        // Dropped — router wanted this expert but it was already at capacity
+                        batchState.dropped += 1;
+                        arrows.insertAdjacentHTML('beforeend', `
+                            <line class="arrow" x1="98" y1="${tokY}" x2="510" y2="${expertY(eIdx)}"
+                                stroke="#ef4444" stroke-width="1" stroke-dasharray="4,3" opacity="0.45"/>
+                        `);
+                    } else {
+                        batchState.loads[eIdx] += 1;
+                        batchState.routed += 1;
+                        arrows.insertAdjacentHTML('beforeend', `
+                            <path class="arrow" d="M98 ${tokY} Q 280 ${tokY} 300 160 Q 320 ${expertY(eIdx)} 510 ${expertY(eIdx)}"
+                                stroke="${EXPERT_COLORS[eIdx % EXPERT_COLORS.length]}" stroke-width="1.5"
+                                fill="none" opacity="0.7"/>
+                        `);
+                    }
+                });
+
+                renderLoadHistogram();
+                renderStats();
+
+                // Fade old token after a bit
+                setTimeout(() => {
+                    const node = lane.querySelector(`g[data-tok="${i - 4}"]`);
+                    if (node) node.style.opacity = '0.15';
+                }, 600);
+
+                i += 1;
+            }, 220);
+        }
+
+        document.getElementById('batch-run').addEventListener('click', runBatch);
+        document.getElementById('batch-reset').addEventListener('click', resetBatch);
+        [batchTSlider, batchNSlider, batchKSlider, batchCSlider].forEach(el => el.addEventListener('input', () => {
+            stopBatchTimer();
+            resetBatch();
+        }));
+        resetBatch();
+
+    </script>
+</body>
+</html>
