@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>QKV Calculation Helper</title>
+<script src="https://cdn.tailwindcss.com"></script>
+
+<style>
+canvas {
+  background:white;
+  border-radius:10px;
+  box-shadow: 0 6px 12px rgba(0,0,0,0.08);
+}
+input {
+  width:40px;
+  text-align:center;
+}
+</style>
+</head>
+
+<body class="bg-slate-100 p-6">
+
+<div class="max-w-7xl mx-auto">
+
+<h1 class="text-3xl font-bold mb-4 text-center">
+QKV Calculation Helper
+</h1>
+
+<div class="grid grid-cols-3 gap-6">
+
+<canvas id="canvas" width="700" height="500" class="col-span-2"></canvas>
+
+<div class="bg-white p-4 rounded shadow space-y-4">
+
+<h3 class="font-bold">Edit Q / K / V</h3>
+
+<div><p class="text-blue-600 font-semibold">Q</p><div id="gridQ" class="grid grid-cols-3 gap-1"></div></div>
+<div><p class="text-green-600 font-semibold">K</p><div id="gridK" class="grid grid-cols-3 gap-1"></div></div>
+<div><p class="text-orange-600 font-semibold">V</p><div id="gridV" class="grid grid-cols-3 gap-1"></div></div>
+
+<div id="explain" class="bg-blue-50 p-2 text-sm rounded"></div>
+
+</div>
+
+</div>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let mouseX = -1, mouseY = -1;
+
+// ===== 修正滑鼠座標（穩定）=====
+canvas.addEventListener("mousemove", (e)=>{
+  const rect = canvas.getBoundingClientRect();
+  const scaleX = canvas.width / rect.width;
+  const scaleY = canvas.height / rect.height;
+
+  mouseX = (e.clientX - rect.left) * scaleX;
+  mouseY = (e.clientY - rect.top) * scaleY;
+});
+
+canvas.addEventListener("mouseleave", ()=>{
+  mouseX = -1;
+  mouseY = -1;
+});
+
+// ===== DATA =====
+let Q=[[1,0,0],[0,1,0],[0,0,1]];
+let K=[[1,0,0],[0,1,0],[0,0,1]];
+let V=[[1,0,1],[0,1,0],[1,1,0]];
+
+// ===== GRID =====
+function createGrid(id,M){
+  const el=document.getElementById(id);
+  el.innerHTML="";
+  M.forEach((r,i)=>{
+    r.forEach((v,j)=>{
+      const input=document.createElement("input");
+      input.type="number";
+      input.value=v;
+      input.oninput=e=>{
+        M[i][j]=parseFloat(e.target.value);
+        render();
+      };
+      el.appendChild(input);
+    });
+  });
+}
+createGrid("gridQ",Q);
+createGrid("gridK",K);
+createGrid("gridV",V);
+
+// ===== MATH =====
+function transpose(M){ return M[0].map((_,i)=>M.map(r=>r[i])); }
+
+function matmul(A,B){
+  return A.map(r=>B[0].map((_,j)=>r.reduce((s,v,k)=>s+v*B[k][j],0)));
+}
+
+function softmaxRow(r){
+  const m=Math.max(...r);
+  const ex=r.map(x=>Math.exp(x-m));
+  const s=ex.reduce((a,b)=>a+b,0);
+  return ex.map(x=>x/s);
+}
+
+function softmax(M){ return M.map(softmaxRow); }
+
+function compute(){
+  const KT=transpose(K);
+  let scores=matmul(Q,KT);
+
+  const d=Q[0].length;
+  scores=scores.map(r=>r.map(v=>v/Math.sqrt(d)));
+
+  const A=softmax(scores);
+  const O=matmul(A,V);
+
+  return {scores,A,O};
+}
+
+// ===== DRAW =====
+function drawMatrix(M,x,y,title,color){
+  const size=50;
+
+  ctx.fillStyle=color;
+  ctx.font="bold 16px sans-serif";
+  ctx.fillText(title,x,y-10);
+
+  M.forEach((row,i)=>{
+    const max=Math.max(...row);
+
+    row.forEach((v,j)=>{
+
+      ctx.fillStyle=color;
+      ctx.globalAlpha=0.2;
+      ctx.fillRect(x+j*size,y+i*size,size,size);
+      ctx.globalAlpha=1;
+
+      ctx.strokeStyle=(v===max)?"red":"#334155";
+      ctx.lineWidth=(v===max)?3:1;
+      ctx.strokeRect(x+j*size,y+i*size,size,size);
+
+      ctx.fillStyle="#111827";
+      ctx.fillText(v.toFixed(2),x+j*size+12,y+i*size+30);
+    });
+  });
+}
+
+// ===== TOOLTIP =====
+function drawTooltip(x,y,lines){
+  ctx.save();
+
+  ctx.font="14px sans-serif";
+
+  const w=Math.max(...lines.map(l=>ctx.measureText(l).width))+20;
+  const h=lines.length*18+20;
+
+  ctx.fillStyle="rgba(15,23,42,0.95)";
+  ctx.fillRect(x+10,y+10,w,h);
+
+  ctx.fillStyle="white";
+  lines.forEach((l,i)=>{
+    ctx.fillText(l,x+20,y+25+i*18);
+  });
+
+  ctx.restore();
+}
+
+// ===== EXPLAIN =====
+function explain(A){
+  let txt="";
+  A.forEach((row,i)=>{
+    const idx=row.indexOf(Math.max(...row));
+    txt+=`Token ${i} attends to ${idx}<br>`;
+  });
+  document.getElementById("explain").innerHTML=txt;
+}
+
+// ===== RENDER =====
+function render(){
+  ctx.clearRect(0,0,700,500);
+
+  const {scores,A,O}=compute();
+
+  drawMatrix(Q,20,80,"Q","#3b82f6");
+  drawMatrix(K,200,80,"K","#22c55e");
+  drawMatrix(V,380,80,"V","#f97316");
+
+  drawMatrix(A,100,250,"Attention","#a855f7");
+  drawMatrix(O,350,250,"Output","#ef4444");
+
+  explain(A);
+
+  let tooltip=null;
+  const size=50;
+
+  // ===== 穩定版判斷（不會閃）=====
+  const ax=100, ay=250;
+  const colA=Math.floor((mouseX-ax)/size);
+  const rowA=Math.floor((mouseY-ay)/size);
+
+  if(rowA>=0 && rowA<3 && colA>=0 && colA<3){
+
+    const q=Q[rowA];
+    const k=K[colA];
+
+    let calc="";
+    let sum=0;
+
+    for(let i=0;i<q.length;i++){
+      calc+=`${q[i]}×${k[i]}`;
+      sum+=q[i]*k[i];
+      if(i<q.length-1) calc+=" + ";
+    }
+
+    tooltip=[
+      `Attention [${rowA} → ${colA}]`,
+      "Q · K",
+      calc,
+      `= ${sum.toFixed(3)}`
+    ];
+  }
+
+  const ox=350, oy=250;
+  const rowO=Math.floor((mouseY-oy)/size);
+
+  if(rowO>=0 && rowO<3 &&
+     mouseX>=ox && mouseX<=ox+size*3){
+
+    let calc="";
+    for(let j=0;j<A[rowO].length;j++){
+      calc+=`${A[rowO][j].toFixed(2)}×V${j}`;
+      if(j<A[rowO].length-1) calc+=" + ";
+    }
+
+    tooltip=[
+      `Output row ${rowO}`,
+      "Weighted sum",
+      calc
+    ];
+  }
+
+  if(tooltip){
+    drawTooltip(mouseX,mouseY,tooltip);
+  }
+
+  requestAnimationFrame(render);
+}
+
+render();
+</script>
+
+</body>
+</html>
