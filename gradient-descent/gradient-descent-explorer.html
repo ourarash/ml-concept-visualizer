@@ -54,7 +54,7 @@
 
     <div class="grid md:grid-cols-2 gap-6 items-start">
       <div>
-        <pre class="font-mono text-sm bg-slate-50 p-4 rounded-md border border-slate-200 leading-relaxed"><span id="line-init"   class="codeline">Initialize w = w₀ = 4.5</span><span id="line-loop"   class="codeline">for iteration in range(m):</span><span id="line-grad"   class="codeline">    dL/dw = (1/n) Σ(ŷᵢ − yᵢ)xᵢ</span><span id="line-update" class="codeline">    w = w − α · dL/dw</span><span                  class="codeline">return w</span></pre>
+        <pre class="font-mono text-sm bg-slate-50 p-4 rounded-md border border-slate-200 leading-relaxed"><span id="line-init"   class="codeline">Initialize w = w₀  (here: 4.5)</span><span id="line-loop"   class="codeline">for iteration in range(m):</span><span id="line-grad"   class="codeline">    dL/dw = (1/n) Σ(ŷᵢ − yᵢ)xᵢ</span><span id="line-update" class="codeline">    w = w − α · dL/dw</span><span                  class="codeline">return w</span></pre>
       </div>
 
       <div class="bg-white border border-slate-200 rounded-md p-4 stat-row">
@@ -75,9 +75,9 @@
     </div>
 
     <div class="flex flex-wrap items-center gap-4 mt-4">
-      <label class="text-sm text-slate-700">α = <span id="alg-alpha-label" class="font-mono font-semibold">0.10</span></label>
+      <label for="alg-alpha" class="text-sm text-slate-700">α = <span id="alg-alpha-label" class="font-mono font-semibold">0.10</span></label>
       <input id="alg-alpha" type="range" min="0.01" max="0.5" step="0.01" value="0.10" oninput="algSyncAlpha()" class="flex-1 min-w-[160px]">
-      <label class="text-sm text-slate-700">m = <span id="alg-m-label" class="font-mono font-semibold">20</span></label>
+      <label for="alg-m" class="text-sm text-slate-700">m = <span id="alg-m-label" class="font-mono font-semibold">20</span></label>
       <input id="alg-m" type="range" min="1" max="50" step="1" value="20" oninput="algSyncM()" class="flex-1 min-w-[120px]">
       <button onclick="algNext()"  class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶ Next Step</button>
       <button onclick="algRunAll()" class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶▶ Run All</button>
@@ -112,7 +112,7 @@
         </div>
         <div>
           <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Updates per epoch</span><span id="bs-updates-pct" class="font-mono">3</span></div>
-          <div class="hbar"><div id="bs-updates-bar" class="hbar-fill bg-indigo-500" style="width: 12%"></div></div>
+          <div class="hbar"><div id="bs-updates-bar" class="hbar-fill bg-indigo-500" style="width: 0%"></div></div>
         </div>
       </div>
 
@@ -297,7 +297,7 @@ function sampleBatch(data, B) {
 }
 
 function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
-function fmt(v, d) { if (!isFinite(v)) return '∞'; return v.toFixed(d == null ? 3 : d); }
+function fmt(v, d) { if (isNaN(v)) return 'NaN'; if (!isFinite(v)) return '∞'; return v.toFixed(d == null ? 3 : d); }
 
 // ─────────────────────────── §1 ALGORITHM STEPPER ───────────────────────────
 const alg = {
@@ -484,8 +484,10 @@ function updateBatchSize() {
   const B = parseInt(document.getElementById('bs-slider').value, 10);
   bsRender(B);
 }
+var bsAnimating = false;
 function bsAnimate() {
-  // Flash each batch in sequence to suggest "one update per batch".
+  if (bsAnimating) return;   // prevent stacked animation chains on rapid clicks
+  bsAnimating = true;
   const groups = document.querySelectorAll('#bs-layout .data-batch');
   groups.forEach(function (g, idx) {
     setTimeout(function () {
@@ -493,6 +495,7 @@ function bsAnimate() {
       setTimeout(function () { g.classList.remove('flash-anim'); }, 500);
     }, idx * 600);
   });
+  setTimeout(function () { bsAnimating = false; }, groups.length * 600 + 600);
 }
 
 // ─────────────────────────── §3 LOSS LANDSCAPE ───────────────────────────
