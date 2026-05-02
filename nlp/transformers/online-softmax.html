@@ -1,0 +1,648 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Online Softmax Visualization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 1200px;
+            margin: 0 auto;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            background-color: white;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col p-4 md:p-8">
+
+    <main class="max-w-6xl w-full mx-auto flex-grow flex flex-col">
+
+        <!-- Header -->
+        <header class="mb-6 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800">Online Softmax</h1>
+                <p class="text-slate-500 mt-1">The streaming math trick behind FlashAttention</p>
+            </div>
+
+            <!-- Controls -->
+            <div class="flex items-center gap-3 bg-white p-2 rounded-lg shadow-sm border border-slate-200">
+                <button id="btn-prev" class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    &larr; Previous
+                </button>
+                <div class="flex gap-1" id="step-indicators"></div>
+                <button id="btn-next" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+                    Next Step &rarr;
+                </button>
+            </div>
+        </header>
+
+        <!-- Canvas Container -->
+        <div class="relative w-full aspect-[12/5] bg-white rounded-xl mb-6 overflow-hidden flex-shrink-0">
+            <canvas id="onlineCanvas"></canvas>
+        </div>
+
+        <!-- Explanation Text -->
+        <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 mb-6">
+            <h2 id="step-title" class="text-xl font-semibold text-slate-800 mb-2">Step 0: The Setup</h2>
+            <p id="step-desc" class="text-slate-600 leading-relaxed min-h-[3rem]"></p>
+        </div>
+
+        <!-- Preset selector -->
+        <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 mb-6 flex flex-wrap items-center gap-3">
+            <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Try a preset:</span>
+            <button class="preset-btn px-3 py-1.5 text-sm rounded border border-slate-300 hover:border-blue-500 hover:text-blue-600 transition-colors data-[active=true]:bg-blue-600 data-[active=true]:text-white data-[active=true]:border-blue-600" data-preset="0" data-active="true">Max in Block 2 (rescale!)</button>
+            <button class="preset-btn px-3 py-1.5 text-sm rounded border border-slate-300 hover:border-blue-500 hover:text-blue-600 transition-colors data-[active=true]:bg-blue-600 data-[active=true]:text-white data-[active=true]:border-blue-600" data-preset="1" data-active="false">Max in Block 1</button>
+            <button class="preset-btn px-3 py-1.5 text-sm rounded border border-slate-300 hover:border-blue-500 hover:text-blue-600 transition-colors data-[active=true]:bg-blue-600 data-[active=true]:text-white data-[active=true]:border-blue-600" data-preset="2" data-active="false">Tiny + huge spike</button>
+        </div>
+
+        <!-- Deep Dive Section -->
+        <section class="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+            <div class="bg-slate-50 border-b border-slate-200 px-6 py-4">
+                <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                    Deep Dive: Why naive per-block softmax fails, and the math
+                </h3>
+            </div>
+
+            <div class="p-6 grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <!-- Naive comparison -->
+                <div class="lg:col-span-5 space-y-3 text-sm text-slate-600">
+                    <h4 class="font-bold text-slate-800">Naive idea: softmax each block separately</h4>
+                    <p>Each block sums to 1.0 individually, but globally the answer is wrong &mdash; relative magnitudes <em>between</em> blocks are lost. Block 2 has a larger max, but naive softmax has no way to know that.</p>
+
+                    <div class="bg-slate-50 p-3 rounded-lg border border-slate-200 mt-3 font-mono text-xs space-y-1.5">
+                        <div class="flex items-start gap-3">
+                            <span class="text-slate-400 w-16 flex-shrink-0">Naive:</span>
+                            <span id="dd-naive" class="text-red-600 break-all"></span>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-slate-400 w-16 flex-shrink-0">Online:</span>
+                            <span id="dd-online" class="text-emerald-600 break-all"></span>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="text-slate-400 w-16 flex-shrink-0">Batch:</span>
+                            <span id="dd-batch" class="text-slate-700 break-all"></span>
+                        </div>
+                    </div>
+                    <p class="text-xs text-slate-500"><strong class="text-emerald-700">Online</strong> matches <strong>Batch</strong> exactly. <strong class="text-red-700">Naive</strong> doesn't.</p>
+                </div>
+
+                <!-- Math -->
+                <div class="lg:col-span-7 space-y-3 text-sm text-slate-600">
+                    <h4 class="font-bold text-slate-800">The streaming update rule</h4>
+                    <p>For each new block <em>b</em> with values <em>x</em>:</p>
+                    <div class="bg-slate-50 border border-slate-200 rounded-lg p-4 font-mono text-xs space-y-2 leading-relaxed">
+                        <div><span class="text-slate-400">m_new</span> = max(m_old, max(x))</div>
+                        <div><span class="text-slate-400">scale</span> = exp(m_old &minus; m_new) &nbsp;&nbsp;<span class="text-slate-400">// &le; 1</span></div>
+                        <div><span class="text-slate-400">&ell;_new</span> = &ell;_old &middot; scale &nbsp;+&nbsp; &Sigma; exp(x &minus; m_new)</div>
+                        <div class="text-slate-400 pt-1">// every saved exp value gets multiplied by scale too</div>
+                    </div>
+                    <p class="text-xs">The key identity: <code class="bg-slate-100 px-1.5 py-0.5 rounded">exp(x &minus; m_old) &middot; exp(m_old &minus; m_new) = exp(x &minus; m_new)</code>. Old exp values can be retroactively re-based to a new max by multiplication.</p>
+                </div>
+            </div>
+
+            <div class="bg-blue-50 px-6 py-3 border-t border-blue-100">
+                <p class="text-xs text-blue-800"><strong>FlashAttention connection:</strong> Replace each "block" with a tile of K/V loaded into SRAM. The same streaming rule produces exact softmax(QKᵀ)V without ever materializing the N&times;N attention matrix in HBM. Memory drops from O(N²) to O(N).</p>
+            </div>
+        </section>
+
+    </main>
+
+    <script>
+    'use strict';
+
+    const canvas = document.getElementById('onlineCanvas');
+    const ctx = canvas.getContext('2d');
+    const W = 1200;
+    const H = 500;
+
+    function resizeCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        canvas.width = W * dpr;
+        canvas.height = H * dpr;
+        ctx.setTransform(1, 0, 0, 1, 0, 0);
+        ctx.scale(dpr, dpr);
+        draw();
+    }
+    window.addEventListener('resize', resizeCanvas);
+
+    const PRESETS = [
+        { name: 'Max in Block 2', values: [2.0, 0.5, 1.0, 1.5, 3.0, 0.1, 0.8, 2.5] },
+        { name: 'Max in Block 1', values: [3.0, 0.1, 0.8, 2.5, 2.0, 0.5, 1.0, 1.5] },
+        { name: 'Tiny + huge spike', values: [0.2, 0.1, 0.3, 0.15, 4.0, 0.05, 0.1, 0.2] }
+    ];
+
+    const COLORS = {
+        block1: '#f97316',
+        block1Soft: '#fed7aa',
+        block1Bg: '#fff7ed',
+        block2: '#3b82f6',
+        block2Soft: '#bfdbfe',
+        block2Bg: '#eff6ff',
+        ink: '#1e293b',
+        inkSoft: '#475569',
+        inkFaint: '#94a3b8',
+        rule: '#e2e8f0',
+        accent: '#eab308',
+        accentBg: '#fef9c3',
+        good: '#10b981'
+    };
+
+    const N_STEPS = 5;
+    let appState = {
+        step: 0,
+        preset: 0,
+        animProgress: 1,
+        animFrom: null,
+        animTo: null,
+        animDuration: 800,
+        animStart: 0,
+        rafId: null
+    };
+
+    function batchSoftmax(vals) {
+        const m = Math.max(...vals);
+        const exps = vals.map(v => Math.exp(v - m));
+        const s = exps.reduce((a, b) => a + b, 0);
+        return exps.map(e => e / s);
+    }
+    function naiveBlockSoftmax(vals, blockSize=4) {
+        const out = [];
+        for (let i = 0; i < vals.length; i += blockSize) {
+            const block = vals.slice(i, i + blockSize);
+            out.push(...batchSoftmax(block));
+        }
+        return out;
+    }
+
+    function frameForStep(step, presetIdx) {
+        const vals = PRESETS[presetIdx].values;
+        const block1 = vals.slice(0, 4);
+        const block2 = vals.slice(4, 8);
+        const m1 = Math.max(...block1);
+        const m_block2 = Math.max(...block2);
+        const m_global = Math.max(m1, m_block2);
+        const exps1_old = block1.map(v => Math.exp(v - m1));
+        const l1 = exps1_old.reduce((a, b) => a + b, 0);
+        const scale = Math.exp(m1 - m_global);
+        const exps1_rescaled = exps1_old.map(e => e * scale);
+        const l1_rescaled = l1 * scale;
+        const exps2 = block2.map(v => Math.exp(v - m_global));
+        const sum_b2 = exps2.reduce((a, b) => a + b, 0);
+        const l_final = l1_rescaled + sum_b2;
+        const allExpsFinal = [...exps1_rescaled, ...exps2];
+        const finalProbs = allExpsFinal.map(e => e / l_final);
+        const rescaleNeeded = (m_global > m1);
+
+        const f = {
+            inputValues: vals.slice(),
+            block1Loaded: false,
+            block2Loaded: false,
+            rescaleHappening: false,
+            rescaleNeeded,
+            mShown: null,
+            lShown: null,
+            softmaxBars: new Array(8).fill(null),
+            showFinalCheck: false,
+            stepIdx: step
+        };
+
+        switch (step) {
+            case 0:
+                break;
+            case 1:
+                f.block1Loaded = true;
+                f.mShown = m1;
+                f.lShown = l1;
+                for (let i = 0; i < 4; i++) {
+                    f.softmaxBars[i] = exps1_old[i] / l1;
+                }
+                break;
+            case 2:
+                f.block1Loaded = true;
+                f.block2Loaded = true;
+                f.mShown = m_global;
+                f.lShown = l_final;
+                f.rescaleHappening = rescaleNeeded;
+                for (let i = 0; i < 4; i++) f.softmaxBars[i] = exps1_rescaled[i] / l_final;
+                for (let i = 0; i < 4; i++) f.softmaxBars[i + 4] = exps2[i] / l_final;
+                break;
+            case 3:
+                f.block1Loaded = true;
+                f.block2Loaded = true;
+                f.mShown = m_global;
+                f.lShown = l_final;
+                for (let i = 0; i < 8; i++) f.softmaxBars[i] = finalProbs[i];
+                break;
+            case 4:
+                f.block1Loaded = true;
+                f.block2Loaded = true;
+                f.mShown = m_global;
+                f.lShown = l_final;
+                for (let i = 0; i < 8; i++) f.softmaxBars[i] = finalProbs[i];
+                f.showFinalCheck = true;
+                break;
+        }
+        return f;
+    }
+
+    function lerp(a, b, t) {
+        if (a === null && b === null) return null;
+        if (a === null) return b * t;
+        if (b === null) return a * (1 - t);
+        return a + (b - a) * t;
+    }
+    function lerpFrame(f1, f2, t) {
+        const u = t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2;
+        const out = {
+            inputValues: f2.inputValues.slice(),
+            block1Loaded: f2.block1Loaded,
+            block2Loaded: (t > 0.3) ? f2.block2Loaded : f1.block2Loaded,
+            rescaleHappening: (t > 0.05 && t < 0.95) ? (f2.rescaleHappening || f1.rescaleHappening) : false,
+            rescaleNeeded: f2.rescaleNeeded,
+            mShown: lerp(f1.mShown, f2.mShown, u),
+            lShown: lerp(f1.lShown, f2.lShown, u),
+            softmaxBars: new Array(8).fill(null),
+            showFinalCheck: (t > 0.7) ? f2.showFinalCheck : f1.showFinalCheck,
+            stepIdx: f2.stepIdx
+        };
+        for (let i = 0; i < 8; i++) {
+            out.softmaxBars[i] = lerp(f1.softmaxBars[i], f2.softmaxBars[i], u);
+        }
+        return out;
+    }
+
+    function clear() { ctx.clearRect(0, 0, W, H); }
+
+    const BOX_TOP = 30;
+    const BOX_H = 70;
+    const BOX_W = 65;
+    const BOX_GAP = 6;
+    const BLOCK_GAP = 80;
+    const BLOCKS_W = 8 * BOX_W + 6 * BOX_GAP + BLOCK_GAP;
+    const BLOCKS_X = (W - BLOCKS_W) / 2;
+
+    const M_PANEL_Y = 130;
+    const M_PANEL_H = 56;
+
+    const BAR_AREA_TOP = 220;
+    const BAR_AREA_BOT = 420;
+    const BAR_AREA_H = BAR_AREA_BOT - BAR_AREA_TOP;
+    const BAR_LABEL_Y = BAR_AREA_BOT + 22;
+
+    function boxX(i) {
+        if (i < 4) return BLOCKS_X + i * (BOX_W + BOX_GAP);
+        return BLOCKS_X + 4 * (BOX_W + BOX_GAP) + BLOCK_GAP + (i - 4) * (BOX_W + BOX_GAP);
+    }
+
+    function drawText(text, x, y, opts={}) {
+        ctx.save();
+        ctx.font = opts.font || '14px -apple-system, sans-serif';
+        ctx.fillStyle = opts.color || COLORS.ink;
+        ctx.textAlign = opts.align || 'center';
+        ctx.textBaseline = opts.baseline || 'middle';
+        ctx.fillText(text, x, y);
+        ctx.restore();
+    }
+
+    function roundRect(x, y, w, h, r) {
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + w - r, y);
+        ctx.arcTo(x + w, y, x + w, y + r, r);
+        ctx.lineTo(x + w, y + h - r);
+        ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+        ctx.lineTo(x + r, y + h);
+        ctx.arcTo(x, y + h, x, y + h - r, r);
+        ctx.lineTo(x, y + r);
+        ctx.arcTo(x, y, x + r, y, r);
+        ctx.closePath();
+    }
+
+    function subscript(n) {
+        return String(n).split('').map(d => '₀₁₂₃₄₅₆₇₈₉'[parseInt(d)]).join('');
+    }
+
+    function drawInputBoxes(f) {
+        ctx.font = 'bold 12px -apple-system, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = COLORS.block1;
+        ctx.fillText('▰ BLOCK 1', boxX(0), 16);
+        ctx.fillStyle = COLORS.block2;
+        ctx.fillText('▰ BLOCK 2', boxX(4), 16);
+
+        ctx.font = '11px -apple-system, sans-serif';
+        ctx.fillStyle = COLORS.inkFaint;
+        ctx.textAlign = 'right';
+        let b1status = 'in HBM';
+        let b2status = 'in HBM';
+        if (f.block1Loaded && !f.block2Loaded) b1status = 'in SRAM';
+        else if (f.block2Loaded) { b1status = 'processed'; b2status = 'in SRAM'; }
+        if (f.stepIdx >= 3) { b1status = 'processed'; b2status = 'processed'; }
+        ctx.fillText(b1status, boxX(3) + BOX_W, 16);
+        ctx.fillText(b2status, boxX(7) + BOX_W, 16);
+
+        for (let i = 0; i < 8; i++) {
+            const x = boxX(i);
+            const isBlock1 = i < 4;
+            const loaded = isBlock1 ? f.block1Loaded : f.block2Loaded;
+            const bgFill = loaded ? (isBlock1 ? COLORS.block1Bg : COLORS.block2Bg) : '#fff';
+            const borderColor = loaded ? (isBlock1 ? COLORS.block1 : COLORS.block2) : COLORS.rule;
+
+            roundRect(x, BOX_TOP, BOX_W, BOX_H, 6);
+            ctx.fillStyle = bgFill;
+            ctx.fill();
+            ctx.strokeStyle = borderColor;
+            ctx.lineWidth = loaded ? 2 : 1;
+            ctx.stroke();
+
+            drawText(`x${subscript(i)}`, x + 9, BOX_TOP + 12, {
+                font: '11px -apple-system', color: COLORS.inkFaint, align: 'left'
+            });
+            drawText(f.inputValues[i].toFixed(1), x + BOX_W/2, BOX_TOP + BOX_H/2 + 4, {
+                font: 'bold 22px -apple-system', color: COLORS.ink
+            });
+        }
+    }
+
+    function drawMLPanel(f) {
+        const cellW = 240;
+        const cellGap = 24;
+        const totalW = 2 * cellW + cellGap;
+        const panelX = (W - totalW) / 2;
+        const cells = [
+            { x: panelX, label: 'running max  m', value: f.mShown, fmt: 2 },
+            { x: panelX + cellW + cellGap, label: 'denominator  ℓ', value: f.lShown, fmt: 2, flash: f.rescaleHappening }
+        ];
+
+        cells.forEach(c => {
+            const flashing = !!c.flash;
+            roundRect(c.x, M_PANEL_Y, cellW, M_PANEL_H, 8);
+            ctx.fillStyle = flashing ? COLORS.accentBg : '#fff';
+            ctx.fill();
+            ctx.strokeStyle = flashing ? COLORS.accent : COLORS.rule;
+            ctx.lineWidth = flashing ? 2 : 1;
+            ctx.stroke();
+
+            drawText(c.label, c.x + 16, M_PANEL_Y + 18, {
+                font: 'bold 11px -apple-system', color: COLORS.inkFaint, align: 'left'
+            });
+            const valStr = (c.value === null) ? '—' : c.value.toFixed(c.fmt);
+            drawText(valStr, c.x + cellW - 16, M_PANEL_Y + 36, {
+                font: 'bold 22px ui-monospace, "SF Mono", monospace', color: COLORS.ink, align: 'right'
+            });
+        });
+
+        if (f.rescaleHappening) {
+            const calloutX = panelX + 2 * cellW + cellGap + 12;
+            const calloutY = M_PANEL_Y + 14;
+            ctx.fillStyle = COLORS.accent;
+            roundRect(calloutX, calloutY, 110, 28, 4);
+            ctx.fill();
+            drawText('RESCALE!', calloutX + 55, calloutY + 14, {
+                font: 'bold 13px -apple-system', color: '#fff'
+            });
+        }
+    }
+
+    function drawBars(f) {
+        drawText('softmax estimate so far  (bars sum to 1.0)', BLOCKS_X, BAR_AREA_TOP - 18, {
+            font: 'bold 11px -apple-system', color: COLORS.inkFaint, align: 'left'
+        });
+
+        ctx.strokeStyle = COLORS.rule;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(BLOCKS_X - 4, BAR_AREA_BOT);
+        ctx.lineTo(BLOCKS_X + BLOCKS_W + 4, BAR_AREA_BOT);
+        ctx.stroke();
+
+        ctx.strokeStyle = COLORS.rule;
+        ctx.setLineDash([3, 4]);
+        ctx.beginPath();
+        ctx.moveTo(BLOCKS_X - 4, BAR_AREA_TOP);
+        ctx.lineTo(BLOCKS_X + BLOCKS_W + 4, BAR_AREA_TOP);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        drawText('1.0', BLOCKS_X - 12, BAR_AREA_TOP, {
+            font: '10px -apple-system', color: COLORS.inkFaint, align: 'right'
+        });
+        drawText('0', BLOCKS_X - 12, BAR_AREA_BOT, {
+            font: '10px -apple-system', color: COLORS.inkFaint, align: 'right'
+        });
+
+        for (let i = 0; i < 8; i++) {
+            const v = f.softmaxBars[i];
+            const x = boxX(i);
+            const isBlock1 = i < 4;
+
+            if (v === null || v === undefined) {
+                ctx.fillStyle = '#f1f5f9';
+                ctx.fillRect(x, BAR_AREA_BOT - 2, BOX_W, 2);
+                drawText('—', x + BOX_W/2, BAR_LABEL_Y, {
+                    font: '11px ui-monospace, monospace', color: COLORS.inkFaint
+                });
+                continue;
+            }
+
+            const h = Math.max(1, v * BAR_AREA_H);
+            const y = BAR_AREA_BOT - h;
+            const fill = isBlock1 ? COLORS.block1 : COLORS.block2;
+
+            ctx.fillStyle = fill;
+            ctx.fillRect(x, y, BOX_W, h);
+
+            drawText(v.toFixed(3), x + BOX_W/2, y - 8, {
+                font: 'bold 11px ui-monospace, monospace', color: fill, baseline: 'bottom'
+            });
+            drawText(`x${subscript(i)}`, x + BOX_W/2, BAR_LABEL_Y, {
+                font: '11px -apple-system', color: COLORS.inkFaint
+            });
+
+            if (f.showFinalCheck) {
+                ctx.fillStyle = COLORS.good;
+                ctx.beginPath();
+                ctx.arc(x + BOX_W/2, BAR_LABEL_Y + 18, 8, 0, 2*Math.PI);
+                ctx.fill();
+                ctx.strokeStyle = '#fff';
+                ctx.lineWidth = 2;
+                ctx.beginPath();
+                ctx.moveTo(x + BOX_W/2 - 3, BAR_LABEL_Y + 18);
+                ctx.lineTo(x + BOX_W/2 - 1, BAR_LABEL_Y + 21);
+                ctx.lineTo(x + BOX_W/2 + 4, BAR_LABEL_Y + 14);
+                ctx.stroke();
+            }
+        }
+
+        if (f.showFinalCheck) {
+            const ref = batchSoftmax(f.inputValues);
+            for (let i = 0; i < 8; i++) {
+                const x = boxX(i);
+                const h = ref[i] * BAR_AREA_H;
+                const y = BAR_AREA_BOT - h;
+                ctx.strokeStyle = COLORS.good;
+                ctx.lineWidth = 2;
+                ctx.setLineDash([4, 3]);
+                ctx.strokeRect(x, y, BOX_W, h);
+                ctx.setLineDash([]);
+            }
+            const legendX = BLOCKS_X + BLOCKS_W - 220;
+            const legendY = BAR_AREA_TOP - 4;
+            ctx.strokeStyle = COLORS.good;
+            ctx.setLineDash([4, 3]);
+            ctx.lineWidth = 2;
+            ctx.strokeRect(legendX, legendY - 8, 16, 12);
+            ctx.setLineDash([]);
+            drawText('batch softmax (reference)', legendX + 22, legendY - 2, {
+                font: '11px -apple-system', color: COLORS.good, align: 'left'
+            });
+        }
+    }
+
+    function draw() {
+        clear();
+        let f;
+        if (appState.animProgress < 1 && appState.animFrom && appState.animTo) {
+            f = lerpFrame(appState.animFrom, appState.animTo, appState.animProgress);
+        } else {
+            f = frameForStep(appState.step, appState.preset);
+        }
+        drawInputBoxes(f);
+        drawMLPanel(f);
+        drawBars(f);
+    }
+
+    function animationFrame(ts) {
+        if (!appState.animStart) appState.animStart = ts;
+        const elapsed = ts - appState.animStart;
+        appState.animProgress = Math.min(1, elapsed / appState.animDuration);
+        draw();
+        if (appState.animProgress < 1) {
+            appState.rafId = requestAnimationFrame(animationFrame);
+        } else {
+            appState.rafId = null;
+            appState.animFrom = null;
+            appState.animTo = null;
+        }
+    }
+
+    function animateTo(targetStep) {
+        const fromFrame = frameForStep(appState.step, appState.preset);
+        const toFrame = frameForStep(targetStep, appState.preset);
+        appState.step = targetStep;
+        appState.animFrom = fromFrame;
+        appState.animTo = toFrame;
+        appState.animProgress = 0;
+        appState.animStart = 0;
+        if (targetStep === 2 && toFrame.rescaleNeeded) {
+            appState.animDuration = 1100;
+        } else {
+            appState.animDuration = 600;
+        }
+        if (appState.rafId) cancelAnimationFrame(appState.rafId);
+        appState.rafId = requestAnimationFrame(animationFrame);
+        updateUI();
+    }
+
+    const STEP_CONTENT = [
+        {
+            title: 'Step 0: Setup',
+            desc: '8 input values, split into <strong>2 blocks of 4</strong>. Goal: compute softmax over all 8. <strong>FlashAttention can only fit one block in SRAM at a time</strong> — how do we get the right answer streaming?'
+        },
+        {
+            title: 'Step 1: Process Block 1',
+            desc: 'Load <strong class="text-orange-600">Block 1</strong> into SRAM. Track its max <strong>m</strong> and denominator <strong>ℓ = Σ exp(xᵢ − m)</strong>. Bar heights = current softmax estimate (sums to 1.0 since we\'ve only seen block 1).'
+        },
+        {
+            title: 'Step 2: Block 2 arrives → Rescale + Accumulate',
+            desc: '<strong class="text-blue-600">Block 2</strong>\'s max is bigger! Multiply <strong>ℓ</strong> and Block 1\'s saved exp values by <code class="bg-yellow-100 px-1 rounded">exp(m_old − m_new)</code> — Block 1 bars shrink. Then add Block 2\'s contribution to ℓ. The bars now reflect the full estimate.'
+        },
+        {
+            title: 'Step 3: Final Normalize',
+            desc: 'All blocks processed. Each saved <strong>exp(xᵢ − m)</strong> is divided by the final <strong>ℓ</strong> to get the softmax probability. Bars sum to 1.0.'
+        },
+        {
+            title: 'Step 4: Verify against Batch Softmax',
+            desc: 'Dashed green outlines = standard batch softmax (computed with full row visible). They <strong class="text-emerald-600">match exactly</strong> — online softmax is mathematically equivalent, not an approximation. This is the trick FlashAttention uses to skip materializing the N×N attention matrix.'
+        }
+    ];
+
+    const stepTitle = document.getElementById('step-title');
+    const stepDesc = document.getElementById('step-desc');
+    const btnPrev = document.getElementById('btn-prev');
+    const btnNext = document.getElementById('btn-next');
+    const stepIndicators = document.getElementById('step-indicators');
+
+    for (let i = 0; i < N_STEPS; i++) {
+        const dot = document.createElement('button');
+        dot.className = 'w-3 h-3 rounded-full transition-colors';
+        dot.dataset.step = i;
+        dot.addEventListener('click', () => animateTo(parseInt(dot.dataset.step, 10)));
+        stepIndicators.appendChild(dot);
+    }
+
+    function updateUI() {
+        const c = STEP_CONTENT[appState.step];
+        stepTitle.textContent = c.title;
+        stepDesc.innerHTML = c.desc;
+        btnPrev.disabled = (appState.step === 0);
+        btnNext.disabled = (appState.step === N_STEPS - 1);
+        [...stepIndicators.children].forEach((d, i) => {
+            d.className = 'w-3 h-3 rounded-full transition-colors ' +
+                (i === appState.step
+                    ? 'bg-blue-600'
+                    : (i < appState.step ? 'bg-blue-300' : 'bg-slate-300 hover:bg-slate-400'));
+        });
+        const vals = PRESETS[appState.preset].values;
+        const naive = naiveBlockSoftmax(vals).map(v => v.toFixed(3));
+        const online = frameForStep(3, appState.preset).softmaxBars.map(v => v.toFixed(3));
+        const batch = batchSoftmax(vals).map(v => v.toFixed(3));
+        document.getElementById('dd-naive').textContent = '[' + naive.join(', ') + ']';
+        document.getElementById('dd-online').textContent = '[' + online.join(', ') + ']';
+        document.getElementById('dd-batch').textContent = '[' + batch.join(', ') + ']';
+    }
+
+    btnPrev.addEventListener('click', () => {
+        if (appState.step > 0) animateTo(appState.step - 1);
+    });
+    btnNext.addEventListener('click', () => {
+        if (appState.step < N_STEPS - 1) animateTo(appState.step + 1);
+    });
+
+    document.querySelectorAll('.preset-btn').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const idx = parseInt(btn.dataset.preset, 10);
+            appState.preset = idx;
+            document.querySelectorAll('.preset-btn').forEach(b => {
+                b.dataset.active = (parseInt(b.dataset.preset, 10) === idx) ? 'true' : 'false';
+            });
+            appState.step = 0;
+            appState.animProgress = 1;
+            appState.animFrom = null;
+            appState.animTo = null;
+            updateUI();
+            draw();
+        });
+    });
+
+    document.addEventListener('keydown', (e) => {
+        if (e.key === 'ArrowRight' && appState.step < N_STEPS - 1) animateTo(appState.step + 1);
+        else if (e.key === 'ArrowLeft' && appState.step > 0) animateTo(appState.step - 1);
+    });
+
+    resizeCanvas();
+    updateUI();
+    draw();
+
+    </script>
+</body>
+</html>
