@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Gradient Descent Learning Rate Visualizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+
+<body class="bg-slate-900 text-white flex flex-col items-center justify-center h-screen">
+
+<h1 class="text-2xl mb-4 text-blue-400">Gradient Descent Visualizer</h1>
+
+<canvas id="canvas" width="600" height="400" class="bg-slate-800 rounded"></canvas>
+
+<div class="mt-4 w-80">
+  <label>Learning Rate: <span id="lrVal">0.10</span></label>
+  <input id="lr" type="range" min="0.01" max="1" step="0.01" value="0.1" class="w-full">
+</div>
+
+<div class="mt-3 flex gap-2">
+  <button id="start" class="bg-blue-600 px-4 py-2 rounded">Start</button>
+  <button id="reset" class="bg-gray-600 px-4 py-2 rounded">Reset</button>
+</div>
+
+<script>
+const canvas = document.getElementById("canvas");
+const ctx = canvas.getContext("2d");
+
+let x = 8; 
+let lr = 0.1;
+let running = false;
+
+// loss function
+function loss(x){
+  return x*x + 5*Math.sin(x);
+}
+
+// gradient
+function grad(x){
+  return 2*x + 5*Math.cos(x);
+}
+
+
+function draw(){
+  ctx.clearRect(0,0,600,400);
+
+  
+  ctx.strokeStyle = "white";
+  ctx.beginPath();
+  for(let i=-5;i<=5;i+=0.1){
+    let px = 300 + i*40;
+    let py = 300 - loss(i)*20;
+    if(i===-5) ctx.moveTo(px,py);
+    else ctx.lineTo(px,py);
+  }
+  ctx.stroke();
+
+  
+  let px = 300 + x*40;
+  let py = 300 - loss(x)*20;
+
+  
+  if (lr < 0.1) ctx.fillStyle = "green";      
+  else if (lr < 0.5) ctx.fillStyle = "red";   
+  else ctx.fillStyle = "orange";              
+
+  ctx.beginPath();
+  ctx.arc(px,py,6,0,Math.PI*2);
+  ctx.fill();
+}
+
+
+function step(){
+  if(!running) return;
+
+  
+  x = x - lr * grad(x);
+
+  
+  if (Math.abs(x) < 0.01) {
+    running = false;
+    return;
+  }
+
+ 
+  if (lr > 0.6) {
+    x += Math.random() * 0.5 - 0.25;
+  }
+
+  draw();
+  requestAnimationFrame(step);
+}
+
+
+document.getElementById("lr").oninput = (e)=>{
+  lr = parseFloat(e.target.value);
+  document.getElementById("lrVal").innerText = lr.toFixed(2);
+}
+
+
+document.getElementById("start").onclick = ()=>{
+  running = true;
+  step();
+}
+
+// reset
+document.getElementById("reset").onclick = ()=>{
+  running = false;
+  x = 8;
+  draw();
+}
+
+// 初始畫面
+draw();
+</script>
+
+</body>
+</html>
