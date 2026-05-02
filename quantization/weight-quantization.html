@@ -5,129 +5,132 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Weight Quantization Visualizer</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <style>
         body { background: #0f172a; color: #e2e8f0; }
-        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.1); border-radius: 14px; padding: 20px; }
-        .card.highlight { border-color: #6366f1; }
+        .card { background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.10); border-radius: 14px; padding: 20px; }
         .weight-cell {
-            width: 62px; height: 52px;
+            width: 68px; height: 58px;
             display: flex; flex-direction: column; align-items: center; justify-content: center;
-            border-radius: 8px; border: 1.5px solid rgba(255,255,255,0.12);
-            font-size: 11px; font-weight: 700; font-family: monospace;
-            transition: all 0.4s ease; cursor: default; position: relative;
+            border-radius: 8px; border: 2px solid rgba(255,255,255,0.15);
+            font-weight: 700; font-family: monospace;
+            transition: background 0.4s, border-color 0.4s, transform 0.2s;
         }
-        .weight-cell .val { font-size: 12px; }
-        .weight-cell .err { font-size: 9px; opacity: 0.75; }
-        .step-indicator {
-            width: 28px; height: 28px; border-radius: 50%;
+        .weight-cell .val { font-size: 13px; }
+        .weight-cell .sub { font-size: 9px; margin-top: 2px; opacity: 0.7; }
+        .step-dot {
+            width: 30px; height: 30px; border-radius: 50%;
             display: flex; align-items: center; justify-content: center;
-            font-weight: 800; font-size: 13px;
+            font-weight: 800; font-size: 13px; flex-shrink: 0;
+            transition: background 0.3s, color 0.3s;
         }
-        .step-active { background: #6366f1; color: white; }
-        .step-done   { background: #14532d; color: #86efac; }
-        .step-todo   { background: #334155; color: #64748b; }
-        .tag { font-size: 10px; font-weight: 700; padding: 2px 8px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.06em; }
-        select, button.ctrl {
-            background: #1e293b; border: 1px solid #475569; color: #e2e8f0;
-            border-radius: 8px; padding: 6px 12px; font-size: 13px; cursor: pointer;
-        }
-        button.ctrl:hover { background: #334155; }
-        button.primary {
-            background: #4f46e5; color: white; border: none;
-            border-radius: 8px; padding: 8px 20px; font-weight: 700; font-size: 13px; cursor: pointer;
-            transition: background 0.15s;
-        }
-        button.primary:hover { background: #4338ca; }
-        button.primary:disabled { background: #334155; color: #64748b; cursor: not-allowed; }
+        .step-active  { background: #6366f1; color: #fff; box-shadow: 0 0 0 3px rgba(99,102,241,0.35); }
+        .step-done    { background: #166534; color: #86efac; }
+        .step-todo    { background: #334155; color: #64748b; }
         .formula-box {
             background: #1e293b; border: 1px solid #334155; border-radius: 10px;
-            padding: 12px 16px; font-family: monospace; font-size: 13px; color: #a5b4fc;
+            padding: 14px 16px; font-family: monospace; font-size: 13px;
+            color: #a5b4fc; line-height: 1.7;
         }
-        .arrow { color: #6366f1; font-size: 20px; align-self: center; }
-        @keyframes flash { 0%,100%{opacity:1} 50%{opacity:0.3} }
-        .flash { animation: flash 0.5s ease; }
-        input[type=range] {
-            -webkit-appearance:none; height:6px; background:#334155; border-radius:5px;
+        select {
+            background: #1e293b; border: 1px solid #475569; color: #e2e8f0;
+            border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer;
         }
-        input[type=range]::-webkit-slider-thumb {
-            -webkit-appearance:none; width:18px; height:18px; background:#6366f1;
-            border-radius:50%; cursor:pointer;
+        .btn {
+            border-radius: 8px; padding: 8px 16px; font-weight: 700;
+            font-size: 13px; cursor: pointer; border: none; transition: background 0.15s, opacity 0.15s;
         }
+        .btn-primary  { background: #4f46e5; color: #fff; }
+        .btn-primary:hover  { background: #4338ca; }
+        .btn-secondary { background: #1e293b; color: #e2e8f0; border: 1px solid #475569; }
+        .btn-secondary:hover { background: #334155; }
+        .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        @keyframes pop { 0%{transform:scale(1)} 50%{transform:scale(1.08)} 100%{transform:scale(1)} }
+        .pop { animation: pop 0.3s ease; }
+        .bar-track { background: #1e293b; border-radius: 6px; height: 18px; overflow: hidden; }
+        .bar-fill   { height: 18px; border-radius: 6px; transition: width 0.5s ease; }
     </style>
 </head>
 <body class="min-h-screen p-4 lg:p-8">
 <div class="max-w-5xl mx-auto">
 
+    <!-- Header -->
     <div class="mb-6">
         <a href="../index.html" class="text-slate-500 hover:text-slate-300 text-sm mb-2 inline-block">← Back to Catalog</a>
         <h1 class="text-3xl font-bold text-white">Weight Quantization Visualizer</h1>
-        <p class="text-slate-400 mt-1">Step through how FP32 weights are mapped to low-bit integers — and see where precision is lost.</p>
+        <p class="text-slate-400 mt-1 text-sm">Step through how FP32 weights are compressed to low-bit integers — and see exactly where precision is lost.</p>
     </div>
 
-    <!-- Controls -->
-    <div class="card mb-5 flex flex-wrap items-center gap-4">
+    <!-- Controls row -->
+    <div class="card mb-5 flex flex-wrap items-center gap-3">
         <div class="flex items-center gap-2">
-            <label class="text-slate-400 text-sm">Bit-width:</label>
-            <select id="bitwidth" class="ctrl">
+            <label class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Bit-width</label>
+            <select id="sel-bits">
                 <option value="8">INT8 (−128…127)</option>
                 <option value="4">INT4 (−8…7)</option>
                 <option value="2">INT2 (−2…1)</option>
             </select>
         </div>
         <div class="flex items-center gap-2">
-            <label class="text-slate-400 text-sm">Scheme:</label>
-            <select id="scheme" class="ctrl">
+            <label class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Scheme</label>
+            <select id="sel-scheme">
                 <option value="symmetric">Symmetric</option>
                 <option value="asymmetric">Asymmetric</option>
             </select>
         </div>
         <div class="flex items-center gap-2">
-            <label class="text-slate-400 text-sm">Granularity:</label>
-            <select id="granularity" class="ctrl">
+            <label class="text-slate-400 text-xs font-semibold uppercase tracking-wider">Granularity</label>
+            <select id="sel-gran">
                 <option value="tensor">Per-tensor</option>
-                <option value="channel">Per-row (channel)</option>
+                <option value="channel">Per-row</option>
             </select>
         </div>
-        <button class="ctrl" id="randomize-btn">↻ New weights</button>
-        <button class="primary" id="auto-play-btn">▶ Auto-play</button>
+        <button class="btn btn-secondary" id="btn-new">↻ New weights</button>
     </div>
 
-    <!-- Step progress -->
-    <div class="flex items-center gap-2 mb-5 flex-wrap" id="step-bar"></div>
+    <!-- Step navigator -->
+    <div class="card mb-5">
+        <div class="flex flex-wrap items-center gap-2 mb-4" id="step-bar"></div>
+        <p id="step-desc" class="text-slate-400 text-sm min-h-[1.4rem]"></p>
+        <div class="flex gap-3 mt-4">
+            <button class="btn btn-secondary" id="btn-prev" disabled>← Prev</button>
+            <button class="btn btn-primary"   id="btn-next">Next →</button>
+            <button class="btn btn-secondary" id="btn-play">▶ Auto</button>
+            <button class="btn btn-secondary" id="btn-reset">⟳ Reset</button>
+        </div>
+    </div>
 
-    <!-- Main visualization area -->
+    <!-- Main grid -->
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 mb-5">
 
-        <!-- Left: weight grid -->
+        <!-- Weight tensor -->
         <div class="card">
-            <div class="flex items-center gap-2 mb-3">
+            <div class="flex items-center gap-2 mb-4">
                 <h2 class="font-bold text-white">Weight Tensor (4 × 4)</h2>
-                <span id="tensor-label" class="tag" style="background:#1e3a5f;color:#93c5fd">FP32 original</span>
+                <span id="tensor-tag" class="text-xs font-bold px-2 py-0.5 rounded-full uppercase"
+                    style="background:#1e3a5f;color:#93c5fd">FP32 original</span>
             </div>
-            <div id="weight-grid" class="grid gap-2" style="grid-template-columns: repeat(4, 1fr)"></div>
+            <div id="weight-grid" class="grid gap-2" style="grid-template-columns:repeat(4,1fr)"></div>
             <p id="grid-caption" class="text-slate-500 text-xs mt-3">Original 32-bit float weights.</p>
         </div>
 
-        <!-- Right: formula + stats -->
+        <!-- Formula + stats -->
         <div class="flex flex-col gap-4">
-
             <div class="card flex-1">
                 <h2 class="font-bold text-white mb-3">Quantization Math</h2>
                 <div id="formula-panel"></div>
             </div>
-
             <div class="card">
                 <h2 class="font-bold text-white mb-3">Statistics</h2>
-                <div id="stats-panel" class="grid grid-cols-2 gap-3 text-sm"></div>
+                <div id="stats-panel" class="grid grid-cols-2 gap-2 text-sm"></div>
             </div>
         </div>
     </div>
 
-    <!-- Error chart -->
+    <!-- Error chart (pure CSS bars) -->
     <div class="card mb-5">
-        <h2 class="font-bold text-white mb-3">Quantization Error per Weight</h2>
-        <canvas id="error-chart" height="100"></canvas>
+        <h2 class="font-bold text-white mb-1">Quantization Error per Weight</h2>
+        <p class="text-slate-500 text-xs mb-4">Appears after Step 3 (dequantize). Bar height = |w − w̃|.</p>
+        <div id="error-chart" class="space-y-1"></div>
     </div>
 
     <!-- Memory savings -->
@@ -136,22 +139,22 @@
         <div id="memory-panel" class="space-y-3"></div>
     </div>
 
-    <!-- Key insights -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+    <!-- Insight cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
         <div class="card">
-            <div class="text-xl mb-1">🎯</div>
+            <div class="text-2xl mb-1">🎯</div>
             <h3 class="font-bold text-white text-sm mb-1">Symmetric vs Asymmetric</h3>
-            <p class="text-slate-400 text-xs">Symmetric sets zero-point = 0, maps [−max, max] uniformly. Asymmetric uses a separate zero-point offset, better for one-sided distributions (e.g., ReLU outputs ≥ 0).</p>
+            <p class="text-slate-400 text-xs">Symmetric maps [−max, max] with zero-point = 0. Asymmetric adds an offset, useful for ReLU activations that are always ≥ 0.</p>
         </div>
         <div class="card">
-            <div class="text-xl mb-1">📊</div>
-            <h3 class="font-bold text-white text-sm mb-1">Per-tensor vs Per-channel</h3>
-            <p class="text-slate-400 text-xs">Per-tensor uses one scale for all weights — fast but coarse. Per-channel assigns one scale per output neuron, capturing different weight magnitudes per filter with only minor overhead.</p>
+            <div class="text-2xl mb-1">📊</div>
+            <h3 class="font-bold text-white text-sm mb-1">Per-tensor vs Per-row</h3>
+            <p class="text-slate-400 text-xs">Per-tensor uses one scale for all weights. Per-row assigns one scale per output channel, capturing different magnitudes at a small cost.</p>
         </div>
         <div class="card">
-            <div class="text-xl mb-1">⚠️</div>
+            <div class="text-2xl mb-1">⚠️</div>
             <h3 class="font-bold text-white text-sm mb-1">Outliers hurt quality</h3>
-            <p class="text-slate-400 text-xs">A single large outlier forces a wide scale, wasting most of the INT8 range on values near zero. Methods like SmoothQuant and GPTQ redistribute outliers before quantization.</p>
+            <p class="text-slate-400 text-xs">One large outlier forces a wide scale, wasting most of the INT8 range. SmoothQuant and GPTQ redistribute outliers before quantizing.</p>
         </div>
     </div>
 
@@ -159,300 +162,279 @@
 
 <script>
 const STEPS = [
-    { id: 0, label: 'Original FP32', desc: 'Raw 32-bit float weights as stored in the model checkpoint.' },
-    { id: 1, label: 'Compute scale', desc: 'Find the min/max of the tensor and compute the scale factor (and zero-point for asymmetric).' },
-    { id: 2, label: 'Quantize → INT', desc: 'Map each float to the nearest integer: q = round(w / scale) + zero_point, then clamp.' },
-    { id: 3, label: 'Dequantize → FP', desc: 'Recover approximate floats: w̃ = (q − zero_point) × scale. This is what the model actually computes with.' },
-    { id: 4, label: 'Error analysis', desc: 'The difference |w − w̃| is the quantization error. Lower bit-widths cause larger errors.' },
+    { label: 'FP32 Original',    desc: 'Raw 32-bit float weights as stored in the model checkpoint. Each value takes 4 bytes.' },
+    { label: 'Compute Scale',    desc: 'Find min/max of the tensor and compute the scale factor (and zero-point for asymmetric quantization).' },
+    { label: 'Quantize → INT',   desc: 'Map each float to the nearest integer: q = clamp(round(w / scale) + zero_point). Range shrinks to INT8/4/2.' },
+    { label: 'Dequantize → FP',  desc: 'Recover approximate floats: w̃ = (q − zero_point) × scale. These are the values the hardware actually multiplies.' },
+    { label: 'Error Analysis',   desc: 'The quantization error |w − w̃| shows how much precision was lost. Lower bit-width = coarser grid = larger error.' },
 ];
 
-let currentStep = 0;
+let step = 0;
 let weights = [];
-let isPlaying = false;
-let playTimer = null;
-let errorChart = null;
+let playing = false;
+let timer = null;
 
-function randWeight() { return (Math.random() * 4 - 2).toFixed(4) * 1; }
+const CELL_BG = ['#1e293b','#1e293b','#1c1040','#0a2a1a','#0f172a'];
+const CELL_BD = ['#475569','#3b82f6','#a855f7','#22c55e','#ef4444'];
+const TAG_STYLES = [
+    'background:#1e3a5f;color:#93c5fd',
+    'background:#1e3a5f;color:#93c5fd',
+    'background:#3b1f6e;color:#d8b4fe',
+    'background:#14532d;color:#86efac',
+    'background:#7f1d1d;color:#fca5a5',
+];
+const TAG_LABELS = ['FP32 original','Computing scale…','INT quantized','Dequantized FP32','Error heatmap'];
 
-function generateWeights() {
-    weights = Array.from({length: 16}, randWeight);
-}
+function rand() { return parseFloat((Math.random() * 4 - 2).toFixed(3)); }
+function genWeights() { weights = Array.from({length: 16}, rand); }
 
-function getBitwidth() { return parseInt(document.getElementById('bitwidth').value); }
-function getScheme() { return document.getElementById('scheme').value; }
-function getGranularity() { return document.getElementById('granularity').value; }
+function selBits()   { return parseInt(document.getElementById('sel-bits').value); }
+function selScheme() { return document.getElementById('sel-scheme').value; }
+function selGran()   { return document.getElementById('sel-gran').value; }
 
-function getQParams(vals, bits, scheme) {
-    const n = Math.pow(2, bits);
-    const qMin = -(n / 2), qMax = n / 2 - 1;
+function qparams(vals, bits, scheme) {
+    const half = Math.pow(2, bits - 1);
+    const qMin = -half, qMax = half - 1;
     const wMin = Math.min(...vals), wMax = Math.max(...vals);
     if (scheme === 'symmetric') {
-        const absMax = Math.max(Math.abs(wMin), Math.abs(wMax));
-        const scale = absMax / qMax || 1e-8;
-        return { scale, zeroPoint: 0, qMin, qMax };
-    } else {
-        const scale = (wMax - wMin) / (qMax - qMin) || 1e-8;
-        const zeroPoint = Math.round(qMin - wMin / scale);
-        return { scale, zeroPoint: Math.max(qMin, Math.min(qMax, zeroPoint)), qMin, qMax };
+        const absMax = Math.max(Math.abs(wMin), Math.abs(wMax)) || 1e-8;
+        return { scale: absMax / qMax, zp: 0, qMin, qMax };
     }
+    const range = wMax - wMin || 1e-8;
+    const scale = range / (qMax - qMin);
+    const zp = Math.round(qMin - wMin / scale);
+    return { scale, zp: Math.max(qMin, Math.min(qMax, zp)), qMin, qMax };
 }
 
-function quantize(w, params) {
-    return Math.max(params.qMin, Math.min(params.qMax, Math.round(w / params.scale) + params.zeroPoint));
-}
-function dequantize(q, params) { return (q - params.zeroPoint) * params.scale; }
+function quant(w, p)   { return Math.max(p.qMin, Math.min(p.qMax, Math.round(w / p.scale) + p.zp)); }
+function dequant(q, p) { return (q - p.zp) * p.scale; }
 
-function computeAll() {
-    const bits = getBitwidth(), scheme = getScheme(), gran = getGranularity();
-    const rows = 4;
-    let qParamsList = [];
-
-    if (gran === 'tensor') {
-        const p = getQParams(weights, bits, scheme);
-        qParamsList = Array(rows).fill(p);
-    } else {
-        for (let r = 0; r < rows; r++) {
-            const row = weights.slice(r * 4, r * 4 + 4);
-            qParamsList.push(getQParams(row, bits, scheme));
-        }
-    }
-
-    const quantized = weights.map((w, i) => quantize(w, qParamsList[Math.floor(i / 4)]));
-    const dequantized = quantized.map((q, i) => dequantize(q, qParamsList[Math.floor(i / 4)]));
-    const errors = weights.map((w, i) => Math.abs(w - dequantized[i]));
-    const relErrors = weights.map((w, i) => w !== 0 ? Math.abs((w - dequantized[i]) / w) * 100 : 0);
-    const mse = errors.reduce((a, b) => a + b * b, 0) / errors.length;
-    const mae = errors.reduce((a, b) => a + b, 0) / errors.length;
-
-    return { qParamsList, quantized, dequantized, errors, relErrors, mse, mae };
+function compute() {
+    const bits = selBits(), scheme = selScheme(), gran = selGran();
+    const params = gran === 'tensor'
+        ? Array(4).fill(qparams(weights, bits, scheme))
+        : Array.from({length: 4}, (_, r) => qparams(weights.slice(r*4, r*4+4), bits, scheme));
+    const Q  = weights.map((w, i) => quant(w, params[Math.floor(i/4)]));
+    const DQ = Q.map((q, i) => dequant(q, params[Math.floor(i/4)]));
+    const E  = weights.map((w, i) => Math.abs(w - DQ[i]));
+    const mse = E.reduce((a,b) => a + b*b, 0) / E.length;
+    const mae = E.reduce((a,b) => a + b, 0) / E.length;
+    return { params, Q, DQ, E, mse, mae };
 }
 
-function colorForStep(step) {
-    return ['#334155', '#1e3a5f', '#3b1f6e', '#1a3a2a', '#7f1d1d'][step];
-}
-function borderForStep(step) {
-    return ['#475569', '#3b82f6', '#a855f7', '#22c55e', '#ef4444'][step];
-}
-
-function heatColor(err, maxErr) {
-    if (maxErr === 0) return '#14532d';
+function heatBg(err, maxErr) {
+    if (maxErr < 1e-9) return '#14532d';
     const t = Math.min(1, err / maxErr);
-    const r = Math.round(20 + t * 220);
-    const g = Math.round(83 - t * 50);
-    const b = Math.round(44 + t * 10);
-    return `rgb(${r},${g},${b})`;
-}
-
-function renderGrid(step, data) {
-    const grid = document.getElementById('weight-grid');
-    const label = document.getElementById('tensor-label');
-    const caption = document.getElementById('grid-caption');
-    const maxErr = Math.max(...data.errors);
-
-    let vals, bg, borderCol, caption2, labelText, labelStyle;
-
-    if (step === 0) {
-        vals = weights; bg = '#1e293b'; borderCol = '#475569';
-        labelText = 'FP32 original'; labelStyle = 'background:#1e3a5f;color:#93c5fd';
-        caption2 = 'Original 32-bit float weights.';
-    } else if (step === 1) {
-        vals = weights; bg = '#1e293b'; borderCol = '#3b82f6';
-        labelText = 'Computing scale…'; labelStyle = 'background:#1e3a5f;color:#93c5fd';
-        caption2 = `Scale computed from weight range. Scheme: ${getScheme()}, Granularity: ${getGranularity()}.`;
-    } else if (step === 2) {
-        vals = data.quantized; bg = '#1e0a3c'; borderCol = '#a855f7';
-        labelText = `INT${getBitwidth()} quantized`; labelStyle = 'background:#3b1f6e;color:#d8b4fe';
-        caption2 = `Integer values after quantize + clamp. Range: [${data.qParamsList[0].qMin}, ${data.qParamsList[0].qMax}].`;
-    } else if (step === 3) {
-        vals = data.dequantized; bg = '#0a2a1a'; borderCol = '#22c55e';
-        labelText = 'Dequantized FP32'; labelStyle = 'background:#14532d;color:#86efac';
-        caption2 = 'Approximate floats recovered by multiplying back by scale.';
-    } else {
-        vals = data.dequantized; bg = null; borderCol = null;
-        labelText = 'Error heatmap'; labelStyle = 'background:#7f1d1d;color:#fca5a5';
-        caption2 = 'Cell color = quantization error magnitude. Darker red = more error.';
-    }
-
-    grid.innerHTML = vals.map((v, i) => {
-        const cellBg = step === 4 ? heatColor(data.errors[i], maxErr) : bg;
-        const cellBorder = step === 4 ? heatColor(data.errors[i], maxErr) : borderCol;
-        const errTxt = step >= 3 ? `Δ${data.errors[i].toFixed(3)}` : '';
-        const dispVal = step === 2 ? v.toFixed(0) : v.toFixed(3);
-        return `<div class="weight-cell flash" style="background:${cellBg};border-color:${cellBorder}">
-            <span class="val">${dispVal}</span>
-            ${errTxt ? `<span class="err">${errTxt}</span>` : ''}
-        </div>`;
-    }).join('');
-
-    label.textContent = labelText;
-    label.style.cssText = labelStyle + '; border-radius:9999px;padding:2px 8px;font-size:10px;font-weight:700;text-transform:uppercase;';
-    caption.textContent = caption2;
-}
-
-function renderFormula(step, data) {
-    const p = data.qParamsList[0];
-    const bits = getBitwidth(), scheme = getScheme();
-    const panel = document.getElementById('formula-panel');
-
-    if (step === 0) {
-        panel.innerHTML = `<div class="formula-box">w ∈ ℝ  (32-bit IEEE 754 float)<br><br>
-            <span class="text-slate-400">Range: [${Math.min(...weights).toFixed(3)}, ${Math.max(...weights).toFixed(3)}]</span></div>
-            <p class="text-slate-400 text-xs mt-2">No transformation yet. Each weight takes 4 bytes of memory.</p>`;
-    } else if (step === 1) {
-        panel.innerHTML = `<div class="formula-box">
-            ${scheme === 'symmetric'
-                ? `absMax = max(|w|) = ${Math.max(...weights.map(Math.abs)).toFixed(4)}<br>scale = absMax / ${p.qMax} = <span class="text-yellow-300">${p.scale.toFixed(5)}</span><br>zero_point = 0`
-                : `wMin = ${Math.min(...weights).toFixed(4)}, wMax = ${Math.max(...weights).toFixed(4)}<br>scale = (wMax−wMin) / (${p.qMax}−${p.qMin}) = <span class="text-yellow-300">${p.scale.toFixed(5)}</span><br>zero_point = round(${p.qMin} − wMin/scale) = <span class="text-yellow-300">${p.zeroPoint}</span>`
-            }
-        </div>
-        <p class="text-slate-400 text-xs mt-2">Scale maps the float range to the integer range. One scale value per ${getGranularity() === 'tensor' ? 'tensor' : 'row'}.</p>`;
-    } else if (step === 2) {
-        panel.innerHTML = `<div class="formula-box">q = clamp(round(w / scale) + zp, ${p.qMin}, ${p.qMax})<br><br>
-            <span class="text-slate-400">Example: w = ${weights[0].toFixed(4)}<br>
-            → round(${weights[0].toFixed(4)} / ${p.scale.toFixed(5)}) + ${p.zeroPoint}<br>
-            → ${data.quantized[0]}</span></div>
-        <p class="text-slate-400 text-xs mt-2">Each weight now fits in ${bits} bits. INT${bits} stores ${Math.pow(2,bits)} distinct values.</p>`;
-    } else if (step === 3) {
-        panel.innerHTML = `<div class="formula-box">w̃ = (q − zero_point) × scale<br><br>
-            <span class="text-slate-400">Example: q = ${data.quantized[0]}<br>
-            → (${data.quantized[0]} − ${p.zeroPoint}) × ${p.scale.toFixed(5)}<br>
-            → ${data.dequantized[0].toFixed(5)}</span></div>
-        <p class="text-slate-400 text-xs mt-2">Dequantized values are what the model actually multiplies during inference. They're FP32 again, but snapped to the quantization grid.</p>`;
-    } else {
-        panel.innerHTML = `<div class="formula-box">error = |w − w̃|<br>MSE = ${data.mse.toFixed(6)}<br>MAE = ${data.mae.toFixed(6)}</div>
-        <p class="text-slate-400 text-xs mt-2">Larger bit-width → finer grid → smaller error. Try switching to INT4 or INT2 to see error grow.</p>`;
-    }
-}
-
-function renderStats(step, data) {
-    const p = data.qParamsList[0];
-    const bits = getBitwidth();
-    const panel = document.getElementById('stats-panel');
-    const items = [
-        ['Bit-width', `INT${bits}`],
-        ['Scale', p.scale.toFixed(5)],
-        ['Zero-point', p.zeroPoint],
-        ['Quant range', `[${p.qMin}, ${p.qMax}]`],
-        ['MSE', step >= 4 ? data.mse.toFixed(6) : '—'],
-        ['Max error', step >= 4 ? Math.max(...data.errors).toFixed(4) : '—'],
-    ];
-    panel.innerHTML = items.map(([k, v]) => `
-        <div class="bg-slate-800/50 rounded-lg p-2">
-            <div class="text-slate-500 text-xs">${k}</div>
-            <div class="text-white font-mono font-bold text-sm">${v}</div>
-        </div>`).join('');
-}
-
-function renderErrorChart(data) {
-    const ctx = document.getElementById('error-chart').getContext('2d');
-    const labels = weights.map((_, i) => `w${i}`);
-    if (errorChart) { errorChart.destroy(); }
-    errorChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-            labels,
-            datasets: [
-                {
-                    label: 'Quantization Error |w − w̃|',
-                    data: currentStep >= 3 ? data.errors : Array(16).fill(0),
-                    backgroundColor: data.errors.map(e => {
-                        const maxE = Math.max(...data.errors) || 1;
-                        const t = e / maxE;
-                        return `rgba(${Math.round(239 * t + 99 * (1-t)}, ${Math.round(68 * t + 102 * (1-t))}, ${Math.round(68 * t + 241 * (1-t))}, 0.8)`;
-                    }),
-                    borderRadius: 4,
-                }
-            ]
-        },
-        options: {
-            responsive: true,
-            plugins: { legend: { labels: { color: '#94a3b8' } } },
-            scales: {
-                x: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' } },
-                y: { ticks: { color: '#64748b' }, grid: { color: '#1e293b' }, min: 0 }
-            }
-        }
-    });
-}
-
-function renderMemory() {
-    const bits = getBitwidth();
-    const n = 16;
-    const fp32 = n * 4;
-    const qBytes = Math.ceil(n * bits / 8);
-    const scaleBytes = getGranularity() === 'tensor' ? 4 : 4 * 4;
-    const total = qBytes + scaleBytes;
-    const ratio = (fp32 / total).toFixed(1);
-
-    const panel = document.getElementById('memory-panel');
-    const bars = [
-        { label: 'FP32 original', bytes: fp32, color: '#3b82f6', pct: 100 },
-        { label: `INT${bits} weights`, bytes: qBytes, color: '#a855f7', pct: qBytes / fp32 * 100 },
-        { label: `INT${bits} weights + scale metadata`, bytes: total, color: '#22c55e', pct: total / fp32 * 100 },
-    ];
-    panel.innerHTML = bars.map(b => `
-        <div>
-            <div class="flex justify-between text-xs text-slate-400 mb-1">
-                <span>${b.label}</span><span class="font-mono font-bold text-white">${b.bytes} bytes</span>
-            </div>
-            <div class="bg-slate-800 rounded h-4 overflow-hidden">
-                <div class="h-4 rounded transition-all duration-500" style="width:${b.pct}%;background:${b.color}"></div>
-            </div>
-        </div>`).join('') + `<p class="text-slate-400 text-xs pt-1">Compression ratio: <strong class="text-white">${ratio}× smaller</strong> vs FP32 (for this 4×4 toy tensor).</p>`;
+    return `rgb(${Math.round(20 + t*215)},${Math.round(80 - t*60)},${Math.round(40)})`;
 }
 
 function renderStepBar() {
-    const bar = document.getElementById('step-bar');
-    bar.innerHTML = STEPS.map((s, i) => {
-        const cls = i < currentStep ? 'step-done' : i === currentStep ? 'step-active' : 'step-todo';
-        return `<div class="flex items-center gap-1 ${i < STEPS.length - 1 ? 'mr-2' : ''}">
-            <div class="step-indicator ${cls}">${i < currentStep ? '✓' : i + 1}</div>
-            <span class="text-xs font-semibold ${i === currentStep ? 'text-white' : 'text-slate-500'}">${s.label}</span>
-            ${i < STEPS.length - 1 ? '<span class="text-slate-600 text-lg ml-2">›</span>' : ''}
-        </div>`;
+    document.getElementById('step-bar').innerHTML = STEPS.map((s, i) => {
+        const cls = i < step ? 'step-done' : i === step ? 'step-active' : 'step-todo';
+        const label = i < step ? '✓' : i + 1;
+        return `
+          <div class="flex items-center gap-1">
+            <div class="step-dot ${cls}">${label}</div>
+            <span class="text-xs ${i === step ? 'text-white font-semibold' : 'text-slate-500'}">${s.label}</span>
+            ${i < STEPS.length - 1 ? '<span class="text-slate-700 mx-1">›</span>' : ''}
+          </div>`;
+    }).join('');
+    document.getElementById('step-desc').textContent = STEPS[step].desc;
+}
+
+function renderGrid(data) {
+    const grid = document.getElementById('weight-grid');
+    const tag  = document.getElementById('tensor-tag');
+    const cap  = document.getElementById('grid-caption');
+    const maxE = Math.max(...data.E);
+
+    let vals, captions;
+    if      (step === 0) { vals = weights;  }
+    else if (step === 1) { vals = weights;  }
+    else if (step === 2) { vals = data.Q;   }
+    else if (step === 3) { vals = data.DQ;  }
+    else                 { vals = data.DQ;  }
+
+    const capt2 = [
+        'Original 32-bit float weights.',
+        `Scale computed from weight range [${Math.min(...weights).toFixed(2)}, ${Math.max(...weights).toFixed(2)}].`,
+        `INT${selBits()} values. Range [${data.params[0].qMin}, ${data.params[0].qMax}].`,
+        'Approximate floats recovered by multiplying back by scale.',
+        'Color intensity = quantization error |w − w̃|.',
+    ][step];
+
+    grid.innerHTML = vals.map((v, i) => {
+        const bg = step === 4 ? heatBg(data.E[i], maxE) : CELL_BG[step];
+        const bd = step === 4 ? heatBg(data.E[i], maxE) : CELL_BD[step];
+        const sub = step >= 3 ? `Δ${data.E[i].toFixed(3)}` : '';
+        const disp = step === 2 ? v.toFixed(0) : v.toFixed(3);
+        return `<div class="weight-cell pop" style="background:${bg};border-color:${bd}">
+                  <span class="val">${disp}</span>
+                  ${sub ? `<span class="sub">${sub}</span>` : ''}
+                </div>`;
+    }).join('');
+
+    tag.textContent = TAG_LABELS[step];
+    tag.style.cssText = TAG_STYLES[step] + ';font-size:10px;font-weight:700;padding:2px 8px;border-radius:9999px;text-transform:uppercase;';
+    cap.textContent = capt2;
+}
+
+function renderFormula(data) {
+    const p = data.params[0];
+    const bits = selBits(), scheme = selScheme();
+    const panel = document.getElementById('formula-panel');
+
+    const html = [
+        `<div class="formula-box">w ∈ ℝ &nbsp;(32-bit IEEE 754)<br>
+         <span class="text-slate-400">Range: [${Math.min(...weights).toFixed(3)}, ${Math.max(...weights).toFixed(3)}]<br>
+         Memory: 4 bytes × 16 = ${16*4} bytes</span></div>
+         <p class="text-slate-500 text-xs mt-2">No transformation yet. Highest precision but heaviest memory.</p>`,
+
+        scheme === 'symmetric'
+            ? `<div class="formula-box">absMax = max(|w|) = <span class="text-yellow-300">${Math.max(...weights.map(Math.abs)).toFixed(4)}</span><br>
+               scale = absMax / ${p.qMax} = <span class="text-yellow-300">${p.scale.toFixed(6)}</span><br>
+               zero_point = 0</div>
+               <p class="text-slate-500 text-xs mt-2">One scale per ${selGran() === 'tensor' ? 'tensor' : 'row'}. Symmetric → ZP = 0, good for weights.</p>`
+            : `<div class="formula-box">wMin = ${Math.min(...weights).toFixed(4)}, wMax = ${Math.max(...weights).toFixed(4)}<br>
+               scale = (wMax−wMin)/(${p.qMax}−${p.qMin}) = <span class="text-yellow-300">${p.scale.toFixed(6)}</span><br>
+               zero_point = <span class="text-yellow-300">${p.zp}</span></div>
+               <p class="text-slate-500 text-xs mt-2">Asymmetric uses a zero-point offset — useful for one-sided distributions like ReLU outputs.</p>`,
+
+        `<div class="formula-box">q = clamp(round(w / scale) + zp, ${p.qMin}, ${p.qMax})<br><br>
+         <span class="text-slate-400">Example: w = ${weights[0].toFixed(4)}<br>
+         → round(${weights[0].toFixed(4)} / ${p.scale.toFixed(5)}) + ${p.zp} = ${data.Q[0]}</span></div>
+         <p class="text-slate-500 text-xs mt-2">Each weight now fits in ${bits} bits → ${Math.pow(2,bits)} distinct values.</p>`,
+
+        `<div class="formula-box">w̃ = (q − zero_point) × scale<br><br>
+         <span class="text-slate-400">Example: q = ${data.Q[0]}<br>
+         → (${data.Q[0]} − ${p.zp}) × ${p.scale.toFixed(5)}<br>
+         → ${data.DQ[0].toFixed(5)}</span></div>
+         <p class="text-slate-500 text-xs mt-2">The model multiplies these approximated values at inference — still FP32, but snapped to the INT grid.</p>`,
+
+        `<div class="formula-box">error = |w − w̃|<br>
+         MSE = ${data.mse.toFixed(6)}<br>
+         MAE = ${data.mae.toFixed(6)}<br>
+         Max = ${Math.max(...data.E).toFixed(4)}</div>
+         <p class="text-slate-500 text-xs mt-2">Switch to INT4 or INT2 above to watch the error grow as the grid gets coarser.</p>`,
+    ][step];
+
+    panel.innerHTML = html;
+}
+
+function renderStats(data) {
+    const p = data.params[0], bits = selBits();
+    const panel = document.getElementById('stats-panel');
+    const rows = [
+        ['Bit-width', `INT${bits}`],
+        ['Scale', p.scale.toFixed(5)],
+        ['Zero-point', p.zp],
+        ['Quant range', `[${p.qMin}, ${p.qMax}]`],
+        ['MSE', step >= 4 ? data.mse.toFixed(6) : '—'],
+        ['Max |error|', step >= 4 ? Math.max(...data.E).toFixed(5) : '—'],
+    ];
+    panel.innerHTML = rows.map(([k, v]) =>
+        `<div class="bg-slate-800/60 rounded-lg p-2">
+           <div class="text-slate-500 text-xs">${k}</div>
+           <div class="text-white font-mono font-bold text-sm">${v}</div>
+         </div>`
+    ).join('');
+}
+
+function renderErrorChart(data) {
+    const el = document.getElementById('error-chart');
+    if (step < 3) {
+        el.innerHTML = '<p class="text-slate-600 text-sm">Errors shown after Step 3 (Dequantize).</p>';
+        return;
+    }
+    const maxE = Math.max(...data.E) || 1;
+    el.innerHTML = data.E.map((e, i) => {
+        const pct = (e / maxE * 100).toFixed(1);
+        const orig = weights[i].toFixed(3);
+        const dq   = data.DQ[i].toFixed(3);
+        const t = e / maxE;
+        const col = `rgb(${Math.round(99 + t*140)},${Math.round(102 - t*34)},${Math.round(241 - t*173)})`;
+        return `
+          <div class="flex items-center gap-2 text-xs">
+            <span class="text-slate-500 w-5 text-right font-mono">${i}</span>
+            <div class="bar-track flex-1">
+              <div class="bar-fill" style="width:${pct}%;background:${col}"></div>
+            </div>
+            <span class="text-slate-400 font-mono w-36">${orig}→${dq} <span class="text-red-400">Δ${e.toFixed(4)}</span></span>
+          </div>`;
     }).join('');
 }
 
+function renderMemory() {
+    const bits = selBits(), n = 16;
+    const fp32 = n * 4;
+    const qB   = Math.ceil(n * bits / 8);
+    const scB  = selGran() === 'tensor' ? 4 : 4 * 4;
+    const tot  = qB + scB;
+    const panel = document.getElementById('memory-panel');
+    const bars = [
+        { label: 'FP32 original', bytes: fp32, color: '#3b82f6', pct: 100 },
+        { label: `INT${bits} weights only`, bytes: qB,  color: '#a855f7', pct: qB/fp32*100 },
+        { label: `INT${bits} + scale metadata`, bytes: tot, color: '#22c55e', pct: tot/fp32*100 },
+    ];
+    panel.innerHTML = bars.map(b =>
+        `<div>
+           <div class="flex justify-between text-xs text-slate-400 mb-1">
+             <span>${b.label}</span>
+             <span class="font-mono font-bold text-white">${b.bytes}B &nbsp;<span class="text-slate-500">(${b.pct.toFixed(0)}%)</span></span>
+           </div>
+           <div class="bar-track">
+             <div class="bar-fill" style="width:${b.pct.toFixed(1)}%;background:${b.color}"></div>
+           </div>
+         </div>`
+    ).join('') +
+    `<p class="text-slate-400 text-xs pt-1">Compression ratio vs FP32: <strong class="text-white">${(fp32/tot).toFixed(1)}×</strong> (for this 4×4 toy tensor).</p>`;
+}
+
 function render() {
-    const data = computeAll();
+    const data = compute();
     renderStepBar();
-    renderGrid(currentStep, data);
-    renderFormula(currentStep, data);
-    renderStats(currentStep, data);
+    renderGrid(data);
+    renderFormula(data);
+    renderStats(data);
     renderErrorChart(data);
     renderMemory();
+
+    document.getElementById('btn-prev').disabled = step === 0;
+    document.getElementById('btn-next').disabled = step === STEPS.length - 1;
 }
 
-function nextStep() {
-    if (currentStep < STEPS.length - 1) { currentStep++; render(); }
-}
-function prevStep() {
-    if (currentStep > 0) { currentStep--; render(); }
-}
+function goNext() { if (step < STEPS.length - 1) { step++; render(); } }
+function goPrev() { if (step > 0) { step--; render(); } }
 
-document.getElementById('auto-play-btn').addEventListener('click', function() {
-    if (isPlaying) {
-        clearInterval(playTimer); isPlaying = false;
-        this.textContent = '▶ Auto-play';
+document.getElementById('btn-next').addEventListener('click', goNext);
+document.getElementById('btn-prev').addEventListener('click', goPrev);
+
+document.getElementById('btn-reset').addEventListener('click', () => {
+    step = 0; render();
+});
+
+document.getElementById('btn-play').addEventListener('click', function () {
+    if (playing) {
+        clearInterval(timer); playing = false; this.textContent = '▶ Auto';
     } else {
-        if (currentStep === STEPS.length - 1) { currentStep = 0; render(); }
-        isPlaying = true; this.textContent = '⏸ Pause';
-        playTimer = setInterval(() => {
-            if (currentStep < STEPS.length - 1) { nextStep(); }
-            else { clearInterval(playTimer); isPlaying = false; document.getElementById('auto-play-btn').textContent = '▶ Auto-play'; }
+        if (step === STEPS.length - 1) { step = 0; render(); }
+        playing = true; this.textContent = '⏸ Pause';
+        timer = setInterval(() => {
+            if (step < STEPS.length - 1) { goNext(); }
+            else { clearInterval(timer); playing = false; document.getElementById('btn-play').textContent = '▶ Auto'; }
         }, 1800);
     }
 });
 
-document.getElementById('randomize-btn').addEventListener('click', () => {
-    currentStep = 0; generateWeights(); render();
+document.getElementById('btn-new').addEventListener('click', () => {
+    step = 0; genWeights(); render();
 });
 
-['bitwidth','scheme','granularity'].forEach(id => {
-    document.getElementById(id).addEventListener('change', () => { currentStep = 0; render(); });
-});
+['sel-bits','sel-scheme','sel-gran'].forEach(id =>
+    document.getElementById(id).addEventListener('change', () => { step = 0; render(); })
+);
 
-generateWeights();
+genWeights();
 render();
 </script>
 </body>
