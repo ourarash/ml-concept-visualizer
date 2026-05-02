@@ -146,7 +146,7 @@
     <div id="greedy-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="greedy-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="greedy-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
+      <div id="greedy-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"></div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">x<sub>t</sub> = argmax<sub>v ∈ V</sub> P(v | x<sub>1..t-1</sub>)</div>
@@ -168,7 +168,7 @@
     <div id="temp-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="temp-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="temp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
+      <div id="temp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"></div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">P<sub>T</sub>(v) = softmax(logit<sub>v</sub> / T)</div>
@@ -190,7 +190,7 @@
     <div id="topk-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="topk-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="topk-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
+      <div id="topk-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"></div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">keep top-k tokens; mask the rest; renormalize; sample</div>
@@ -222,7 +222,7 @@
     <div id="topp-bars" class="space-y-1.5"></div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="topp-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="topp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
+      <div id="topp-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"></div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">smallest set {v : Σ P(v) ≥ p} in descending P</div>
@@ -235,8 +235,8 @@
     <h2 class="text-xl font-bold text-indigo-600 mb-1">🌳 Beam Search</h2>
     <p class="text-sm text-slate-600 mb-4">Keep the B highest-scoring partial sequences at each step. Score is the sum of log-probabilities along the path.</p>
     <div class="flex flex-wrap items-center gap-4 mb-4">
-      <label class="text-sm text-slate-700">Beam width B = <span id="beam-w-label" class="font-mono font-semibold">3</span></label>
-      <input id="beam-w" type="range" min="1" max="5" step="1" value="3" oninput="document.getElementById('beam-w-label').textContent=this.value" class="flex-1 min-w-[160px]">
+      <label for="beam-w" class="text-sm text-slate-700">Beam width B = <span id="beam-w-label" class="font-mono font-semibold">3</span></label>
+      <input id="beam-w" type="range" min="1" max="5" step="1" value="3" oninput="document.getElementById('beam-w-label').textContent=this.value; if(beamStep>0) beamReset();" class="flex-1 min-w-[160px]">
       <button onclick="beamNext()"  class="px-3 py-2 bg-indigo-600 text-white rounded-md text-sm font-semibold hover:bg-indigo-500">▶ Next Step</button>
       <button onclick="beamReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
     </div>
@@ -273,7 +273,7 @@
     </div>
     <div class="mt-3">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Generated sequence <span id="cd-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="cd-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
+      <div id="cd-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"></div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">score(v) = log P<sub>exp</sub>(v) − α · log P<sub>ama</sub>(v)</div>
@@ -306,7 +306,7 @@
     </div>
     <div class="mt-2">
       <div class="text-xs uppercase tracking-wide text-slate-500 mb-1 flex items-center gap-2">Accepted sequence <span id="spec-stopped" class="text-red-600 font-semibold"></span></div>
-      <div id="spec-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"</div>
+      <div id="spec-seq" class="p-3 bg-slate-50 rounded-md border border-slate-200 font-mono text-sm min-h-[2.5rem] tree-row"></div>
     </div>
     <div class="mt-4 grid md:grid-cols-2 gap-3">
       <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">accept x̃<sub>t</sub> if U[0,1] &lt; min(1, P<sub>target</sub>(x̃<sub>t</sub>) / P<sub>draft</sub>(x̃<sub>t</sub>))<br>on reject: sample from normalize(max(0, P<sub>target</sub> − P<sub>draft</sub>))</div>
