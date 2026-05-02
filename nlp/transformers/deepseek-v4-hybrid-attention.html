@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<!-- Brief: Visualises DeepSeek V4-style hybrid sparse attention — three attention types (DSA, CSA, HCA) stacked across transformer layers, each handling a different distance regime in long-context inference. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek V4 Hybrid Sparse Attention</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"
+        onload="renderMathInElement(document.body, {delimiters:[{left:'$$',right:'$$',display:true},{left:'$',right:'$',display:false},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}]});"></script>
+    <style>
+        body { font-family: 'Inter', system-ui, sans-serif; }
+        .pill { display:inline-flex; align-items:center; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:.04em; text-transform:uppercase; }
+        .pill-dsa { background:#dbeafe; color:#1d4ed8; }
+        .pill-csa { background:#dcfce7; color:#166534; }
+        .pill-hca { background:#fef3c7; color:#92400e; }
+        .pill-vanilla { background:#fce7f3; color:#9d174d; }
+
+        .layer-block {
+            display: flex; align-items: center; gap: 12px;
+            padding: 8px 12px; margin-bottom: 6px;
+            border-radius: 8px; border: 1px solid #e2e8f0;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-size: 12px;
+            transition: transform .15s ease, box-shadow .15s ease;
+        }
+        .layer-block:hover { transform: translateX(4px); box-shadow: 0 4px 12px rgba(15,23,42,.08); }
+        .layer-block.dsa { background: linear-gradient(90deg, #eff6ff, #ffffff); border-left: 4px solid #3b82f6; }
+        .layer-block.csa { background: linear-gradient(90deg, #f0fdf4, #ffffff); border-left: 4px solid #22c55e; }
+        .layer-block.hca { background: linear-gradient(90deg, #fffbeb, #ffffff); border-left: 4px solid #f59e0b; }
+
+        .token-cell {
+            display: inline-block;
+            min-width: 18px; height: 22px;
+            margin: 1px; border-radius: 3px;
+            border: 1px solid transparent;
+            font-size: 9px; line-height: 22px; text-align: center;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+        }
+        .token-cell.dsa  { background: #dbeafe; border-color: #93c5fd; color: #1e40af; }
+        .token-cell.csa  { background: #dcfce7; border-color: #86efac; color: #15803d; }
+        .token-cell.hca  { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+        .token-cell.dropped { background: #f1f5f9; border-color: #e2e8f0; color: #cbd5e1; }
+        .token-cell.query { background: #fce7f3; border-color: #f472b6; color: #9d174d; font-weight: bold; }
+        .token-cell.selected-dsa { box-shadow: 0 0 0 2px #3b82f6; }
+
+        .summary-cell {
+            display: inline-block;
+            min-width: 26px; height: 22px;
+            margin: 1px; border-radius: 3px;
+            background: #f59e0b; color: white;
+            border: 1px solid #d97706;
+            font-size: 9px; line-height: 22px; text-align: center;
+            font-family: 'JetBrains Mono', ui-monospace, monospace;
+            font-weight: bold;
+        }
+
+        .compress-arrow {
+            font-family: ui-monospace, monospace;
+            color: #94a3b8;
+            font-size: 14px;
+            margin: 0 6px;
+        }
+
+        .bar-track { background-color: #e2e8f0; border-radius: 6px; height: 14px; overflow: hidden; position: relative; }
+        .bar-fill { height: 100%; transition: width .3s ease; }
+
+        .stat-card {
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            padding: 12px 14px;
+            background: white;
+        }
+        .stat-card.dsa { border-color: #93c5fd; background: linear-gradient(135deg, #eff6ff, #ffffff); }
+        .stat-card.csa { border-color: #86efac; background: linear-gradient(135deg, #f0fdf4, #ffffff); }
+        .stat-card.hca { border-color: #fcd34d; background: linear-gradient(135deg, #fffbeb, #ffffff); }
+
+        .indexer-bar {
+            display: inline-block;
+            background: #3b82f6;
+            border-radius: 2px;
+            margin: 1px;
+            transition: height .3s ease, background-color .3s ease;
+        }
+        .indexer-bar.selected { background: #1e40af; box-shadow: 0 0 0 1px #1e40af; }
+        .indexer-bar.unselected { background: #cbd5e1; }
+
+        .compress-region {
+            display: flex; flex-wrap: wrap; align-items: center;
+            padding: 8px;
+            border-radius: 8px;
+            background: #f8fafc;
+            border: 1px solid #e2e8f0;
+        }
+
+        .stage-pill {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 8px; border-radius: 999px;
+            font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen">
+    <div class="max-w-7xl mx-auto p-4 lg:p-8">
+
+        <!-- ========== HEADER ========== -->
+        <header class="mb-6">
+            <h1 class="text-3xl font-bold text-slate-900">DeepSeek V4 Hybrid Sparse Attention</h1>
+            <p class="mt-2 text-slate-600 leading-relaxed">
+                V3.2 ran a single flavour of sparse attention (DSA) across every layer. <span class="font-semibold">V4 stacks three different
+                attention types in different layers</span> — each tuned to a distance regime in long-context inference. Recent tokens get
+                <span class="font-semibold text-blue-700">DSA</span>'s lightning indexer; mid-distance tokens get
+                <span class="font-semibold text-green-700">CSA</span>'s token-wise KV compression; very distant tokens collapse into
+                <span class="font-semibold text-amber-700">HCA</span>'s heavily compressed summaries. The result: million-token context
+                without million-token memory or compute.
+            </p>
+            <div class="mt-3 grid md:grid-cols-3 gap-2 text-xs">
+                <div class="p-3 rounded-lg border border-blue-200 bg-blue-50">
+                    <div class="font-bold text-blue-800">DSA — DeepSeek Sparse Attention</div>
+                    <div class="text-blue-700 mt-1">Carried over from V3.2. Lightning indexer scores past tokens; only the top-k get full attention. Best for <em>recent</em> context where exact recall matters.</div>
+                </div>
+                <div class="p-3 rounded-lg border border-green-200 bg-green-50">
+                    <div class="font-bold text-green-800">CSA — Compressed Sparse Attention</div>
+                    <div class="text-green-700 mt-1">Token-wise compression of K, V vectors. Each token still has its own K, V — just smaller. Best for <em>moderately distant</em> context where rough fidelity is enough.</div>
+                </div>
+                <div class="p-3 rounded-lg border border-amber-200 bg-amber-50">
+                    <div class="font-bold text-amber-800">HCA — Heavily Compressed Attention</div>
+                    <div class="text-amber-700 mt-1">Aggressive compression: groups of tokens collapse into a single summary representation. Best for <em>very distant</em> context where only the gist needs to survive.</div>
+                </div>
+            </div>
+        </header>
+
+        <!-- ========== WHY HYBRID ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Why hybrid? The million-token wall</h2>
+            <div class="grid md:grid-cols-3 gap-4 text-sm">
+                <div class="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-1">Vanilla full attention</div>
+                    <p>For $N{=}10^6$ tokens, KV cache scales linearly: $O(N d)$ per layer. Compute scales as $O(N)$ per query token.
+                       Both crush GPU memory and bandwidth at multi-million-token contexts.</p>
+                </div>
+                <div class="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-1">V3.2's DSA-only approach</div>
+                    <p>Lightning-indexer selection is great for recent context but still keeps the full KV cache for indexing —
+                       the cache itself doesn't shrink. For 1M-token contexts the cache is still the bottleneck.</p>
+                </div>
+                <div class="p-4 rounded-lg bg-slate-50 border border-slate-200">
+                    <div class="text-xs font-bold text-slate-500 uppercase mb-1">V4's hybrid fix</div>
+                    <p>Match the storage to the distance: keep close tokens at full fidelity (DSA), squeeze mid tokens (CSA),
+                       summarise far tokens (HCA). The cache footprint becomes <em>sub-linear</em> in context length.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== ARCHITECTURE: LAYER STACK ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Architecture: three attention types stacked across layers</h2>
+            <p class="text-sm text-slate-600 mb-4">
+                Different layers use different attention types. Earlier (and typically more frequent) layers focus on near context with DSA;
+                interleaved CSA layers handle medium-distance retrieval; sparse HCA layers anchor the long-range context.
+                The exact interleaving below is illustrative — real configurations are tuned per benchmark.
+            </p>
+            <div class="grid md:grid-cols-2 gap-6 items-start">
+                <div>
+                    <div class="text-xs font-bold uppercase text-slate-500 mb-2">Sample layer composition (top → bottom)</div>
+                    <div id="layer-stack"></div>
+                    <div class="mt-3 flex items-center gap-3 text-xs text-slate-500">
+                        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded bg-blue-500"></span>DSA</span>
+                        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded bg-green-500"></span>CSA</span>
+                        <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded bg-amber-500"></span>HCA</span>
+                    </div>
+                </div>
+                <div class="text-sm text-slate-600 space-y-3">
+                    <p><span class="font-semibold">Why interleave?</span> Each attention type has a different inductive bias.
+                       Stacking them lets the model query close, mid, and far context cooperatively rather than forcing one mechanism
+                       to do all three jobs.</p>
+                    <p><span class="font-semibold">Why DSA gets more layers:</span> recent context is what most queries need.
+                       Allocating more layers to DSA matches the workload distribution.</p>
+                    <p><span class="font-semibold">Why HCA is the rarest:</span> per-layer it stores the least, so a few HCA layers
+                       are enough to keep the long tail of context accessible.</p>
+                    <p class="text-xs text-slate-500 italic">Counts shown reflect a typical interleaved pattern — adjust the slider in the
+                       next section to see how varying the proportions changes total memory and compute.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== THE THREE MECHANISMS ========== -->
+        <section class="grid lg:grid-cols-3 gap-6 mb-6">
+
+            <!-- DSA panel -->
+            <div class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-blue-500">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-slate-900">DSA (V3.2 carry-over)</h3>
+                    <span class="pill pill-dsa">Lightning Indexer</span>
+                </div>
+                <p class="text-xs text-slate-600 mb-3 leading-relaxed">
+                    A small learned indexer scores every past token against the current query, then selects the top-k for full attention.
+                    Cheap to score (low-rank), fast to attend (only top-k tokens participate).
+                </p>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">scores per past token (top-k highlighted):</div>
+                <div id="dsa-scores" class="flex items-end h-16 gap-[1px] bg-slate-50 rounded p-1 mb-2"></div>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">tokens used for attention:</div>
+                <div id="dsa-tokens" class="bg-slate-50 rounded p-2"></div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                    <div><span class="text-slate-500">KV cache per token:</span><br><span class="font-mono font-bold text-slate-900">full (d_kv)</span></div>
+                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(top-k)</span></div>
+                </div>
+                <div class="mt-3 text-[11px] text-blue-700 leading-snug">
+                    <span class="font-semibold">Math:</span> score $s_i = \langle q_{\text{ix}},\, k_{\text{ix},i}\rangle$ via small indexer projections; attend over top-k of $\{s_i\}$.
+                </div>
+            </div>
+
+            <!-- CSA panel -->
+            <div class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-green-500">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-slate-900">CSA</h3>
+                    <span class="pill pill-csa">Token-wise KV compression</span>
+                </div>
+                <p class="text-xs text-slate-600 mb-3 leading-relaxed">
+                    Every token keeps its own K and V — but each is projected down to a smaller dimension before storage.
+                    Trades a small drop in fidelity for a multi-× shrink in cache size and bandwidth.
+                </p>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">original K, V (one block per token):</div>
+                <div id="csa-original" class="flex flex-wrap mb-2"></div>
+                <div class="text-center text-[11px] text-green-700 font-semibold mb-1">↓  $W_{\downarrow}$ : token-wise low-rank projection  ↓</div>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">compressed K′, V′ (smaller per-token):</div>
+                <div id="csa-compressed" class="flex flex-wrap"></div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                    <div><span class="text-slate-500">KV cache per token:</span><br><span class="font-mono font-bold text-slate-900">d_kv / r</span></div>
+                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(N) cheap dot</span></div>
+                </div>
+                <div class="mt-3 text-[11px] text-green-700 leading-snug">
+                    <span class="font-semibold">Math:</span> $K' = K W_{\downarrow}^K \in \mathbb{R}^{N \times d_{kv}/r}$; attention computed in the compressed space.
+                </div>
+            </div>
+
+            <!-- HCA panel -->
+            <div class="bg-white rounded-2xl shadow-sm p-5 border-t-4 border-amber-500">
+                <div class="flex items-center justify-between mb-3">
+                    <h3 class="text-lg font-bold text-slate-900">HCA</h3>
+                    <span class="pill pill-hca">Summary tokens</span>
+                </div>
+                <p class="text-xs text-slate-600 mb-3 leading-relaxed">
+                    Groups of consecutive tokens collapse into a single summary representation. Stored cache shrinks by the group size
+                    $g$. The model can still "look back" to ancient context, just at coarser granularity.
+                </p>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">original tokens (one cell each):</div>
+                <div id="hca-original" class="flex flex-wrap mb-2"></div>
+                <div class="text-center text-[11px] text-amber-700 font-semibold mb-1">↓  pool / aggregate per group of g  ↓</div>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">summary tokens (one per group):</div>
+                <div id="hca-summary" class="flex flex-wrap"></div>
+                <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
+                    <div><span class="text-slate-500">KV cache:</span><br><span class="font-mono font-bold text-slate-900">N / g entries</span></div>
+                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(N / g)</span></div>
+                </div>
+                <div class="mt-3 text-[11px] text-amber-700 leading-snug">
+                    <span class="font-semibold">Math:</span> $\bar K_{j} = \mathrm{Pool}(K_{jg:(j{+}1)g})$, similarly for $\bar V_j$; attend over $N/g$ summaries.
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== INTERACTIVE: CONTEXT ALLOCATOR ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Interactive: distance-based attention assignment</h2>
+            <p class="text-sm text-slate-600 mb-4">
+                Imagine a single query token (rose) at the right edge of a long context. As you change the context length $N$ and the
+                window sizes, watch how the three attention types partition the past — and watch the total KV cache shrink relative to vanilla.
+            </p>
+
+            <div class="grid md:grid-cols-3 gap-4 mb-4 text-sm">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">Total context $N$ (tokens)</label>
+                    <input id="ctx-N" type="range" min="1024" max="1048576" step="1024" value="65536" class="w-full">
+                    <div class="text-xs font-mono text-slate-500" id="ctx-N-label">65,536</div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">DSA window (recent, full fidelity)</label>
+                    <input id="ctx-dsa" type="range" min="64" max="8192" step="64" value="2048" class="w-full">
+                    <div class="text-xs font-mono text-slate-500" id="ctx-dsa-label">2,048</div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-700 mb-1">CSA window (mid, compression r=8)</label>
+                    <input id="ctx-csa" type="range" min="512" max="65536" step="512" value="16384" class="w-full">
+                    <div class="text-xs font-mono text-slate-500" id="ctx-csa-label">16,384</div>
+                </div>
+            </div>
+
+            <div class="text-xs font-bold uppercase text-slate-500 mb-2">Past context (left = oldest, right = most recent), query at far right</div>
+            <div class="bar-track" style="height: 32px;">
+                <div id="ctx-bar" class="flex h-full"></div>
+            </div>
+            <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+                <span>token 0</span>
+                <span id="ctx-bar-mid">·</span>
+                <span><span id="ctx-bar-end">N</span> ← query</span>
+            </div>
+
+            <div class="grid md:grid-cols-4 gap-3 mt-5 text-sm">
+                <div class="stat-card hca">
+                    <div class="text-[11px] uppercase font-bold text-amber-700">HCA region</div>
+                    <div class="font-mono text-lg text-slate-900" id="stat-hca-tokens">–</div>
+                    <div class="text-[11px] text-slate-500" id="stat-hca-detail">– summaries</div>
+                </div>
+                <div class="stat-card csa">
+                    <div class="text-[11px] uppercase font-bold text-green-700">CSA region</div>
+                    <div class="font-mono text-lg text-slate-900" id="stat-csa-tokens">–</div>
+                    <div class="text-[11px] text-slate-500" id="stat-csa-detail">– at compression r</div>
+                </div>
+                <div class="stat-card dsa">
+                    <div class="text-[11px] uppercase font-bold text-blue-700">DSA region</div>
+                    <div class="font-mono text-lg text-slate-900" id="stat-dsa-tokens">–</div>
+                    <div class="text-[11px] text-slate-500" id="stat-dsa-detail">– top-k attended</div>
+                </div>
+                <div class="stat-card" style="border-color:#fda4af; background:linear-gradient(135deg, #fff1f2, #ffffff);">
+                    <div class="text-[11px] uppercase font-bold text-rose-700">vs vanilla full attention</div>
+                    <div class="font-mono text-lg text-slate-900" id="stat-savings">–</div>
+                    <div class="text-[11px] text-slate-500" id="stat-savings-detail">KV cache cells</div>
+                </div>
+            </div>
+
+            <div class="mt-5 text-xs">
+                <div class="flex justify-between mb-1"><span class="font-semibold text-slate-600">KV cache footprint (cells)</span><span class="font-mono text-slate-500" id="cache-label">–</span></div>
+                <div class="bar-track" style="height: 18px;">
+                    <div class="flex h-full" id="cache-bar"></div>
+                </div>
+                <div class="flex justify-between text-[10px] font-mono text-slate-500 mt-1">
+                    <span>0</span><span><span id="cache-vanilla-label">vanilla = N · d</span> →</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ========== COMPARISON TABLE ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-6">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">At a glance: V3.2 (DSA-only) vs V4 (DSA + CSA + HCA)</h2>
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-left text-xs uppercase text-slate-500 border-b">
+                        <th class="py-2">Property</th>
+                        <th class="py-2">Vanilla full attn</th>
+                        <th class="py-2">V3.2 (DSA only)</th>
+                        <th class="py-2">V4 (DSA + CSA + HCA)</th>
+                    </tr>
+                </thead>
+                <tbody class="text-slate-700">
+                    <tr class="border-b">
+                        <td class="py-2 font-semibold">KV cache size</td>
+                        <td class="font-mono">$O(N \cdot d)$</td>
+                        <td class="font-mono">$O(N \cdot d)$</td>
+                        <td class="font-mono text-emerald-700 font-bold">$O\!\left(\tfrac{N}{g}d + \tfrac{N_{\text{csa}}}{r}d + N_{\text{dsa}}d\right)$</td>
+                    </tr>
+                    <tr class="border-b">
+                        <td class="py-2 font-semibold">Compute per query token</td>
+                        <td class="font-mono">$O(N)$</td>
+                        <td class="font-mono">$O(\text{top-}k)$</td>
+                        <td class="font-mono text-emerald-700 font-bold">$O(\text{top-}k + \tfrac{N_{\text{csa}}}{r} + \tfrac{N}{g})$</td>
+                    </tr>
+                    <tr class="border-b">
+                        <td class="py-2 font-semibold">Recall at distance &lt; 2k</td>
+                        <td>full</td>
+                        <td>top-k selected (high)</td>
+                        <td>top-k selected (high)</td>
+                    </tr>
+                    <tr class="border-b">
+                        <td class="py-2 font-semibold">Recall at distance 2k–32k</td>
+                        <td>full</td>
+                        <td>top-k selected</td>
+                        <td>compressed token-wise (medium)</td>
+                    </tr>
+                    <tr class="border-b">
+                        <td class="py-2 font-semibold">Recall at distance &gt; 32k</td>
+                        <td>full</td>
+                        <td>top-k selected</td>
+                        <td>summary-level (coarse but available)</td>
+                    </tr>
+                    <tr>
+                        <td class="py-2 font-semibold">Effective context ceiling</td>
+                        <td>memory-limited</td>
+                        <td>cache-limited</td>
+                        <td class="font-bold text-emerald-700">~1M tokens at fixed cache budget</td>
+                    </tr>
+                </tbody>
+            </table>
+            <p class="text-xs text-slate-500 mt-3 italic">
+                Asymptotic notation. $g$ is HCA group size, $r$ is CSA compression ratio, $N_{\text{dsa}}$ and $N_{\text{csa}}$ are the
+                window sizes for DSA and CSA respectively.
+            </p>
+        </section>
+
+        <!-- ========== KEY TAKEAWAYS ========== -->
+        <section class="bg-white rounded-2xl shadow-sm p-6 mb-10">
+            <h2 class="text-lg font-semibold text-slate-900 mb-3">Key takeaways</h2>
+            <ol class="list-decimal list-inside space-y-2 text-sm text-slate-700">
+                <li><span class="font-semibold">Match storage to distance.</span> Recent tokens deserve full-fidelity K, V; ancient tokens only need a coarse summary. One-size-fits-all attention pays for fidelity it doesn't use.</li>
+                <li><span class="font-semibold">DSA narrows compute, CSA narrows storage, HCA narrows both.</span> DSA reduces FLOPs but keeps the cache; CSA shrinks cache and the dot-product cost per token; HCA collapses entire token groups so even the cache count drops.</li>
+                <li><span class="font-semibold">Layer-level specialisation, not token-level.</span> A given layer commits to one attention type — the diversity comes from <em>stacking</em> different layers, not switching mechanisms within a layer. This keeps the kernel implementation clean.</li>
+                <li><span class="font-semibold">Hybrid effective context $\gg$ DSA-only.</span> At a fixed memory budget, V4 fits roughly an order of magnitude more tokens than V3.2 because the cache footprint grows sub-linearly in $N$.</li>
+                <li><span class="font-semibold">Quality is preserved differently per regime.</span> DSA preserves exact-recall on near tokens; CSA preserves the dominant directions of K, V; HCA preserves coarse semantic anchors. Together they cover the full distance spectrum without any single mechanism being asked to do an unnatural job.</li>
+            </ol>
+        </section>
+
+        <footer class="text-xs text-slate-400 text-center pb-4">
+            Conceptual visualization based on the public description of DeepSeek's hybrid sparse attention design.
+            Exact ratios, group sizes, and layer counts are illustrative — adjust the sliders to explore different operating points.
+            See also: <a class="text-indigo-600 underline" href="flash-attention-vs-standard.html">FlashAttention vs Standard Attention</a>,
+            <a class="text-indigo-600 underline" href="kv-cache.html">KV Cache</a>.
+        </footer>
+    </div>
+
+    <script>
+    // ============================================================
+    //  Layer-stack diagram
+    // ============================================================
+    function renderLayerStack() {
+        // Illustrative interleaving: DSA dominant, with CSA every few layers, sparser HCA
+        // Pattern (top→bottom of the stack, top is the deepest layer):
+        const pattern = [
+            'dsa','csa','dsa','dsa','csa','dsa','hca',
+            'dsa','csa','dsa','dsa','csa','dsa','hca',
+            'dsa','csa','dsa','dsa','csa','dsa','hca'
+        ];
+        const labels = { dsa: 'DSA', csa: 'CSA', hca: 'HCA' };
+        const role = { dsa: 'lightning indexer · top-k', csa: 'token-wise compressed K, V', hca: 'summary tokens · group g' };
+        const el = document.getElementById('layer-stack');
+        el.innerHTML = '';
+        pattern.forEach((t, i) => {
+            const row = document.createElement('div');
+            row.className = `layer-block ${t}`;
+            const idx = pattern.length - i;
+            row.innerHTML = `
+                <span class="text-slate-400">L${String(idx).padStart(2, '0')}</span>
+                <span class="pill pill-${t}">${labels[t]}</span>
+                <span class="text-slate-500">${role[t]}</span>
+            `;
+            el.appendChild(row);
+        });
+    }
+
+    // ============================================================
+    //  DSA panel: lightning indexer scoring + top-k token highlight
+    // ============================================================
+    function renderDSA() {
+        const N = 32, k = 6;
+        const scores = Array.from({length: N}, () => Math.random());
+        const indexed = scores.map((s, i) => ({s, i})).sort((a, b) => b.s - a.s);
+        const topK = new Set(indexed.slice(0, k).map(x => x.i));
+
+        const scoresEl = document.getElementById('dsa-scores');
+        scoresEl.innerHTML = '';
+        scores.forEach((s, i) => {
+            const bar = document.createElement('div');
+            bar.className = 'indexer-bar ' + (topK.has(i) ? 'selected' : 'unselected');
+            bar.style.width = '6px';
+            bar.style.height = `${Math.max(8, s * 56)}px`;
+            scoresEl.appendChild(bar);
+        });
+
+        const tokensEl = document.getElementById('dsa-tokens');
+        tokensEl.innerHTML = '';
+        for (let i = 0; i < N; i++) {
+            const cell = document.createElement('span');
+            cell.className = 'token-cell ' + (topK.has(i) ? 'dsa selected-dsa' : 'dropped');
+            cell.textContent = i + 1;
+            tokensEl.appendChild(cell);
+        }
+    }
+
+    // ============================================================
+    //  CSA panel: original K,V vs compressed K',V'
+    // ============================================================
+    function renderCSA() {
+        const N = 16, dOrig = 8, dComp = 2;
+        const orig = document.getElementById('csa-original');
+        orig.innerHTML = '';
+        for (let t = 0; t < N; t++) {
+            const wrap = document.createElement('div');
+            wrap.style.display = 'inline-flex';
+            wrap.style.flexDirection = 'column';
+            wrap.style.alignItems = 'center';
+            wrap.style.margin = '2px';
+            const grid = document.createElement('div');
+            grid.style.display = 'grid';
+            grid.style.gridTemplateColumns = `repeat(${dOrig}, 6px)`;
+            grid.style.gridTemplateRows    = `repeat(2, 9px)`;
+            grid.style.gap = '1px';
+            for (let i = 0; i < dOrig * 2; i++) {
+                const c = document.createElement('div');
+                c.style.background = i < dOrig ? '#86efac' : '#a7f3d0';
+                grid.appendChild(c);
+            }
+            wrap.appendChild(grid);
+            const lbl = document.createElement('div');
+            lbl.style.cssText = 'font-size:8px; color:#64748b; font-family:monospace;';
+            lbl.textContent = `t${t+1}`;
+            wrap.appendChild(lbl);
+            orig.appendChild(wrap);
+        }
+        const comp = document.getElementById('csa-compressed');
+        comp.innerHTML = '';
+        for (let t = 0; t < N; t++) {
+            const wrap = document.createElement('div');
+            wrap.style.display = 'inline-flex';
+            wrap.style.flexDirection = 'column';
+            wrap.style.alignItems = 'center';
+            wrap.style.margin = '2px';
+            const grid = document.createElement('div');
+            grid.style.display = 'grid';
+            grid.style.gridTemplateColumns = `repeat(${dComp}, 6px)`;
+            grid.style.gridTemplateRows    = `repeat(2, 9px)`;
+            grid.style.gap = '1px';
+            for (let i = 0; i < dComp * 2; i++) {
+                const c = document.createElement('div');
+                c.style.background = i < dComp ? '#16a34a' : '#22c55e';
+                grid.appendChild(c);
+            }
+            wrap.appendChild(grid);
+            const lbl = document.createElement('div');
+            lbl.style.cssText = 'font-size:8px; color:#64748b; font-family:monospace;';
+            lbl.textContent = `t${t+1}`;
+            wrap.appendChild(lbl);
+            comp.appendChild(wrap);
+        }
+    }
+
+    // ============================================================
+    //  HCA panel: tokens collapsing into summaries
+    // ============================================================
+    function renderHCA() {
+        const N = 24, g = 4;
+        const orig = document.getElementById('hca-original');
+        orig.innerHTML = '';
+        for (let i = 0; i < N; i++) {
+            const cell = document.createElement('span');
+            cell.className = 'token-cell hca';
+            cell.textContent = i + 1;
+            orig.appendChild(cell);
+            if ((i + 1) % g === 0 && i < N - 1) {
+                const sep = document.createElement('span');
+                sep.style.cssText = 'display:inline-block; width:3px; height:22px; background:#fbbf24; margin:1px 2px; border-radius:1px;';
+                orig.appendChild(sep);
+            }
+        }
+        const summary = document.getElementById('hca-summary');
+        summary.innerHTML = '';
+        for (let j = 0; j < N / g; j++) {
+            const cell = document.createElement('span');
+            cell.className = 'summary-cell';
+            cell.textContent = `s${j+1}`;
+            summary.appendChild(cell);
+        }
+    }
+
+    // ============================================================
+    //  Interactive: distance-based context allocator
+    // ============================================================
+    const COMPRESSION_R = 8;     // CSA per-token compression
+    const HCA_GROUP_G   = 64;    // HCA group size
+    const DSA_TOP_K     = 256;   // DSA selected count
+
+    function fmtNum(n) {
+        if (n >= 1048576) return (n/1048576).toFixed(2) + 'M';
+        if (n >= 1024)    return (n/1024).toFixed(1) + 'K';
+        return n.toString();
+    }
+
+    function fmtCommas(n) {
+        return n.toLocaleString();
+    }
+
+    function updateContextAllocator() {
+        let N    = parseInt(document.getElementById('ctx-N').value);
+        let nDsa = parseInt(document.getElementById('ctx-dsa').value);
+        let nCsa = parseInt(document.getElementById('ctx-csa').value);
+
+        // clamp DSA + CSA to N
+        nDsa = Math.min(nDsa, N);
+        nCsa = Math.min(nCsa, Math.max(0, N - nDsa));
+        const nHca = Math.max(0, N - nDsa - nCsa);
+
+        document.getElementById('ctx-N-label').textContent = fmtCommas(N);
+        document.getElementById('ctx-dsa-label').textContent = fmtCommas(nDsa);
+        document.getElementById('ctx-csa-label').textContent = fmtCommas(nCsa);
+
+        // Bar visualisation
+        const bar = document.getElementById('ctx-bar');
+        bar.innerHTML = '';
+        const segs = [
+            { kind: 'hca', n: nHca, color: '#f59e0b', label: `HCA · ${fmtNum(nHca)} → ${fmtNum(Math.ceil(nHca/HCA_GROUP_G))} summaries` },
+            { kind: 'csa', n: nCsa, color: '#22c55e', label: `CSA · ${fmtNum(nCsa)} @ r=${COMPRESSION_R}` },
+            { kind: 'dsa', n: nDsa, color: '#3b82f6', label: `DSA · ${fmtNum(nDsa)} (top-${DSA_TOP_K})` },
+        ];
+        segs.forEach(seg => {
+            if (seg.n === 0) return;
+            const div = document.createElement('div');
+            div.style.background = seg.color;
+            div.style.height = '100%';
+            div.style.width = ((seg.n / N) * 100) + '%';
+            div.style.color = 'white';
+            div.style.fontFamily = 'JetBrains Mono, ui-monospace, monospace';
+            div.style.fontSize = '10px';
+            div.style.display = 'flex';
+            div.style.alignItems = 'center';
+            div.style.justifyContent = 'center';
+            div.style.padding = '0 4px';
+            div.style.overflow = 'hidden';
+            div.style.whiteSpace = 'nowrap';
+            div.title = seg.label;
+            div.textContent = ((seg.n / N) * 100) >= 8 ? seg.label : '';
+            bar.appendChild(div);
+        });
+
+        document.getElementById('ctx-bar-mid').textContent = `↑ ${fmtNum(N - nDsa - Math.floor(nCsa/2))}`;
+        document.getElementById('ctx-bar-end').textContent = fmtNum(N);
+
+        // Stats
+        document.getElementById('stat-hca-tokens').textContent = fmtCommas(nHca);
+        document.getElementById('stat-hca-detail').textContent = `${fmtCommas(Math.ceil(nHca/HCA_GROUP_G))} summary tokens (g=${HCA_GROUP_G})`;
+        document.getElementById('stat-csa-tokens').textContent = fmtCommas(nCsa);
+        document.getElementById('stat-csa-detail').textContent = `each at d/${COMPRESSION_R} compressed`;
+        document.getElementById('stat-dsa-tokens').textContent = fmtCommas(nDsa);
+        document.getElementById('stat-dsa-detail').textContent = `lightning indexer picks top-${DSA_TOP_K}`;
+
+        // KV cache cells (in units of d, so each is "× d cells")
+        const dUnit = 1;
+        const cacheVanilla = N * dUnit;
+        const cacheHybrid =
+            Math.ceil(nHca / HCA_GROUP_G) * dUnit +     // HCA: N/g entries at full d
+            (nCsa / COMPRESSION_R) * dUnit +            // CSA: N entries at d/r
+            nDsa * dUnit;                                // DSA: N entries at full d
+        const ratio = cacheHybrid / cacheVanilla;
+        document.getElementById('stat-savings').textContent = (1 / ratio).toFixed(1) + '×';
+        document.getElementById('stat-savings-detail').textContent =
+            `${fmtCommas(Math.round(cacheHybrid))} cells vs ${fmtCommas(cacheVanilla)} cells`;
+
+        // Cache footprint bar (relative to vanilla)
+        const cacheBar = document.getElementById('cache-bar');
+        cacheBar.innerHTML = '';
+        const totalScale = cacheVanilla;
+        const segsCache = [
+            { n: Math.ceil(nHca / HCA_GROUP_G), color: '#f59e0b' },
+            { n: nCsa / COMPRESSION_R,           color: '#22c55e' },
+            { n: nDsa,                           color: '#3b82f6' },
+        ];
+        segsCache.forEach(seg => {
+            if (seg.n <= 0) return;
+            const div = document.createElement('div');
+            div.style.background = seg.color;
+            div.style.height = '100%';
+            div.style.width = ((seg.n / totalScale) * 100) + '%';
+            cacheBar.appendChild(div);
+        });
+        const remainder = 1 - (cacheHybrid / totalScale);
+        if (remainder > 0) {
+            const div = document.createElement('div');
+            div.style.background = '#f1f5f9';
+            div.style.height = '100%';
+            div.style.width = (remainder * 100) + '%';
+            cacheBar.appendChild(div);
+        }
+        document.getElementById('cache-label').textContent =
+            `${fmtCommas(Math.round(cacheHybrid))} / ${fmtCommas(cacheVanilla)} (${(ratio*100).toFixed(1)}% of vanilla)`;
+        document.getElementById('cache-vanilla-label').textContent = `vanilla = ${fmtCommas(cacheVanilla)}`;
+    }
+
+    // ============================================================
+    //  Boot
+    // ============================================================
+    document.getElementById('ctx-N').addEventListener('input', updateContextAllocator);
+    document.getElementById('ctx-dsa').addEventListener('input', updateContextAllocator);
+    document.getElementById('ctx-csa').addEventListener('input', updateContextAllocator);
+
+    renderLayerStack();
+    renderDSA();
+    renderCSA();
+    renderHCA();
+    updateContextAllocator();
+    </script>
+</body>
+</html>
