@@ -197,16 +197,29 @@
                 </div>
                 <p class="text-xs text-slate-600 mb-3 leading-relaxed">
                     A small learned indexer scores every past token against the current query, then selects the top-k for full attention.
-                    Cheap to score (low-rank), fast to attend (only top-k tokens participate).
                 </p>
+                <div class="grid grid-cols-2 gap-2 mb-3 text-[11px]">
+                    <label>
+                        <div class="text-slate-500">N (past tokens) = <span id="dsa-N-label" class="font-mono font-bold text-slate-900">32</span></div>
+                        <input id="dsa-N" type="range" min="12" max="48" value="32" class="w-full accent-blue-600">
+                    </label>
+                    <label>
+                        <div class="text-slate-500">top-k = <span id="dsa-k-label" class="font-mono font-bold text-slate-900">6</span></div>
+                        <input id="dsa-k" type="range" min="1" max="16" value="6" class="w-full accent-blue-600">
+                    </label>
+                </div>
+                <div class="flex justify-end mb-2">
+                    <button id="dsa-reroll" class="px-2 py-1 text-[10px] font-semibold text-slate-700 bg-slate-100 rounded hover:bg-slate-200">↻ re-roll scores</button>
+                </div>
                 <div class="text-[11px] font-mono text-slate-500 mb-1">scores per past token (top-k highlighted):</div>
                 <div id="dsa-scores" class="flex items-end h-16 gap-[1px] bg-slate-50 rounded p-1 mb-2"></div>
                 <div class="text-[11px] font-mono text-slate-500 mb-1">tokens used for attention:</div>
                 <div id="dsa-tokens" class="bg-slate-50 rounded p-2"></div>
                 <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
                     <div><span class="text-slate-500">KV cache per token:</span><br><span class="font-mono font-bold text-slate-900">full (d_kv)</span></div>
-                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(top-k)</span></div>
+                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(top-<span id="dsa-stat-k">6</span>) of <span id="dsa-stat-N">32</span></span></div>
                 </div>
+                <div class="mt-2 text-[11px]"><span class="text-slate-500">Selection ratio:</span> <span class="font-mono font-bold text-blue-700" id="dsa-stat-ratio">18.8%</span> of past tokens attended</div>
                 <div class="mt-3 text-[11px] text-blue-700 leading-snug">
                     <span class="font-semibold">Math:</span> score $s_i = \langle q_{\text{ix}},\, k_{\text{ix},i}\rangle$ via small indexer projections; attend over top-k of $\{s_i\}$.
                 </div>
@@ -220,17 +233,27 @@
                 </div>
                 <p class="text-xs text-slate-600 mb-3 leading-relaxed">
                     Every token keeps its own K and V — but each is projected down to a smaller dimension before storage.
-                    Trades a small drop in fidelity for a multi-× shrink in cache size and bandwidth.
                 </p>
-                <div class="text-[11px] font-mono text-slate-500 mb-1">original K, V (one block per token):</div>
+                <div class="grid grid-cols-2 gap-2 mb-3 text-[11px]">
+                    <label>
+                        <div class="text-slate-500">N (tokens) = <span id="csa-N-label" class="font-mono font-bold text-slate-900">16</span></div>
+                        <input id="csa-N" type="range" min="6" max="22" value="16" class="w-full accent-green-600">
+                    </label>
+                    <label>
+                        <div class="text-slate-500">compressed dim d/r = <span id="csa-dc-label" class="font-mono font-bold text-slate-900">2</span></div>
+                        <input id="csa-dc" type="range" min="1" max="8" value="2" class="w-full accent-green-600">
+                    </label>
+                </div>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">original K, V (per token, d=<span id="csa-d-orig">8</span>):</div>
                 <div id="csa-original" class="flex flex-wrap mb-2"></div>
                 <div class="text-center text-[11px] text-green-700 font-semibold mb-1">↓  $W_{\downarrow}$ : token-wise low-rank projection  ↓</div>
-                <div class="text-[11px] font-mono text-slate-500 mb-1">compressed K′, V′ (smaller per-token):</div>
+                <div class="text-[11px] font-mono text-slate-500 mb-1">compressed K', V' (per token, d/r=<span id="csa-d-comp">2</span>):</div>
                 <div id="csa-compressed" class="flex flex-wrap"></div>
                 <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                    <div><span class="text-slate-500">KV cache per token:</span><br><span class="font-mono font-bold text-slate-900">d_kv / r</span></div>
-                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(N) cheap dot</span></div>
+                    <div><span class="text-slate-500">KV cache per token:</span><br><span class="font-mono font-bold text-slate-900">d/<span id="csa-stat-r">4</span> (was d=8)</span></div>
+                    <div><span class="text-slate-500">Storage saved:</span><br><span class="font-mono font-bold text-emerald-700"><span id="csa-stat-savings">75</span>%</span></div>
                 </div>
+                <div class="mt-2 text-[11px]"><span class="text-slate-500">Compression ratio r =</span> <span class="font-mono font-bold text-green-700" id="csa-stat-ratio">4×</span></div>
                 <div class="mt-3 text-[11px] text-green-700 leading-snug">
                     <span class="font-semibold">Math:</span> $K' = K W_{\downarrow}^K \in \mathbb{R}^{N \times d_{kv}/r}$; attention computed in the compressed space.
                 </div>
@@ -243,18 +266,29 @@
                     <span class="pill pill-hca">Summary tokens</span>
                 </div>
                 <p class="text-xs text-slate-600 mb-3 leading-relaxed">
-                    Groups of consecutive tokens collapse into a single summary representation. Stored cache shrinks by the group size
-                    $g$. The model can still "look back" to ancient context, just at coarser granularity.
+                    Groups of consecutive tokens collapse into a single summary representation. The model can still "look back"
+                    at coarser granularity.
                 </p>
+                <div class="grid grid-cols-2 gap-2 mb-3 text-[11px]">
+                    <label>
+                        <div class="text-slate-500">N (tokens) = <span id="hca-N-label" class="font-mono font-bold text-slate-900">24</span></div>
+                        <input id="hca-N" type="range" min="8" max="48" step="2" value="24" class="w-full accent-amber-600">
+                    </label>
+                    <label>
+                        <div class="text-slate-500">group size g = <span id="hca-g-label" class="font-mono font-bold text-slate-900">4</span></div>
+                        <input id="hca-g" type="range" min="2" max="8" value="4" class="w-full accent-amber-600">
+                    </label>
+                </div>
                 <div class="text-[11px] font-mono text-slate-500 mb-1">original tokens (one cell each):</div>
                 <div id="hca-original" class="flex flex-wrap mb-2"></div>
                 <div class="text-center text-[11px] text-amber-700 font-semibold mb-1">↓  pool / aggregate per group of g  ↓</div>
                 <div class="text-[11px] font-mono text-slate-500 mb-1">summary tokens (one per group):</div>
                 <div id="hca-summary" class="flex flex-wrap"></div>
                 <div class="mt-3 grid grid-cols-2 gap-2 text-[11px]">
-                    <div><span class="text-slate-500">KV cache:</span><br><span class="font-mono font-bold text-slate-900">N / g entries</span></div>
-                    <div><span class="text-slate-500">Compute per query:</span><br><span class="font-mono font-bold text-slate-900">O(N / g)</span></div>
+                    <div><span class="text-slate-500">KV cache:</span><br><span class="font-mono font-bold text-slate-900"><span id="hca-stat-summaries">6</span> entries (was <span id="hca-stat-N">24</span>)</span></div>
+                    <div><span class="text-slate-500">Compression:</span><br><span class="font-mono font-bold text-emerald-700"><span id="hca-stat-comp">4</span>× fewer cache entries</span></div>
                 </div>
+                <div class="mt-2 text-[11px]"><span class="text-slate-500">Compute per query:</span> <span class="font-mono font-bold text-amber-700">O(<span id="hca-stat-summaries-2">6</span>) dot products</span></div>
                 <div class="mt-3 text-[11px] text-amber-700 leading-snug">
                     <span class="font-semibold">Math:</span> $\bar K_{j} = \mathrm{Pool}(K_{jg:(j{+}1)g})$, similarly for $\bar V_j$; attend over $N/g$ summaries.
                 </div>
@@ -440,9 +474,19 @@
     // ============================================================
     //  DSA panel: lightning indexer scoring + top-k token highlight
     // ============================================================
+    const dsaState = { scores: null, lastN: 0 };
+
     function renderDSA() {
-        const N = 32, k = 6;
-        const scores = Array.from({length: N}, () => Math.random());
+        const N = parseInt(document.getElementById('dsa-N').value);
+        let k = parseInt(document.getElementById('dsa-k').value);
+        k = Math.min(k, N);
+
+        // Persist scores between re-renders so changing k doesn't re-roll randomness
+        if (!dsaState.scores || dsaState.lastN !== N) {
+            dsaState.scores = Array.from({length: N}, () => Math.random());
+            dsaState.lastN = N;
+        }
+        const scores = dsaState.scores;
         const indexed = scores.map((s, i) => ({s, i})).sort((a, b) => b.s - a.s);
         const topK = new Set(indexed.slice(0, k).map(x => x.i));
 
@@ -451,8 +495,10 @@
         scores.forEach((s, i) => {
             const bar = document.createElement('div');
             bar.className = 'indexer-bar ' + (topK.has(i) ? 'selected' : 'unselected');
-            bar.style.width = '6px';
+            const w = Math.max(3, Math.floor(280 / N) - 1);
+            bar.style.width = `${w}px`;
             bar.style.height = `${Math.max(8, s * 56)}px`;
+            bar.title = `token ${i+1}: score=${s.toFixed(2)}${topK.has(i) ? '  (top-k)' : ''}`;
             scoresEl.appendChild(bar);
         });
 
@@ -464,70 +510,77 @@
             cell.textContent = i + 1;
             tokensEl.appendChild(cell);
         }
+
+        document.getElementById('dsa-N-label').textContent = N;
+        document.getElementById('dsa-k-label').textContent = k;
+        document.getElementById('dsa-stat-k').textContent = k;
+        document.getElementById('dsa-stat-N').textContent = N;
+        document.getElementById('dsa-stat-ratio').textContent = ((k / N) * 100).toFixed(1) + '%';
+    }
+
+    function rerollDSA() {
+        dsaState.scores = null;
+        renderDSA();
     }
 
     // ============================================================
     //  CSA panel: original K,V vs compressed K',V'
     // ============================================================
+    const CSA_D_ORIG = 8;
+
     function renderCSA() {
-        const N = 16, dOrig = 8, dComp = 2;
-        const orig = document.getElementById('csa-original');
-        orig.innerHTML = '';
-        for (let t = 0; t < N; t++) {
-            const wrap = document.createElement('div');
-            wrap.style.display = 'inline-flex';
-            wrap.style.flexDirection = 'column';
-            wrap.style.alignItems = 'center';
-            wrap.style.margin = '2px';
-            const grid = document.createElement('div');
-            grid.style.display = 'grid';
-            grid.style.gridTemplateColumns = `repeat(${dOrig}, 6px)`;
-            grid.style.gridTemplateRows    = `repeat(2, 9px)`;
-            grid.style.gap = '1px';
-            for (let i = 0; i < dOrig * 2; i++) {
-                const c = document.createElement('div');
-                c.style.background = i < dOrig ? '#86efac' : '#a7f3d0';
-                grid.appendChild(c);
+        const N     = parseInt(document.getElementById('csa-N').value);
+        let dComp   = parseInt(document.getElementById('csa-dc').value);
+        dComp       = Math.min(dComp, CSA_D_ORIG);
+        const dOrig = CSA_D_ORIG;
+        const r     = dOrig / dComp;
+
+        const buildRow = (host, dim, colorTop, colorBottom) => {
+            host.innerHTML = '';
+            for (let t = 0; t < N; t++) {
+                const wrap = document.createElement('div');
+                wrap.style.display = 'inline-flex';
+                wrap.style.flexDirection = 'column';
+                wrap.style.alignItems = 'center';
+                wrap.style.margin = '2px';
+                const grid = document.createElement('div');
+                grid.style.display = 'grid';
+                grid.style.gridTemplateColumns = `repeat(${dim}, 6px)`;
+                grid.style.gridTemplateRows    = `repeat(2, 9px)`;
+                grid.style.gap = '1px';
+                for (let i = 0; i < dim * 2; i++) {
+                    const c = document.createElement('div');
+                    c.style.background = i < dim ? colorTop : colorBottom;
+                    grid.appendChild(c);
+                }
+                wrap.appendChild(grid);
+                const lbl = document.createElement('div');
+                lbl.style.cssText = 'font-size:8px; color:#64748b; font-family:monospace;';
+                lbl.textContent = `t${t+1}`;
+                wrap.appendChild(lbl);
+                host.appendChild(wrap);
             }
-            wrap.appendChild(grid);
-            const lbl = document.createElement('div');
-            lbl.style.cssText = 'font-size:8px; color:#64748b; font-family:monospace;';
-            lbl.textContent = `t${t+1}`;
-            wrap.appendChild(lbl);
-            orig.appendChild(wrap);
-        }
-        const comp = document.getElementById('csa-compressed');
-        comp.innerHTML = '';
-        for (let t = 0; t < N; t++) {
-            const wrap = document.createElement('div');
-            wrap.style.display = 'inline-flex';
-            wrap.style.flexDirection = 'column';
-            wrap.style.alignItems = 'center';
-            wrap.style.margin = '2px';
-            const grid = document.createElement('div');
-            grid.style.display = 'grid';
-            grid.style.gridTemplateColumns = `repeat(${dComp}, 6px)`;
-            grid.style.gridTemplateRows    = `repeat(2, 9px)`;
-            grid.style.gap = '1px';
-            for (let i = 0; i < dComp * 2; i++) {
-                const c = document.createElement('div');
-                c.style.background = i < dComp ? '#16a34a' : '#22c55e';
-                grid.appendChild(c);
-            }
-            wrap.appendChild(grid);
-            const lbl = document.createElement('div');
-            lbl.style.cssText = 'font-size:8px; color:#64748b; font-family:monospace;';
-            lbl.textContent = `t${t+1}`;
-            wrap.appendChild(lbl);
-            comp.appendChild(wrap);
-        }
+        };
+        buildRow(document.getElementById('csa-original'),   dOrig, '#86efac', '#a7f3d0');
+        buildRow(document.getElementById('csa-compressed'), dComp, '#16a34a', '#22c55e');
+
+        document.getElementById('csa-N-label').textContent = N;
+        document.getElementById('csa-dc-label').textContent = dComp;
+        document.getElementById('csa-d-orig').textContent = dOrig;
+        document.getElementById('csa-d-comp').textContent = dComp;
+        document.getElementById('csa-stat-r').textContent = r.toFixed(r >= 4 ? 0 : 1);
+        document.getElementById('csa-stat-savings').textContent = ((1 - dComp/dOrig) * 100).toFixed(0);
+        document.getElementById('csa-stat-ratio').textContent = r.toFixed(r >= 4 ? 0 : 1) + '×';
     }
 
     // ============================================================
     //  HCA panel: tokens collapsing into summaries
     // ============================================================
     function renderHCA() {
-        const N = 24, g = 4;
+        const N = parseInt(document.getElementById('hca-N').value);
+        const g = parseInt(document.getElementById('hca-g').value);
+        const numSummaries = Math.ceil(N / g);
+
         const orig = document.getElementById('hca-original');
         orig.innerHTML = '';
         for (let i = 0; i < N; i++) {
@@ -541,14 +594,25 @@
                 orig.appendChild(sep);
             }
         }
+
         const summary = document.getElementById('hca-summary');
         summary.innerHTML = '';
-        for (let j = 0; j < N / g; j++) {
+        for (let j = 0; j < numSummaries; j++) {
             const cell = document.createElement('span');
             cell.className = 'summary-cell';
             cell.textContent = `s${j+1}`;
+            const groupStart = j * g + 1;
+            const groupEnd = Math.min(N, (j + 1) * g);
+            cell.title = `summary of tokens ${groupStart}–${groupEnd}`;
             summary.appendChild(cell);
         }
+
+        document.getElementById('hca-N-label').textContent = N;
+        document.getElementById('hca-g-label').textContent = g;
+        document.getElementById('hca-stat-summaries').textContent = numSummaries;
+        document.getElementById('hca-stat-summaries-2').textContent = numSummaries;
+        document.getElementById('hca-stat-N').textContent = N;
+        document.getElementById('hca-stat-comp').textContent = (N / numSummaries).toFixed(1);
     }
 
     // ============================================================
@@ -669,6 +733,16 @@
     document.getElementById('ctx-N').addEventListener('input', updateContextAllocator);
     document.getElementById('ctx-dsa').addEventListener('input', updateContextAllocator);
     document.getElementById('ctx-csa').addEventListener('input', updateContextAllocator);
+
+    document.getElementById('dsa-N').addEventListener('input', () => { dsaState.scores = null; renderDSA(); });
+    document.getElementById('dsa-k').addEventListener('input', renderDSA);
+    document.getElementById('dsa-reroll').addEventListener('click', rerollDSA);
+
+    document.getElementById('csa-N').addEventListener('input', renderCSA);
+    document.getElementById('csa-dc').addEventListener('input', renderCSA);
+
+    document.getElementById('hca-N').addEventListener('input', renderHCA);
+    document.getElementById('hca-g').addEventListener('input', renderHCA);
 
     renderLayerStack();
     renderDSA();
