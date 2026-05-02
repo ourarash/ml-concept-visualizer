@@ -751,7 +751,9 @@ function drawLR(run) {
   const st = lrState[run.id];
   const initialLoss = st && st.history.length ? st.history[0].loss : 1;
   const losses = st ? st.history.map(function (h) { return h.loss; }) : [];
-  const lMax = Math.max(initialLoss * 1.5, losses.length ? Math.max.apply(null, losses) * 1.05 : initialLoss);
+  const rawMax = losses.length ? Math.max.apply(null, losses) : initialLoss;
+  // Cap y-axis so early oscillations stay visible; diverging runs simply exit the top edge.
+  const lMax = Math.max(initialLoss * 2, Math.min(rawMax * 1.05, initialLoss * 10));
 
   function X(s) { return padL + (s / LR_STEPS) * plotW; }
   function Y(l) { return padT + (1 - clamp(l, 0, lMax) / lMax) * plotH; }
@@ -776,10 +778,18 @@ function drawLR(run) {
   }
   ctx.stroke();
 
-  // Final marker dot
+  // Final marker dot (clamped to chart; add "↑ diverging" label when off-chart)
   const last = st.history[st.history.length - 1];
   ctx.fillStyle = run.color;
-  ctx.beginPath(); ctx.arc(X(last.step), Y(last.loss), 3, 0, Math.PI * 2); ctx.fill();
+  const dotY = Y(last.loss);
+  ctx.beginPath(); ctx.arc(X(last.step), Math.max(dotY, padT + 4), 3, 0, Math.PI * 2); ctx.fill();
+  if (last.loss > lMax) {
+    ctx.fillStyle = run.color;
+    ctx.font = 'bold 10px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('↑ diverging', W - padR - 2, padT + 10);
+    ctx.textAlign = 'left';
+  }
 }
 function lrRunAll() {
   LR_RUNS.forEach(function (run) {
