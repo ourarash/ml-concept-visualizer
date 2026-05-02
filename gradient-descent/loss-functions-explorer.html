@@ -93,7 +93,7 @@
         </div>
         <!-- gap + forward arrow ŷ→L -->
         <div class="flex flex-col items-center" style="width:130px;">
-          <div id="albl-dLdy" class="alabel mono mb-1">∂L/∂ŷ = (2/N)Σ(ŷ−y)</div>
+          <div id="albl-dLdy" class="alabel mono mb-1">∂L/∂ŷᵢ = (2/N)(ŷᵢ−yᵢ)</div>
           <div class="flex items-center w-full">
             <div class="flex-1 h-0.5 bg-slate-300"></div>
             <svg width="12" height="10" viewBox="0 0 12 10"><polygon points="0,0 12,5 0,10" fill="#94a3b8"/></svg>
@@ -148,7 +148,7 @@
         <span id="cr-err-show">—</span>
       </div>
       <div class="flex justify-between">
-        <span class="text-amber-600">∂L/∂ŷ = (2/N)Σ(ŷ−y)</span>
+        <span class="text-amber-600">∂L/∂ŷᵢ = (2/N)(ŷᵢ−yᵢ) per sample</span>
         <span id="cr-dLdy-show" class="text-amber-700 font-semibold">—</span>
       </div>
       <div class="flex justify-between">
@@ -277,7 +277,7 @@
     <!-- Canvas: Hinge + Logistic + 0/1 overlay -->
     <div class="grid md:grid-cols-5 gap-6 items-start">
       <div class="md:col-span-3">
-        <canvas id="classification-canvas" class="w-full border border-slate-200 rounded-lg" style="height:280px;"></canvas>
+        <canvas id="classification-canvas" role="img" aria-label="Interactive chart comparing 0/1 loss, Hinge loss, and Logistic loss against the classification margin z = y·ŷ. Use the slider below to move the marker." class="w-full border border-slate-200 rounded-lg" style="height:280px;"></canvas>
         <div class="mt-3 flex items-center gap-3">
           <label class="text-sm text-slate-600 whitespace-nowrap mono">z = <span id="cls-z-lbl" class="font-semibold">0.50</span></label>
           <input id="cls-z-slider" type="range" min="-2" max="3" step="0.05" value="0.5" oninput="clsUpdateZ()" class="flex-1">
@@ -309,7 +309,7 @@
     </div>
     <div class="mt-5 bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-900">
       <p class="font-semibold mb-1">Surrogate losses — the key idea</p>
-      <p>Hinge and Logistic are <strong>convex, differentiable upper bounds</strong> of the 0/1 loss. Minimizing either one also upper-bounds the true misclassification error, so gradient descent on a surrogate loss is a principled proxy for minimizing 0/1 loss.</p>
+      <p>Hinge and Logistic are <strong>convex upper bounds</strong> of the 0/1 loss. Hinge is piecewise-linear (subdifferentiable, not differentiable at z = 1); Logistic is smooth everywhere (C∞). Minimizing either one also upper-bounds the true misclassification error, so gradient descent on a surrogate loss is a principled proxy for minimizing 0/1 loss.</p>
     </div>
   </div>
 
@@ -319,7 +319,7 @@
     <p class="text-sm text-slate-600 mb-5">Adjust the logits for 3 classes. Softmax converts them to probabilities; CCE penalizes the model for low confidence on the <span class="text-rose-600 font-semibold">correct class</span>.</p>
     <div class="grid md:grid-cols-5 gap-6 items-start">
       <div class="md:col-span-3">
-        <canvas id="cce-canvas" class="w-full border border-slate-200 rounded-lg" style="height:280px;"></canvas>
+        <canvas id="cce-canvas" role="img" aria-label="Two-part chart: top shows softmax probability bars for 3 classes; bottom shows the −log(p) loss curve with a moving dot tracking the correct-class probability." class="w-full border border-slate-200 rounded-lg" style="height:280px;"></canvas>
         <div class="mt-4 space-y-2.5">
           <div class="flex items-center gap-3 text-sm">
             <span class="mono font-semibold text-rose-600 w-24">z₁ (correct)</span>
@@ -409,7 +409,7 @@
   <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
     <h3 class="text-lg font-bold text-slate-800 mb-1">Loss Function Comparison Chart</h3>
     <p class="text-sm text-slate-600 mb-4">All four classification losses on the same axes — the classic "surrogate loss" diagram from the lecture. Horizontal axis: margin z = y · ŷ. Hinge and Logistic both upper-bound the 0/1 loss everywhere.</p>
-    <canvas id="compare-canvas" class="w-full border border-slate-200 rounded-lg" style="height:260px;"></canvas>
+    <canvas id="compare-canvas" role="img" aria-label="Comparison chart showing 0/1 loss, MSE margin form, Hinge loss, and Logistic loss on the same axes with margin z = y·ŷ on the horizontal axis." class="w-full border border-slate-200 rounded-lg" style="height:260px;"></canvas>
     <div class="flex flex-wrap gap-4 mt-3 text-xs mono">
       <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-slate-400" style="border-top:2px dashed #94a3b8;"></span>0/1 loss</span>
       <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-green-600"></span>Hinge</span>
@@ -460,7 +460,7 @@ const CR_STEPS = [
     hlW: false, hlYhat: false, hlL: true, hlDydw: false, hlDLdy: true, hlChain: false,
   },
   {
-    desc: '<strong>Step 1 — ∂L/∂ŷ:</strong> Differentiate L = (1/N)Σ(ŷ−y)² with respect to ŷ. Result: <span class="text-amber-700 font-semibold">(2/N)Σ(ŷᵢ−yᵢ)</span>. This is the "how wrong" part — it equals zero only when all predictions are perfect.',
+    desc: '<strong>Step 1 — ∂L/∂ŷᵢ:</strong> For MSE, L = (1/N)Σ(ŷᵢ−yᵢ)², the per-sample derivative is <span class="text-amber-700 font-semibold">(2/N)(ŷᵢ−yᵢ)</span>. Each sample contributes its own error signal — zero only when ŷᵢ = yᵢ for that sample.',
     hlW: false, hlYhat: true, hlL: true, hlDydw: false, hlDLdy: true, hlChain: false,
   },
   {
@@ -468,7 +468,7 @@ const CR_STEPS = [
     hlW: true, hlYhat: true, hlL: false, hlDydw: true, hlDLdy: false, hlChain: false,
   },
   {
-    desc: '<strong>Step 3 — Chain rule:</strong> Multiply the two pieces: <span class="text-emerald-700 font-semibold">∂L/∂w<sub>j</sub> = (2/N)Σ(ŷᵢ−yᵢ) · x<sub>j</sub></span>. This is the gradient GD uses to update w<sub>j</sub>. Drag the w slider above to see how it changes in real time.',
+    desc: '<strong>Step 3 — Chain rule:</strong> Sum the per-sample products: <span class="text-emerald-700 font-semibold">∂L/∂w = (2/N)Σᵢ (ŷᵢ−yᵢ)·xᵢ</span>. Each sample contributes its own error × feature value. Drag the w slider to see how the gradient changes.',
     hlW: true, hlYhat: true, hlL: true, hlDydw: true, hlDLdy: true, hlChain: true,
   },
 ];
@@ -862,14 +862,14 @@ function drawCompare(ctx, W, H) {
   ctx.clearRect(0, 0, W, H);
   const PL = 48, PR = 20, PT = 18, PB = 40;
   const pw = W - PL - PR, ph = H - PT - PB;
-  const zMin = -2, zMax = 3, lMax = 4;
+  const zMin = -2, zMax = 3, lMax = 5;
 
   const zx = function(z) { return PL + (z - zMin) / (zMax - zMin) * pw; };
   const ly = function(l) { return PT + ph - Math.min(l, lMax) / lMax * ph; };
 
   // Grid
   ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 1;
-  [1,2,3,4].forEach(function(v) {
+  [1,2,3,4,5].forEach(function(v) {
     ctx.beginPath(); ctx.moveTo(PL, ly(v)); ctx.lineTo(PL + pw, ly(v)); ctx.stroke();
   });
 
@@ -886,7 +886,7 @@ function drawCompare(ctx, W, H) {
     ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
     ctx.fillText(v, zx(v), PT + ph + 15);
   });
-  [0,1,2,3,4].forEach(function(v) {
+  [0,1,2,3,4,5].forEach(function(v) {
     ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
     ctx.fillText(v, PL - 5, ly(v) + 4);
   });
@@ -955,13 +955,18 @@ function drawCompare(ctx, W, H) {
 function redraw(id, fn) {
   const c = document.getElementById(id);
   if (!c) return;
-  const dpr = window.devicePixelRatio || 1;
-  const w   = Math.max(c.getBoundingClientRect().width, 1);
-  const h   = parseFloat(c.style.height) || 260;
-  c.width   = Math.round(w * dpr);
-  c.height  = Math.round(h * dpr);
-  c.style.width  = w + 'px';
-  c.style.height = h + 'px';
+  const dpr  = window.devicePixelRatio || 1;
+  const w    = Math.max(c.getBoundingClientRect().width, 1);
+  const h    = parseFloat(c.style.height) || 260;
+  const newW = Math.round(w * dpr);
+  const newH = Math.round(h * dpr);
+  // Only reallocate the backing store when dimensions actually change
+  if (c.width !== newW || c.height !== newH) {
+    c.width        = newW;
+    c.height       = newH;
+    c.style.width  = w + 'px';
+    c.style.height = h + 'px';
+  }
   const ctx = c.getContext('2d');
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.scale(dpr, dpr);
