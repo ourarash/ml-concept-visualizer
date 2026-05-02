@@ -42,9 +42,6 @@
   .step-fn-label {
     font-size: 0.7rem; fill: #64748b;
   }
-  @media (max-width: 640px) {
-    .hide-sm { display: none; }
-  }
 </style>
 </head>
 <body class="bg-slate-50 text-slate-800">
@@ -83,7 +80,7 @@
         </div>
         <!-- gap + forward arrow w→ŷ -->
         <div class="flex flex-col items-center" style="width:120px;">
-          <div id="albl-dydw" class="alabel mono mb-1">∂ŷ/∂w<sub>j</sub> = x<sub>j</sub></div>
+          <div id="albl-dydw" class="alabel mono mb-1">∂ŷ/∂w = xᵢ (per sample)</div>
           <div class="flex items-center w-full">
             <div class="flex-1 h-0.5 bg-slate-300"></div>
             <svg width="12" height="10" viewBox="0 0 12 10"><polygon points="0,0 12,5 0,10" fill="#94a3b8"/></svg>
@@ -119,7 +116,7 @@
           <div class="flex-1 h-0.5 border-t-2 border-dashed border-slate-300"></div>
         </div>
         <div id="albl-chain" class="alabel text-center mt-1.5 text-xs">
-          ∂L/∂w<sub>j</sub> = (∂L/∂ŷ) × (∂ŷ/∂w<sub>j</sub>) = (2/N) Σ(ŷᵢ − yᵢ) · x<sub>j</sub>
+          ∂L/∂w = (2/N) Σᵢ (ŷᵢ − yᵢ) · xᵢ
         </div>
         <div class="text-center text-slate-400 text-xs mt-0.5">← backpropagation direction</div>
       </div>
@@ -155,32 +152,26 @@
         <span id="cr-dLdy-show" class="text-amber-700 font-semibold">—</span>
       </div>
       <div class="flex justify-between">
-        <span class="text-blue-600">x_j (feature)</span>
+        <span class="text-blue-600">∂ŷ/∂w = xᵢ (each sample)</span>
         <span id="cr-xj-show" class="text-blue-700">—</span>
       </div>
       <div class="flex justify-between border-t border-slate-100 pt-1">
-        <span class="text-emerald-600 font-semibold">∂L/∂w_j = ∂L/∂ŷ × x_j</span>
+        <span class="text-emerald-600 font-semibold">∂L/∂w = (2/N)Σ(ŷᵢ−yᵢ)·xᵢ</span>
         <span id="cr-dLdw-show" class="text-emerald-700 font-bold">—</span>
       </div>
     </div>
   </div>
 
-  <!-- Sliders -->
-  <div class="mt-4 grid sm:grid-cols-2 gap-4">
-    <div class="flex items-center gap-3">
-      <label class="text-sm text-slate-600 whitespace-nowrap">w = <span id="cr-w-lbl" class="mono font-semibold">3.00</span></label>
-      <input id="cr-w-slider" type="range" min="-1" max="5" step="0.1" value="3.0" oninput="crRender()" class="flex-1">
-    </div>
-    <div class="flex items-center gap-3">
-      <label class="text-sm text-slate-600 whitespace-nowrap">x_j = <span id="cr-xj-lbl" class="mono font-semibold">1.20</span></label>
-      <input id="cr-xj-slider" type="range" min="-2" max="2" step="0.1" value="1.2" oninput="crRender()" class="flex-1">
-    </div>
+  <!-- Slider -->
+  <div class="mt-4 flex items-center gap-3 max-w-sm">
+    <label class="text-sm text-slate-600 whitespace-nowrap">w = <span id="cr-w-lbl" class="mono font-semibold">3.00</span></label>
+    <input id="cr-w-slider" type="range" min="-1" max="5" step="0.1" value="3.0" oninput="crRender()" class="flex-1">
   </div>
 
   <!-- Key insight box -->
   <div class="mt-5 bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
     <p class="font-semibold mb-1">Key insight</p>
-    <p>∂ŷ/∂w<sub>j</sub> = x<sub>j</sub> — just the j-th feature value, not the loss and not w itself. The chain rule splits <em>"how does w<sub>j</sub> affect the loss?"</em> into two easy pieces: <em>"how wrong is the prediction?"</em> × <em>"how much does w<sub>j</sub> control ŷ?"</em></p>
+    <p>∂ŷ/∂w = xᵢ — for each sample i, the partial derivative of the prediction with respect to w is simply the feature value xᵢ. The chain rule multiplies this with the error signal: <em>"how wrong is the prediction across all samples?"</em> × <em>"what feature value drives w?"</em> — giving ∂L/∂w = (2/N)Σ(ŷᵢ−yᵢ)·xᵢ.</p>
   </div>
 </section>
 
@@ -198,8 +189,11 @@
     <p class="text-sm text-slate-600 mb-4">Drag the point left/right to feel how MSE and MAE respond differently to outliers. At e = 3, MSE penalizes 9× while MAE only penalizes 3×.</p>
     <div class="grid md:grid-cols-5 gap-6 items-start">
       <div class="md:col-span-3">
-        <canvas id="regression-canvas" class="w-full border border-slate-200 rounded-lg" style="height:260px;cursor:ew-resize;"></canvas>
-        <p class="text-xs text-slate-400 mt-1 text-center">← Drag horizontally to change the error →</p>
+        <canvas id="regression-canvas" role="img" aria-label="Interactive chart comparing MSE and MAE loss curves. Drag or use the slider below to change the prediction error." class="w-full border border-slate-200 rounded-lg" style="height:260px;cursor:ew-resize;"></canvas>
+        <div class="mt-2 flex items-center gap-3">
+          <label class="text-xs text-slate-500 whitespace-nowrap" for="reg-e-slider">e = <span id="reg-e-lbl" class="mono font-semibold">2.000</span></label>
+          <input id="reg-e-slider" type="range" min="-3" max="3" step="0.05" value="2.0" aria-label="Prediction error value" oninput="regSliderUpdate()" class="flex-1">
+        </div>
       </div>
       <div class="md:col-span-2 space-y-3 text-xs mono">
         <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
@@ -305,9 +299,10 @@
         </div>
         <div class="bg-purple-50 border border-purple-200 rounded-lg p-3">
           <p class="font-bold text-purple-800 text-sm mb-1.5">Logistic Loss / BCE</p>
-          <p class="text-purple-700">L = log(1 + e<sup>−z</sup>)</p>
-          <p class="text-purple-700">  = −[y log p + (1−y)log(1−p)]</p>
-          <p class="text-purple-700">∂L/∂ŷ = −y(1 − σ(y·ŷ))</p>
+          <p class="text-purple-700">L = log(1 + e<sup>−z</sup>)  (margin form, z = y·ŷ, y ∈ {−1,+1})</p>
+          <p class="text-purple-700 mt-0.5">BCE form: −[y′ log p + (1−y′)log(1−p)]</p>
+          <p class="text-purple-500 text-xs mt-0.5">(y′ ∈ {0,1}, p = σ(ŷ) — different label encoding)</p>
+          <p class="text-purple-700 mt-0.5">∂L/∂ŷ = −y(1 − σ(y·ŷ))  (margin form)</p>
           <p class="text-purple-600 mt-1.5" style="font-family:inherit;">Always smooth (C∞), gradient never exactly 0. "Soft margin" — even confidently correct points receive a small push.</p>
         </div>
       </div>
@@ -479,13 +474,17 @@ const CR_STEPS = [
 ];
 
 function crCalc() {
-  const w  = parseFloat(document.getElementById('cr-w-slider').value);
-  const xj = parseFloat(document.getElementById('cr-xj-slider').value);
-  let sumErr = 0;
-  CR_DATA.forEach(function(d) { sumErr += (w * d.x - d.y); });
+  const w = parseFloat(document.getElementById('cr-w-slider').value);
+  let sumErr = 0, sumGrad = 0;
+  CR_DATA.forEach(function(d) {
+    const err = w * d.x - d.y;
+    sumErr  += err;
+    sumGrad += err * d.x;   // each sample contributes (ŷᵢ−yᵢ)·xᵢ
+  });
   const meanErr = sumErr / N_CR;
-  const dLdy = 2 * meanErr;
-  return { w, xj, meanErr, dLdy, dLdw: dLdy * xj };
+  const dLdy  = 2 * meanErr;           // ∂L/∂ŷ = (2/N)Σ(ŷ−y)
+  const dLdw  = 2 * sumGrad / N_CR;    // ∂L/∂w = (2/N)Σ(ŷᵢ−yᵢ)·xᵢ
+  return { w, meanErr, dLdy, dLdw };
 }
 
 function crApplyHL(s) {
@@ -506,15 +505,14 @@ function crApplyHL(s) {
 function crRender() {
   const n = crCalc();
   document.getElementById('cr-w-lbl').textContent  = n.w.toFixed(2);
-  document.getElementById('cr-xj-lbl').textContent = n.xj.toFixed(2);
   document.getElementById('cr-w-show').textContent  = n.w.toFixed(2);
   document.getElementById('cr-step-lbl').textContent = 'step ' + crStepIdx + ' / 3';
 
   const show = function(id, val) { document.getElementById(id).textContent = val; };
-  show('cr-err-show',  crStepIdx >= 1 ? n.meanErr.toFixed(4) : '—');
-  show('cr-dLdy-show', crStepIdx >= 1 ? n.dLdy.toFixed(4)   : '—');
-  show('cr-xj-show',   crStepIdx >= 2 ? n.xj.toFixed(2)     : '—');
-  show('cr-dLdw-show', crStepIdx >= 3 ? n.dLdw.toFixed(4)   : '—');
+  show('cr-err-show',  crStepIdx >= 1 ? n.meanErr.toFixed(4)             : '—');
+  show('cr-dLdy-show', crStepIdx >= 1 ? n.dLdy.toFixed(4)               : '—');
+  show('cr-xj-show',   crStepIdx >= 2 ? 'xᵢ varies (−2 … 2 in dataset)' : '—');
+  show('cr-dLdw-show', crStepIdx >= 3 ? n.dLdw.toFixed(4)               : '—');
 
   if (crStepIdx === 0) {
     document.getElementById('cr-desc').innerHTML = 'Click ▶ Next to begin the derivation.';
@@ -609,13 +607,22 @@ function drawRegression(ctx, W, H) {
   ctx.beginPath(); ctx.arc(x0, ey(Math.abs(regE)), 7, 0, Math.PI * 2);
   ctx.fillStyle = '#f97316'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
 
-  // Update panel
+  // Update panel + keep slider in sync with drag
   const N = 20;
   document.getElementById('reg-e').textContent    = regE.toFixed(3);
   document.getElementById('reg-mse').textContent  = (regE * regE).toFixed(3);
   document.getElementById('reg-dmse').textContent = ((2 / N) * regE).toFixed(4);
   document.getElementById('reg-mae').textContent  = Math.abs(regE).toFixed(3);
   document.getElementById('reg-dmae').textContent = (Math.sign(regE) / N).toFixed(4);
+  const sl = document.getElementById('reg-e-slider');
+  if (sl && parseFloat(sl.value) !== regE) sl.value = regE;
+  const lbl = document.getElementById('reg-e-lbl');
+  if (lbl) lbl.textContent = regE.toFixed(3);
+}
+
+function regSliderUpdate() {
+  regE = parseFloat(document.getElementById('reg-e-slider').value);
+  redraw('regression-canvas', drawRegression);
 }
 
 (function setupRegDrag() {
@@ -901,7 +908,7 @@ function drawCompare(ctx, W, H) {
   ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
   ctx.fillText('0/1', PL + 4, ly(1) - 6);
 
-  // MSE in margin view: (1 - z)^2 / 4  (Vapnik's squared loss in margin form)
+  // MSE in margin view: max(0, 1-z)^2 / 2  (clipped squared loss, zeroed for confident predictions)
   ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2;
   ctx.beginPath();
   for (let i = 0; i <= 300; i++) {
