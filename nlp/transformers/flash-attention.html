@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>FlashAttention — IO-Aware Tiled Attention</title>
+    <title>FlashAttention — IO-Aware Tiled Attention (Forward + Backward)</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         :root { color-scheme: light; }
@@ -12,10 +12,15 @@
         .mono { font-family: 'JetBrains Mono', monospace; }
         .mode-tab { transition: all 0.2s ease; }
         .mode-tab.active { background: #2563eb; color: white; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.3); }
-        .pulse-load  { animation: pulseLoad 0.45s ease-out; }
-        .pulse-write { animation: pulseWrite 0.45s ease-out; }
-        @keyframes pulseLoad  { 0% { filter: drop-shadow(0 0 0 rgba(34, 197, 94, 0)); } 50% { filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.7)); } 100% { filter: drop-shadow(0 0 0 rgba(34, 197, 94, 0)); } }
-        @keyframes pulseWrite { 0% { filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0)); } 50% { filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.7)); } 100% { filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0)); } }
+        .phase-tab { transition: all 0.18s ease; }
+        .phase-tab.active.fwd { background: #0d9488; color: white; box-shadow: 0 3px 10px rgba(13,148,136,0.28); }
+        .phase-tab.active.bwd { background: #b45309; color: white; box-shadow: 0 3px 10px rgba(180,83,9,0.28); }
+        .pulse-load  { animation: pulseLoad 0.55s ease-out; }
+        .pulse-write { animation: pulseWrite 0.55s ease-out; }
+        .pulse-recompute { animation: pulseRecompute 0.7s ease-out; }
+        @keyframes pulseLoad     { 0% { filter: drop-shadow(0 0 0 rgba(34, 197, 94, 0)); } 50% { filter: drop-shadow(0 0 8px rgba(34, 197, 94, 0.75)); } 100% { filter: drop-shadow(0 0 0 rgba(34, 197, 94, 0)); } }
+        @keyframes pulseWrite    { 0% { filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0)); } 50% { filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.75)); } 100% { filter: drop-shadow(0 0 0 rgba(245, 158, 11, 0)); } }
+        @keyframes pulseRecompute{ 0% { filter: drop-shadow(0 0 0 rgba(168, 85, 247, 0)); } 50% { filter: drop-shadow(0 0 9px rgba(168, 85, 247, 0.85)); } 100% { filter: drop-shadow(0 0 0 rgba(168, 85, 247, 0)); } }
         details > summary { list-style: none; cursor: pointer; }
         details > summary::-webkit-details-marker { display: none; }
         details[open] > summary .chev { transform: rotate(90deg); }
@@ -23,11 +28,13 @@
         input[type="range"] { accent-color: #2563eb; }
         .math-row { transition: background 0.2s ease; }
         .math-row.active { background: #fef3c7; }
+        .math-row.active.bwd { background: #fde68a; }
+        .math-row.active.recompute { background: #f3e8ff; border-left: 3px solid #a855f7; }
     </style>
 </head>
 <body class="min-h-screen">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
-        <header class="mb-6 pb-4 border-b border-slate-200">
+        <header class="mb-5 pb-4 border-b border-slate-200">
             <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
                 <a href="../../index.html" class="hover:text-blue-600">Home</a>
                 <span>›</span>
@@ -37,23 +44,36 @@
             </div>
             <h1 class="text-3xl font-black text-slate-900 tracking-tight">FlashAttention — IO-Aware Tiled Attention</h1>
             <p class="text-slate-600 mt-2 text-sm sm:text-base">
-                Standard attention writes the full <strong>N×N</strong> attention matrix to HBM and reads it back —
-                bandwidth-bound from the start. <strong>FlashAttention</strong> keeps work resident in <strong>SRAM</strong>:
-                stream <em>K, V</em> tiles in, run an <strong>online softmax</strong> that updates running statistics
-                <em>(m, ℓ, O)</em>, and only ever write the final output to HBM. Same answer, but
-                <strong>O(N·d)</strong> HBM traffic instead of <strong>O(N²)</strong>.
+                Standard attention launches <strong>4 separate CUDA kernels</strong> per pass and round-trips an
+                <strong>N×N</strong> matrix through HBM. <strong>FlashAttention</strong> fuses them into
+                <strong>one kernel</strong>: stream <em>K, V</em> tiles into SRAM, run an <strong>online softmax</strong>,
+                and only ever write the final output to HBM. The <strong>backward pass</strong> uses the same trick —
+                instead of loading the saved N×N matrix, it <em>recomputes</em> attention from <em>Q, K</em> and the tiny
+                saved <em>(m, ℓ)</em> stats. Result: <strong>O(N·d)</strong> HBM traffic on
+                <strong>both passes</strong>, with no approximation. (EE-508 Transformers — Part 3)
             </p>
         </header>
 
         <!-- Mode tabs -->
-        <div class="grid grid-cols-2 gap-3 mb-5">
+        <div class="grid grid-cols-2 gap-3 mb-3">
             <button id="tab-std" class="mode-tab px-3 py-3 rounded-xl font-bold text-sm border-2 border-slate-200 bg-white text-slate-700 transition">
                 <div class="flex items-center justify-center gap-2 mb-1"><span class="text-lg">🐢</span><span>Standard attention</span></div>
-                <div class="text-[11px] font-normal opacity-90 text-center">N×N matrix in HBM — bandwidth-bound</div>
+                <div class="text-[11px] font-normal opacity-90 text-center">4 separate kernels · N×N matrix in HBM</div>
             </button>
             <button id="tab-flash" class="mode-tab active px-3 py-3 rounded-xl font-bold text-sm border-2 border-blue-600 bg-blue-600 text-white transition">
                 <div class="flex items-center justify-center gap-2 mb-1"><span class="text-lg">⚡</span><span>FlashAttention</span></div>
-                <div class="text-[11px] font-normal opacity-90 text-center">SRAM-resident tiles + online softmax</div>
+                <div class="text-[11px] font-normal opacity-90 text-center">1 fused kernel · SRAM-resident tiles + online softmax</div>
+            </button>
+        </div>
+
+        <!-- Phase toggle -->
+        <div class="flex items-center gap-2 mb-5 bg-white rounded-xl border border-slate-200 shadow-sm p-2">
+            <span class="text-[10px] uppercase tracking-widest font-black text-slate-500 px-2">Pass</span>
+            <button id="phase-fwd" class="phase-tab active fwd flex-1 py-2 px-3 rounded-lg font-bold text-sm bg-teal-600 text-white transition">
+                ▶ Forward pass <span class="opacity-80 font-normal text-[11px]">— compute O = softmax(QKᵀ)·V</span>
+            </button>
+            <button id="phase-bwd" class="phase-tab flex-1 py-2 px-3 rounded-lg font-bold text-sm bg-slate-100 text-slate-700 transition">
+                ◀ Backward pass <span class="opacity-80 font-normal text-[11px]">— compute dQ, dK, dV from dO</span>
             </button>
         </div>
 
@@ -95,9 +115,9 @@
                     </div>
                 </div>
 
-                <!-- Live HBM/FLOPs -->
+                <!-- Live HBM/SRAM counters -->
                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
-                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Live counters</h3>
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Live counters · this pass</h3>
                     <div class="grid grid-cols-2 gap-2.5">
                         <div class="bg-blue-50 border border-blue-100 rounded-lg p-2.5 text-center">
                             <div class="text-[9px] font-black uppercase text-blue-600 tracking-widest">Step</div>
@@ -116,7 +136,29 @@
                             <div id="sramPeakVal" class="text-2xl font-black text-emerald-700 leading-tight mono">0</div>
                         </div>
                     </div>
-                    <p id="bytesNote" class="text-[10px] text-slate-500 mt-2 leading-snug">Bytes assume FP16 (2 B per element). HBM = ~2 TB/s. SRAM = ~19 TB/s.</p>
+                    <p class="text-[10px] text-slate-500 mt-2 leading-snug">FP16 (2 B/elem). HBM ≈ 2 TB/s · SRAM ≈ 19 TB/s. Counters reset on phase / mode / config change.</p>
+                </div>
+
+                <!-- Phase totals (forward + backward) -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Cumulative HBM by phase</h3>
+                    <div class="space-y-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-teal-700 bg-teal-50 px-2 py-0.5 rounded w-16 text-center">FWD</span>
+                            <div class="flex-1 h-5 bg-slate-100 rounded relative overflow-hidden">
+                                <div id="bar-fwd" class="h-full bg-teal-500" style="width:0%"></div>
+                            </div>
+                            <span id="fwdTotal" class="mono text-xs font-bold text-teal-800 w-16 text-right">0 B</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-black uppercase tracking-widest text-amber-800 bg-amber-50 px-2 py-0.5 rounded w-16 text-center">BWD</span>
+                            <div class="flex-1 h-5 bg-slate-100 rounded relative overflow-hidden">
+                                <div id="bar-bwd" class="h-full bg-amber-600" style="width:0%"></div>
+                            </div>
+                            <span id="bwdTotal" class="mono text-xs font-bold text-amber-800 w-16 text-right">0 B</span>
+                        </div>
+                    </div>
+                    <p id="phaseRatio" class="text-[10px] text-slate-500 mt-2 leading-snug">Run forward → backward to fill both bars. The backward bar is the savings story — recompute makes it linear in N.</p>
                 </div>
 
                 <!-- Playback -->
@@ -139,6 +181,33 @@
 
             <!-- Main viz -->
             <section class="lg:col-span-8 space-y-5">
+
+                <!-- Kernel-fusion pipeline strip -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-sm font-black text-slate-800 tracking-tight">Kernel pipeline — what the GPU actually launches</h2>
+                        <span id="kernelBadge" class="text-[10px] uppercase tracking-widest font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full">1 fused kernel</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mb-2">
+                        Each box is one CUDA kernel launch. Vertical arrows are <strong>HBM round-trips</strong> between launches —
+                        every one costs ~N² of bandwidth on standard attention.
+                        <strong>FlashAttention collapses them all into one launch</strong> with no intermediate HBM traffic.
+                    </p>
+                    <div class="relative w-full">
+                        <svg id="pipelineSvg" viewBox="0 0 880 200" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <marker id="pa-dn" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                                    <polygon points="0 0, 8 3, 0 6" fill="#10b981"/>
+                                </marker>
+                                <marker id="pa-up" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+                                    <polygon points="0 0, 8 3, 0 6" fill="#f59e0b"/>
+                                </marker>
+                            </defs>
+                            <g id="pipelineLayer"></g>
+                        </svg>
+                    </div>
+                </div>
+
                 <!-- Memory hierarchy + tiles -->
                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
                     <div class="flex items-center justify-between mb-2">
@@ -154,19 +223,22 @@
                                 <marker id="arr-up" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
                                     <polygon points="0 0, 9 3.5, 0 7" fill="#f59e0b"/>
                                 </marker>
+                                <marker id="arr-rc" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#a855f7"/>
+                                </marker>
                             </defs>
                             <g id="vizLayer"></g>
                         </svg>
                     </div>
                 </div>
 
-                <!-- Online softmax panel (Flash only) -->
+                <!-- Math panel — forward (online softmax) -->
                 <div id="softmaxPanel" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
                     <div class="flex items-center justify-between mb-2">
-                        <h2 class="text-sm font-black text-slate-800 tracking-tight">Online softmax — running statistics</h2>
-                        <span class="text-[10px] uppercase tracking-widest font-bold text-amber-600">FlashAttention's secret sauce</span>
+                        <h2 class="text-sm font-black text-slate-800 tracking-tight">Online softmax — forward running statistics</h2>
+                        <span class="text-[10px] uppercase tracking-widest font-bold text-amber-600">FlashAttention's forward unlock</span>
                     </div>
-                    <p class="text-[11px] text-slate-500 mb-2">For each Q tile <em>i</em>, three small vectors live in SRAM and are updated as each K/V tile <em>j</em> streams through. After the last tile, the final O<sub>i</sub> is written to HBM.</p>
+                    <p class="text-[11px] text-slate-500 mb-2">For each Q tile <em>i</em>, three small vectors live in SRAM and are updated as each K/V tile <em>j</em> streams through. After the last tile, the final O<sub>i</sub> is written to HBM — and <strong>(m<sub>i</sub>, ℓ<sub>i</sub>) are saved for the backward pass</strong> (just O(N) bytes, vs O(N²) for the full matrix).</p>
                     <div class="space-y-1.5 mono text-[12px]">
                         <div id="math-1" class="math-row p-2 rounded">
                             <span class="font-bold text-slate-700">S<sub>ij</sub></span>
@@ -184,13 +256,67 @@
                             <span class="font-bold text-slate-700">ℓ<sub>new</sub></span>
                             <span class="text-slate-500">=</span>
                             <span class="text-slate-700">e^(m<sub>i</sub>−m<sub>new</sub>)·ℓ<sub>i</sub> + sum(e^(S<sub>ij</sub>−m<sub>new</sub>))</span>
-                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— rescale & accumulate denominator</span>
+                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— rescale &amp; accumulate denominator</span>
                         </div>
                         <div id="math-4" class="math-row p-2 rounded">
                             <span class="font-bold text-slate-700">O<sub>new</sub></span>
                             <span class="text-slate-500">=</span>
                             <span class="text-slate-700">diag(e^(m<sub>i</sub>−m<sub>new</sub>))·O<sub>i</sub> + e^(S<sub>ij</sub>−m<sub>new</sub>)·V<sub>j</sub></span>
-                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— rescale O & accumulate weighted values</span>
+                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— rescale O &amp; accumulate weighted values</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Math panel — backward (recompute + grad) -->
+                <div id="bwdPanel" class="bg-white rounded-xl border border-slate-200 shadow-sm p-4" style="display:none">
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-sm font-black text-slate-800 tracking-tight">Backward pass — recompute, then differentiate</h2>
+                        <span class="text-[10px] uppercase tracking-widest font-bold text-purple-700">Recomputation = the backward unlock</span>
+                    </div>
+                    <p class="text-[11px] text-slate-500 mb-2">
+                        For each (Q-tile <em>i</em>, KV-tile <em>j</em>) pair: load Q<sub>i</sub>, K<sub>j</sub>, V<sub>j</sub>, O<sub>i</sub>, dO<sub>i</sub> and the saved
+                        <strong>(m<sub>i</sub>, ℓ<sub>i</sub>)</strong> into SRAM. <strong>Recompute</strong> the attention block from scratch — then run all five gradient matmuls
+                        in SRAM and accumulate dQ, dK, dV. The full N×N matrix is never touched.
+                    </p>
+                    <div class="space-y-1.5 mono text-[12px]">
+                        <div id="bmath-1" class="math-row p-2 rounded">
+                            <span class="font-bold text-purple-700">S<sub>ij</sub></span>
+                            <span class="text-slate-500">=</span>
+                            <span class="text-slate-700">Q<sub>i</sub> · K<sub>j</sub><sup>T</sup></span>
+                            <span class="ml-2 px-1.5 rounded bg-purple-100 text-purple-700 font-sans not-italic text-[10px] font-bold">RECOMPUTE</span>
+                        </div>
+                        <div id="bmath-2" class="math-row p-2 rounded">
+                            <span class="font-bold text-purple-700">P<sub>ij</sub></span>
+                            <span class="text-slate-500">=</span>
+                            <span class="text-slate-700">exp(S<sub>ij</sub> − m<sub>i</sub>) / ℓ<sub>i</sub></span>
+                            <span class="ml-2 px-1.5 rounded bg-purple-100 text-purple-700 font-sans not-italic text-[10px] font-bold">RECOMPUTE — uses saved (m, ℓ)</span>
+                        </div>
+                        <div id="bmath-3" class="math-row p-2 rounded">
+                            <span class="font-bold text-amber-700">dV<sub>j</sub></span>
+                            <span class="text-slate-500">+=</span>
+                            <span class="text-slate-700">P<sub>ij</sub><sup>T</sup> · dO<sub>i</sub></span>
+                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— grad through value mixing</span>
+                        </div>
+                        <div id="bmath-4" class="math-row p-2 rounded">
+                            <span class="font-bold text-amber-700">dP<sub>ij</sub></span>
+                            <span class="text-slate-500">=</span>
+                            <span class="text-slate-700">dO<sub>i</sub> · V<sub>j</sub><sup>T</sup></span>
+                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— grad of attention weights</span>
+                        </div>
+                        <div id="bmath-5" class="math-row p-2 rounded">
+                            <span class="font-bold text-amber-700">dS<sub>ij</sub></span>
+                            <span class="text-slate-500">=</span>
+                            <span class="text-slate-700">P<sub>ij</sub> ⊙ (dP<sub>ij</sub> − D<sub>i</sub>)</span>
+                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">— softmax-grad; D<sub>i</sub> = rowsum(dO<sub>i</sub> ⊙ O<sub>i</sub>)</span>
+                        </div>
+                        <div id="bmath-6" class="math-row p-2 rounded">
+                            <span class="font-bold text-amber-700">dQ<sub>i</sub></span>
+                            <span class="text-slate-500">+=</span>
+                            <span class="text-slate-700">dS<sub>ij</sub> · K<sub>j</sub></span>
+                            <span class="text-slate-400 ml-2 font-sans not-italic text-[10px]">,</span>
+                            <span class="font-bold text-amber-700 ml-2">dK<sub>j</sub></span>
+                            <span class="text-slate-500">+=</span>
+                            <span class="text-slate-700">dS<sub>ij</sub><sup>T</sup> · Q<sub>i</sub></span>
                         </div>
                     </div>
                 </div>
@@ -199,11 +325,11 @@
                 <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
                     <div class="flex items-end justify-between mb-2">
                         <div>
-                            <h3 class="text-sm font-black text-slate-800 tracking-tight">HBM traffic vs sequence length</h3>
-                            <p class="text-[11px] text-slate-500">Standard scales <strong>O(N²)</strong>; Flash scales <strong>O(N·d)</strong>. The crossover point is around N ≈ d.</p>
+                            <h3 class="text-sm font-black text-slate-800 tracking-tight">HBM traffic vs sequence length — forward + backward</h3>
+                            <p class="text-[11px] text-slate-500">Standard pays N² on forward and again on backward (it loaded the saved A). Flash pays O(N·d) on both.</p>
                         </div>
                         <div class="text-right">
-                            <div class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Bandwidth saved (this N, d)</div>
+                            <div class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Total saved (this N, d, both passes)</div>
                             <div id="savingsVal" class="text-2xl font-black text-emerald-600 mono">—</div>
                         </div>
                     </div>
@@ -215,23 +341,25 @@
                 <!-- Pedagogy -->
                 <details class="bg-white rounded-xl border border-slate-200 shadow-sm p-4" open>
                     <summary class="font-black text-slate-800 text-sm tracking-tight flex items-center gap-2">
-                        <span class="chev text-slate-400">▶</span> Why this is fast
+                        <span class="chev text-slate-400">▶</span> Why fusion + recompute is the whole story
                     </summary>
                     <div class="mt-3 space-y-3 text-[13px] text-slate-700 leading-relaxed">
                         <p><strong>The bottleneck isn't FLOPs — it's HBM.</strong> An A100 has 312 TFLOPs of FP16 compute but only 2 TB/s of HBM bandwidth. Standard attention reads/writes the N×N matrix multiple times: at N=4096, d=64, that's ~250 MB of traffic per layer per pass. The compute units sit idle waiting on memory.</p>
                         <p><strong>SRAM is 10× faster per byte.</strong> Each streaming multiprocessor has ~192 KB of L1/SRAM running at ~19 TB/s. If you can keep the working set there, you decouple from HBM bandwidth.</p>
-                        <p class="bg-amber-50 border border-amber-100 rounded-lg p-3 text-amber-900 text-[12px]">
-                            <strong>Online softmax is the unlock.</strong> Naïve softmax needs the full row to compute the denominator. FlashAttention rewrites it as an incremental update: keep a running max <em>m</em>, running denominator <em>ℓ</em>, and running output <em>O</em>. As each K/V tile streams in, all three are rescaled so the final answer is exactly what naïve softmax would give. <strong>No approximation, just smarter math.</strong>
+                        <p class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-emerald-900 text-[12px]">
+                            <strong>Forward unlock — kernel fusion.</strong> Standard attention is 4 separate kernel launches: <em>matmul → softmax → mask → matmul</em>, each writing its intermediate to HBM and the next reading it back. The N×N attention matrix gets materialized. FlashAttention's <strong>online softmax</strong> rewrites the normalization as an incremental update so all four ops fit in <em>one</em> kernel — read Q, K, V tile-by-tile, write only O. <strong>No approximation, just smarter math.</strong>
+                        </p>
+                        <p class="bg-purple-50 border border-purple-100 rounded-lg p-3 text-purple-900 text-[12px]">
+                            <strong>Backward unlock — recomputation.</strong> The standard backward needs the attention matrix A again to differentiate through softmax. Storing all of A from the forward pass costs O(N²) HBM. FlashAttention saves <em>only the normalization stats (m, ℓ)</em> — that's O(N) bytes — and <strong>recomputes A in blocks</strong> during the backward kernel. A small extra FLOP cost buys 10–20× memory savings, and because everything stays in SRAM, the backward is also bandwidth-bound-free.
                         </p>
                         <p class="bg-rose-50 border border-rose-100 rounded-lg p-3 text-rose-900 text-[12px]">
                             <strong>The B<sub>r</sub> trap.</strong> FlashAttention's K and V get re-read once for every Q-block —
-                            <em>N/B<sub>r</sub></em> times total. If you pick <em>B<sub>r</sub></em> too small, the re-read overhead exceeds the
+                            <em>N/B<sub>r</sub></em> times total, on <em>both</em> passes. If you pick <em>B<sub>r</sub></em> too small, the re-read overhead exceeds the
                             savings from skipping the N×N matrix and Flash <em>loses</em> to standard. Real implementations set
                             <em>B<sub>r</sub> ≈ M / (4·d)</em>, where <em>M</em> is the SRAM budget — typically 64–128 rows for d=64 on an A100.
-                            Try the slider: with the default N=16, d=8, Flash beats Standard at B<sub>r</sub>=8 but loses badly at B<sub>r</sub>=2.
+                            Try the slider: with the default N=16, d=8, Flash beats Standard at B<sub>r</sub>=8 but loses at B<sub>r</sub>=2.
                         </p>
-                        <p><strong>The backward pass uses the same trick</strong> — it doesn't store the attention matrix; it recomputes it from saved <em>m</em> and <em>ℓ</em> when needed. (See <a href="../../gradient-descent/activation-checkpointing.html" class="underline font-bold">activation checkpointing</a> — same idea, narrower scope.)</p>
-                        <p>Net result with proper B<sub>r</sub> tuning: 2–4× faster attention end-to-end on long contexts, used by every modern LLM training pipeline.</p>
+                        <p>FlashAttention-2 went further: <strong>fully fused</strong> softmax + dropout + masking + matmul in one CUDA kernel, plus better parallelism across batch / heads / blocks. Net: 2–4× faster end-to-end attention, used by every modern LLM training pipeline. (Companion: <a href="../../gradient-descent/activation-checkpointing.html" class="underline font-bold">activation checkpointing</a> generalizes this same recompute-vs-store trade-off to whole networks.)</p>
                     </div>
                 </details>
             </section>
@@ -244,6 +372,7 @@
 
     const state = {
         mode: 'flash',     // 'std' | 'flash'
+        phase: 'fwd',      // 'fwd' | 'bwd'
         N: 16,
         d: 8,
         Br: 4,
@@ -252,12 +381,19 @@
         playing: false,
         timer: null,
         speedMs: 600,
-        // Counters
+        // Counters (this pass)
         hbmRead: 0,
         hbmWrite: 0,
         sramPeak: 0,
+        // Cumulative per-phase totals (across runs in current mode)
+        fwdTotal: 0,
+        bwdTotal: 0,
         // Flash inner state
         currentI: 0, currentJ: -1,
+        // Standard backward sub-step (which gradient kernel is active)
+        stdBwdSub: 0,   // 0..5
+        // Flash backward sub-substep (1=load, 2=recompute S,P, 3=dV, 4=dP, 5=dS, 6=dQ/dK)
+        flBwdSub: 0,
     };
 
     function bytes(elements) { return elements * 2; } // FP16
@@ -272,11 +408,165 @@
 
     // ===== Schedule for each mode =====
     function totalSteps() {
-        if (state.mode === 'std') return 4;  // Q·K^T → S, softmax→P, P·V→O, done
-        // Flash: outer × inner
+        if (state.mode === 'std') {
+            // fwd: 4 separate kernels (QK, mask, softmax, PV) + done
+            // bwd: 5 separate kernels (dV, dP, dS, dQ, dK) + done
+            return state.phase === 'fwd' ? 5 : 6;
+        }
         const Tr = Math.ceil(state.N / state.Br);
         const Tc = Math.ceil(state.N / state.Bc);
-        return Tr * Tc + Tr;  // each (i,j) inner step + write O_i
+        // Both Flash phases: per outer i, do (Tc inner steps + 1 write step) = Tc+1
+        return Tr * (Tc + 1);
+    }
+
+    // ===== Kernel pipeline strip =====
+    function drawPipeline() {
+        const layer = document.getElementById('pipelineLayer');
+        layer.innerHTML = '';
+        const W = 880, H = 200;
+        const padL = 16, padR = 16;
+        const innerW = W - padL - padR;
+
+        // HBM bar at top
+        const hbmY = 14, hbmH = 22;
+        layer.appendChild(svgEl('rect', { x: padL, y: hbmY, width: innerW, height: hbmH, rx: 6,
+            fill: '#fef2f2', stroke: '#fca5a5', 'stroke-width': 1 }));
+        layer.appendChild(svgText('HBM', { x: padL + 10, y: hbmY + 14, 'font-size': '11', 'font-weight': '900', fill: '#b91c1c', 'letter-spacing': '0.05em' }));
+        layer.appendChild(svgText('— global memory, ~2 TB/s', { x: padL + 50, y: hbmY + 14, 'font-size': '9', 'font-style': 'italic', fill: '#ef4444' }));
+
+        // Define kernel sequence per mode/phase
+        let kernels;
+        if (state.mode === 'std' && state.phase === 'fwd') {
+            kernels = [
+                { name: 'GEMM\nS = Q·Kᵀ', reads: ['Q','K'], writes: ['S'], color: '#fb7185' },
+                { name: 'Mask', reads: ['S'], writes: ['S′'], color: '#fb7185' },
+                { name: 'Softmax\nP = σ(S)', reads: ['S′'], writes: ['P'], color: '#fb7185' },
+                { name: 'GEMM\nO = P·V', reads: ['P','V'], writes: ['O'], color: '#fb7185' },
+            ];
+        } else if (state.mode === 'std' && state.phase === 'bwd') {
+            kernels = [
+                { name: 'GEMM\ndV = Pᵀ·dO', reads: ['P','dO'], writes: ['dV'], color: '#fb923c' },
+                { name: 'GEMM\ndP = dO·Vᵀ', reads: ['dO','V'], writes: ['dP'], color: '#fb923c' },
+                { name: 'Softmax-bwd\ndS = P·(dP−D)', reads: ['P','dP'], writes: ['dS'], color: '#fb923c' },
+                { name: 'GEMM\ndQ = dS·K', reads: ['dS','K'], writes: ['dQ'], color: '#fb923c' },
+                { name: 'GEMM\ndK = dSᵀ·Q', reads: ['dS','Q'], writes: ['dK'], color: '#fb923c' },
+            ];
+        } else if (state.mode === 'flash' && state.phase === 'fwd') {
+            kernels = [
+                { name: 'Fused FlashAttn (forward)\ntile-load Q,K,V → online softmax → write O',
+                  reads: ['Q','K','V'], writes: ['O','m,ℓ'], color: '#10b981', wide: true,
+                  inner: ['Q·Kᵀ', 'rescale m,ℓ', 'P·V', 'all in SRAM'] },
+            ];
+        } else {
+            kernels = [
+                { name: 'Fused FlashAttn (backward)\ntile-load Q,K,V,O,dO + saved (m,ℓ) → recompute S,P → grad matmuls → write dQ,dK,dV',
+                  reads: ['Q','K','V','O','dO','m,ℓ'], writes: ['dQ','dK','dV'], color: '#a855f7', wide: true,
+                  inner: ['recompute S,P (m,ℓ)', 'dV=Pᵀ·dO', 'dP=dO·Vᵀ', 'dS=P·(dP−D)', 'dQ,dK in SRAM'] },
+        ];
+        }
+
+        // Kernel boxes
+        const kY = 80, kH = 70;
+        const gap = state.mode === 'flash' ? 0 : 14;
+        const totalGaps = (kernels.length - 1) * gap;
+        const slotW = (innerW - 4 - totalGaps) / kernels.length;
+        let kx = padL + 2;
+        const activeIdx = activeKernelIdx();
+        kernels.forEach((k, idx) => {
+            const w = slotW;
+            const isActive = idx === activeIdx && state.step > 0;
+            // Box
+            const r = svgEl('rect', { x: kx, y: kY, width: w, height: kH, rx: 8,
+                fill: isActive ? k.color : '#fff',
+                stroke: k.color, 'stroke-width': isActive ? 2.5 : 1.5,
+                opacity: 1 });
+            if (isActive) r.setAttribute('opacity', '0.92');
+            layer.appendChild(r);
+
+            // Title
+            const lines = k.name.split('\n');
+            lines.forEach((line, li) => {
+                layer.appendChild(svgText(line, {
+                    x: kx + w / 2, y: kY + 18 + li * 13, 'text-anchor': 'middle',
+                    'font-size': li === 0 ? '11' : '10',
+                    'font-weight': li === 0 ? '900' : '700',
+                    fill: isActive ? '#fff' : k.color,
+                }));
+            });
+            // Inner ops for fused kernel
+            if (k.inner) {
+                k.inner.forEach((op, oi) => {
+                    layer.appendChild(svgText('· ' + op, {
+                        x: kx + 12 + (oi % 3) * (w / 3 - 8),
+                        y: kY + kH - 18 + Math.floor(oi / 3) * 12,
+                        'font-size': '9', 'font-weight': '600',
+                        'font-family': 'JetBrains Mono, monospace',
+                        fill: isActive ? '#fff' : '#a855f7',
+                    }));
+                });
+            }
+
+            // Read arrows (HBM → kernel) on the LEFT side of box
+            const readX = kx + 14;
+            layer.appendChild(svgEl('line', {
+                x1: readX, x2: readX, y1: hbmY + hbmH, y2: kY,
+                stroke: '#10b981', 'stroke-width': isActive ? 2.5 : 1.5,
+                'marker-end': 'url(#pa-dn)', opacity: isActive ? 1 : 0.7
+            }));
+            layer.appendChild(svgText(k.reads.join(','), {
+                x: readX + 4, y: hbmY + hbmH + 14,
+                'font-size': '9', 'font-weight': '700', fill: '#047857',
+                'font-family': 'JetBrains Mono, monospace',
+            }));
+
+            // Write arrows (kernel → HBM) on the RIGHT side of box
+            const writeX = kx + w - 14;
+            layer.appendChild(svgEl('line', {
+                x1: writeX, x2: writeX, y1: kY, y2: hbmY + hbmH,
+                stroke: '#f59e0b', 'stroke-width': isActive ? 2.5 : 1.5,
+                'marker-end': 'url(#pa-up)', opacity: isActive ? 1 : 0.7
+            }));
+            layer.appendChild(svgText(k.writes.join(','), {
+                x: writeX - 4, y: hbmY + hbmH + 14, 'text-anchor': 'end',
+                'font-size': '9', 'font-weight': '700', fill: '#b45309',
+                'font-family': 'JetBrains Mono, monospace',
+            }));
+
+            kx += w + gap;
+        });
+
+        // Footer summary
+        const summary = state.mode === 'flash'
+            ? `1 fused kernel · ${kernels[0].reads.length} HBM reads, ${kernels[0].writes.length} HBM writes total`
+            : `${kernels.length} separate kernels · ${kernels.length * 2} HBM round-trips (read + write each)`;
+        layer.appendChild(svgText(summary, {
+            x: W / 2, y: H - 8, 'text-anchor': 'middle',
+            'font-size': '11', 'font-weight': '700',
+            fill: state.mode === 'flash' ? '#047857' : '#b91c1c'
+        }));
+
+        // Update kernel badge
+        const badge = document.getElementById('kernelBadge');
+        if (state.mode === 'flash') {
+            badge.textContent = '1 fused kernel';
+            badge.className = 'text-[10px] uppercase tracking-widest font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full';
+        } else {
+            badge.textContent = `${kernels.length} separate kernels`;
+            badge.className = 'text-[10px] uppercase tracking-widest font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full';
+        }
+    }
+
+    // Which kernel box should be highlighted right now
+    function activeKernelIdx() {
+        if (state.step === 0) return -1;
+        if (state.mode === 'flash') return 0; // single fused kernel always active
+        // Standard, by sub-step
+        if (state.phase === 'fwd') {
+            // 4 kernels: QK(0), mask(1), softmax(2), P·V(3); steps 1..4 map directly, step 5 = done
+            return Math.min(state.step - 1, 3);
+        }
+        // bwd: stdBwdSub 1..5 → kernels 0..4
+        return Math.min(state.stdBwdSub - 1, 4);
     }
 
     // ===== Render the memory hierarchy =====
@@ -287,7 +577,6 @@
         const padL = 90, padR = 16;
         const innerW = W - padL - padR;
 
-        // HBM strip (top)
         const hbmY = 26, hbmH = 130;
         const sramY = 220, sramH = 150;
 
@@ -305,15 +594,19 @@
         // Bus arrows between bands
         for (let i = 0; i < 6; i++) {
             const x = padL + 60 + i * (innerW / 7);
-            // Read arrow (HBM → SRAM, green)
             layer.appendChild(svgEl('line', { x1: x, x2: x, y1: hbmY + hbmH + 4, y2: sramY - 4, stroke: '#cbd5e1', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         }
         layer.appendChild(svgText('load (HBM → SRAM)', { x: padL + 4, y: (hbmY + hbmH + sramY) / 2 - 8, 'font-size': '10', fill: '#10b981', 'font-weight': '700' }));
         layer.appendChild(svgText('write (SRAM → HBM)', { x: padL + 4, y: (hbmY + hbmH + sramY) / 2 + 8, 'font-size': '10', fill: '#f59e0b', 'font-weight': '700' }));
 
-        // ===== Draw matrices in HBM =====
-        if (state.mode === 'std') drawStandard(layer, padL, innerW, hbmY, hbmH, sramY, sramH);
-        else drawFlash(layer, padL, innerW, hbmY, hbmH, sramY, sramH);
+        // Draw matrices
+        const fns = {
+            'std-fwd':   drawStdFwd,
+            'std-bwd':   drawStdBwd,
+            'flash-fwd': drawFlashFwd,
+            'flash-bwd': drawFlashBwd,
+        };
+        fns[`${state.mode}-${state.phase}`](layer, padL, innerW, hbmY, hbmH, sramY, sramH);
 
         // Phase footer
         layer.appendChild(svgText(phaseFooter(), {
@@ -324,129 +617,97 @@
         refreshCounters();
         refreshMathHighlight();
         refreshChart();
+        drawPipeline();
+        refreshPhaseBars();
     }
 
-    function drawStandard(layer, padL, innerW, hbmY, hbmH, sramY, sramH) {
+    // ===== Standard FORWARD =====
+    function drawStdFwd(layer, padL, innerW, hbmY, hbmH, sramY, sramH) {
         const N = state.N, d = state.d;
-        // Layout: Q, K, V, S/P, O across the HBM band
+        // step 1: write S; step 2: write S'; step 3: write P; step 4: write O
+        const intermName =
+            state.step >= 4 ? 'P (N×N)' :
+            state.step >= 3 ? 'P (N×N)' :
+            state.step >= 2 ? "S′ (N×N)" :
+            state.step >= 1 ? 'S (N×N)' : 'S (—)';
         const slots = [
             { name: 'Q', cols: d, rows: N, color: '#3b82f6' },
             { name: 'K', cols: d, rows: N, color: '#8b5cf6' },
             { name: 'V', cols: d, rows: N, color: '#ec4899' },
-            { name: state.step >= 2 ? 'P (N×N)' : (state.step >= 1 ? 'S (N×N)' : 'S (—)'),
-              cols: N, rows: N, color: '#f97316', big: true, exists: state.step >= 1 },
-            { name: 'O', cols: d, rows: N, color: '#10b981', exists: state.step >= 3 },
+            { name: intermName, cols: N, rows: N, color: '#f97316', exists: state.step >= 1 },
+            { name: 'O', cols: d, rows: N, color: '#10b981', exists: state.step >= 4 },
         ];
-        // Width allocation: bigger weight to N×N
-        const totalCols = slots.reduce((a, s) => a + s.cols, 0);
-        let x = padL + 8;
-        const margin = 8;
-        const usableW = innerW - margin * (slots.length - 1) - 16;
-        for (const s of slots) {
-            const w = (s.cols / totalCols) * usableW;
-            const h = (s.rows / Math.max(N, d)) * (hbmH - 22);
-            const rectY = hbmY + 6;
-            const opacity = (s.exists === false) ? 0.18 : 1;
-            const r = svgEl('rect', { x, y: rectY, width: w, height: h, rx: 4,
-                fill: s.color, opacity: opacity * 0.7, stroke: s.color, 'stroke-width': 1.5 });
-            // Pulse if just written this step
-            if (s.name.startsWith('S') && state.step === 1) r.classList.add('pulse-write');
-            if (s.name.startsWith('P') && state.step === 2) r.classList.add('pulse-write');
-            if (s.name === 'O' && state.step === 3) r.classList.add('pulse-write');
-            layer.appendChild(r);
-            // Cell tag
-            layer.appendChild(svgText(s.name, { x: x + w / 2, y: rectY + h + 14, 'text-anchor': 'middle', 'font-size': '11', 'font-weight': '700', fill: s.color }));
-            layer.appendChild(svgText(`${s.rows}×${s.cols}`, { x: x + w / 2, y: rectY + h / 2 + 4, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '700', fill: 'white', 'font-family': 'JetBrains Mono, monospace' }));
-            x += w + margin;
-        }
-
-        // SRAM band: empty for standard (just loads everything every op)
+        layoutHbmRow(layer, slots, padL, innerW, hbmY, hbmH, N, {
+            pulse: (s) => (
+                (s.name === 'S (N×N)'  && state.step === 1) ||
+                (s.name === 'S′ (N×N)' && state.step === 2) ||
+                (s.name === 'P (N×N)'  && state.step === 3) ||
+                (s.name === 'O'        && state.step === 4)
+            ) ? 'pulse-write' : null
+        });
         layer.appendChild(svgText('Standard attention does not exploit SRAM — every op streams full matrices through HBM.', {
-            x: padL + (innerW) / 2, y: sramY + sramH / 2, 'text-anchor': 'middle',
+            x: padL + innerW / 2, y: sramY + sramH / 2, 'text-anchor': 'middle',
             'font-size': '12', 'font-weight': '700', fill: '#94a3b8', 'font-style': 'italic'
         }));
-
-        // Compute current op label
-        const opLbl = svgText(opLabel('std'), {
+        layer.appendChild(svgText(opLabel(), {
             x: padL + innerW / 2, y: (hbmY + hbmH + sramY) / 2 + 24, 'text-anchor': 'middle',
             'font-size': '13', 'font-weight': '800', fill: '#1e40af'
-        });
-        layer.appendChild(opLbl);
+        }));
     }
 
-    function drawFlash(layer, padL, innerW, hbmY, hbmH, sramY, sramH) {
+    // ===== Standard BACKWARD =====
+    function drawStdBwd(layer, padL, innerW, hbmY, hbmH, sramY, sramH) {
+        const N = state.N, d = state.d;
+        const sub = state.stdBwdSub; // 0..5
+        // HBM contains saved A (= P from fwd), Q, K, V, dO, and grad outputs as they're written
+        const slots = [
+            { name: 'Q', cols: d, rows: N, color: '#3b82f6' },
+            { name: 'K', cols: d, rows: N, color: '#8b5cf6' },
+            { name: 'V', cols: d, rows: N, color: '#ec4899' },
+            { name: 'A (saved N×N)', cols: N, rows: N, color: '#f97316' },
+            { name: 'dO', cols: d, rows: N, color: '#0ea5e9' },
+            { name: 'dV', cols: d, rows: N, color: '#fb923c', exists: sub >= 1 },
+            { name: 'dP (N×N)', cols: N, rows: N, color: '#fb923c', exists: sub >= 2 },
+            { name: 'dS (N×N)', cols: N, rows: N, color: '#fb923c', exists: sub >= 3 },
+            { name: 'dQ', cols: d, rows: N, color: '#fb923c', exists: sub >= 4 },
+            { name: 'dK', cols: d, rows: N, color: '#fb923c', exists: sub >= 5 },
+        ];
+        layoutHbmRow(layer, slots, padL, innerW, hbmY, hbmH, N, {
+            pulse: (s) => {
+                const map = { 'dV': 1, 'dP (N×N)': 2, 'dS (N×N)': 3, 'dQ': 4, 'dK': 5 };
+                if (map[s.name] === sub) return 'pulse-write';
+                return null;
+            },
+        });
+
+        layer.appendChild(svgText('Standard backward re-loads the saved N×N attention matrix every kernel — and writes a new N×N intermediate.', {
+            x: padL + innerW / 2, y: sramY + sramH / 2 - 6, 'text-anchor': 'middle',
+            'font-size': '12', 'font-weight': '700', fill: '#94a3b8', 'font-style': 'italic'
+        }));
+        const opLbls = ['Idle — press Step', 'Kernel 1: dV = Aᵀ·dO', 'Kernel 2: dP = dO·Vᵀ', 'Kernel 3: dS = softmax-bwd(dP)', 'Kernel 4: dQ = dS·K', 'Kernel 5: dK = dSᵀ·Q', 'Backward done.'];
+        layer.appendChild(svgText(opLbls[sub] || opLbls[0], {
+            x: padL + innerW / 2, y: sramY + sramH / 2 + 14, 'text-anchor': 'middle',
+            'font-size': '13', 'font-weight': '800', fill: '#b45309'
+        }));
+    }
+
+    // ===== Flash FORWARD =====
+    function drawFlashFwd(layer, padL, innerW, hbmY, hbmH, sramY, sramH) {
         const N = state.N, d = state.d, Br = state.Br, Bc = state.Bc;
         const Tr = Math.ceil(N / Br), Tc = Math.ceil(N / Bc);
 
-        // ===== HBM: Q, K, V, O =====
         const slots = [
             { name: 'Q', cols: d, rows: N, color: '#3b82f6' },
             { name: 'K', cols: d, rows: N, color: '#8b5cf6' },
             { name: 'V', cols: d, rows: N, color: '#ec4899' },
             { name: 'O', cols: d, rows: N, color: '#10b981' },
+            { name: 'm, ℓ', cols: Math.max(1, Math.ceil(d / 4)), rows: N, color: '#a855f7' },
         ];
-        const totalCols = slots.reduce((a, s) => a + s.cols, 0);
-        let x = padL + 8;
-        const margin = 16;
-        const usableW = innerW - margin * (slots.length - 1) - 16;
-        const matrixCoords = {};
-        for (const s of slots) {
-            const w = (s.cols / totalCols) * usableW;
-            const h = (s.rows / N) * (hbmH - 22);
-            const rectY = hbmY + 6;
+        const coords = layoutHbmRow(layer, slots, padL, innerW, hbmY, hbmH, N, {
+            tileHighlight: (s, ctx) => highlightFlashFwd(s, ctx),
+        });
 
-            // Background
-            layer.appendChild(svgEl('rect', { x, y: rectY, width: w, height: h, rx: 4,
-                fill: s.color, opacity: 0.18, stroke: s.color, 'stroke-width': 1.5 }));
-
-            // Tile highlights
-            const cellH = h / N;
-            const cellW = w / s.cols;
-            // Highlight current Q tile (rows currentI*Br .. currentI*Br + Br)
-            // Highlight current K/V tile (rows currentJ*Bc .. currentJ*Bc + Bc)
-            // O tile rows mirror Q tile
-            if (state.step > 0) {
-                const i = state.currentI;
-                const j = state.currentJ;
-                if (s.name === 'Q' && i < Tr) {
-                    const r0 = i * Br, r1 = Math.min(N, r0 + Br);
-                    layer.appendChild(svgEl('rect', { x, y: rectY + r0 * cellH, width: w, height: (r1 - r0) * cellH,
-                        fill: '#3b82f6', opacity: 0.85, stroke: '#1e40af', 'stroke-width': 1.5 }));
-                }
-                if ((s.name === 'K' || s.name === 'V') && j >= 0 && j < Tc) {
-                    const r0 = j * Bc, r1 = Math.min(N, r0 + Bc);
-                    const cls = state.step > 0 ? 'pulse-load' : '';
-                    const rect = svgEl('rect', { x, y: rectY + r0 * cellH, width: w, height: (r1 - r0) * cellH,
-                        fill: s.color, opacity: 0.85, stroke: s.color, 'stroke-width': 1.5 });
-                    rect.classList.add('pulse-load');
-                    layer.appendChild(rect);
-                }
-                // O tile written when last K/V tile of an outer iter completes
-                if (s.name === 'O' && i < Tr && j >= Tc - 1) {
-                    const r0 = i * Br, r1 = Math.min(N, r0 + Br);
-                    const rect = svgEl('rect', { x, y: rectY + r0 * cellH, width: w, height: (r1 - r0) * cellH,
-                        fill: '#10b981', opacity: 0.85, stroke: '#047857', 'stroke-width': 1.5 });
-                    rect.classList.add('pulse-write');
-                    layer.appendChild(rect);
-                }
-                // Already-written O tiles (faded green)
-                if (s.name === 'O') {
-                    for (let ii = 0; ii < i; ii++) {
-                        const r0 = ii * Br, r1 = Math.min(N, r0 + Br);
-                        layer.appendChild(svgEl('rect', { x, y: rectY + r0 * cellH, width: w, height: (r1 - r0) * cellH,
-                            fill: '#10b981', opacity: 0.55, stroke: '#10b981', 'stroke-width': 0.8 }));
-                    }
-                }
-            }
-
-            layer.appendChild(svgText(s.name, { x: x + w / 2, y: rectY + h + 14, 'text-anchor': 'middle', 'font-size': '11', 'font-weight': '700', fill: s.color }));
-            layer.appendChild(svgText(`${s.rows}×${s.cols}`, { x: x + w / 2, y: rectY + h / 2 + 4, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '700', fill: 'white', 'font-family': 'JetBrains Mono, monospace' }));
-            matrixCoords[s.name] = { x, y: rectY, w, h, cellH, cellW };
-            x += w + margin;
-        }
-
-        // ===== SRAM: tiles + running stats =====
-        // Layout SRAM band: Q tile, K tile, V tile, S tile (Br×Bc), m, l, O tile
+        // SRAM tiles
         const sramItems = [
             { name: 'Q_i',  rows: Br, cols: d,  color: '#3b82f6' },
             { name: 'K_j',  rows: Bc, cols: d,  color: '#8b5cf6' },
@@ -454,59 +715,226 @@
             { name: 'S_ij', rows: Br, cols: Bc, color: '#f97316' },
             { name: 'O_i',  rows: Br, cols: d,  color: '#10b981' },
         ];
-        const sramX0 = padL + 8;
-        const sramAvailW = innerW - 16;
-        const totalCells = sramItems.reduce((a, s) => a + s.cols, 0);
-        let sx = sramX0;
-        for (const s of sramItems) {
-            const w = (s.cols / totalCells) * (sramAvailW - 16 * (sramItems.length - 1));
-            const h = Math.min(sramH - 50, (s.rows / Br) * 60);
-            const rectY = sramY + 12;
-            layer.appendChild(svgEl('rect', { x: sx, y: rectY, width: w, height: h, rx: 4,
-                fill: s.color, opacity: 0.7, stroke: s.color, 'stroke-width': 1.5 }));
-            layer.appendChild(svgText(s.name, { x: sx + w / 2, y: rectY + h + 14, 'text-anchor': 'middle', 'font-size': '11', 'font-weight': '700', fill: s.color }));
-            layer.appendChild(svgText(`${s.rows}×${s.cols}`, { x: sx + w / 2, y: rectY + h / 2 + 4, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '700', fill: 'white', 'font-family': 'JetBrains Mono, monospace' }));
-            sx += w + 16;
-        }
+        layoutSramRow(layer, sramItems, padL, innerW, sramY, sramH, Br, { highlightAll: state.step > 0 });
 
-        // Running stats (m_i, l_i) shown as small indicators
         const statY = sramY + sramH - 10;
-        layer.appendChild(svgText(`m_i (${Br}-vec)   ℓ_i (${Br}-vec)`, {
+        layer.appendChild(svgText(`m_i, ℓ_i (${Br}-vec each)`, {
             x: padL + 8, y: statY, 'font-size': '10', 'font-weight': '700', fill: '#92400e'
         }));
-        layer.appendChild(svgText('— running max & denominator, kept in SRAM, never to HBM', {
+        layer.appendChild(svgText('— running max & denominator, kept in SRAM, written to HBM at the end (saved for backward)', {
             x: padL + 200, y: statY, 'font-size': '10', fill: '#b45309', 'font-style': 'italic'
         }));
 
-        // Op label between bands
-        layer.appendChild(svgText(opLabel('flash'), {
+        layer.appendChild(svgText(opLabel(), {
             x: padL + innerW / 2, y: (hbmY + hbmH + sramY) / 2 + 24, 'text-anchor': 'middle',
             'font-size': '13', 'font-weight': '800', fill: '#1e40af'
         }));
     }
 
-    function opLabel(mode) {
-        if (state.step === 0) return 'Idle — press Step to advance';
-        if (mode === 'std') {
-            return ['', 'Step 1: write S = Q·K^T to HBM (N×N)', 'Step 2: write P = softmax(S) to HBM (N×N)', 'Step 3: write O = P·V to HBM (N×d)', 'Done.'][state.step];
+    // ===== Flash BACKWARD =====
+    function drawFlashBwd(layer, padL, innerW, hbmY, hbmH, sramY, sramH) {
+        const N = state.N, d = state.d, Br = state.Br, Bc = state.Bc;
+        const Tr = Math.ceil(N / Br), Tc = Math.ceil(N / Bc);
+
+        // HBM: Q, K, V, O (saved), dO, m,ℓ (saved), dQ, dK, dV
+        const slots = [
+            { name: 'Q', cols: d, rows: N, color: '#3b82f6' },
+            { name: 'K', cols: d, rows: N, color: '#8b5cf6' },
+            { name: 'V', cols: d, rows: N, color: '#ec4899' },
+            { name: 'O (saved)', cols: d, rows: N, color: '#10b981' },
+            { name: 'dO', cols: d, rows: N, color: '#0ea5e9' },
+            { name: 'm,ℓ (O(N))', cols: Math.max(1, Math.ceil(d / 4)), rows: N, color: '#a855f7' },
+            { name: 'dQ', cols: d, rows: N, color: '#fb923c' },
+            { name: 'dK', cols: d, rows: N, color: '#fb923c' },
+            { name: 'dV', cols: d, rows: N, color: '#fb923c' },
+        ];
+        layoutHbmRow(layer, slots, padL, innerW, hbmY, hbmH, N, {
+            tileHighlight: (s, ctx) => highlightFlashBwd(s, ctx),
+        });
+
+        // SRAM: working tiles + recomputed S/P + grad accumulators
+        const sramItems = [
+            { name: 'Q_i',  rows: Br, cols: d,  color: '#3b82f6' },
+            { name: 'K_j',  rows: Bc, cols: d,  color: '#8b5cf6' },
+            { name: 'V_j',  rows: Bc, cols: d,  color: '#ec4899' },
+            { name: 'O_i',  rows: Br, cols: d,  color: '#10b981' },
+            { name: 'dO_i', rows: Br, cols: d,  color: '#0ea5e9' },
+            { name: 'S/P (recomp)', rows: Br, cols: Bc, color: '#a855f7' },
+            { name: 'dQ_i / dK_j / dV_j', rows: Br, cols: d, color: '#fb923c' },
+        ];
+        layoutSramRow(layer, sramItems, padL, innerW, sramY, sramH, Br, {
+            highlightAll: state.step > 0,
+            highlightRecompute: state.flBwdSub === 2,
+        });
+
+        const statY = sramY + sramH - 10;
+        layer.appendChild(svgText(`Recompute uses ONLY saved (m_i, ℓ_i)`, {
+            x: padL + 8, y: statY, 'font-size': '10', 'font-weight': '700', fill: '#7e22ce'
+        }));
+        layer.appendChild(svgText('— full N×N attention matrix is never loaded (slide: "Recomputation in Backward Pass")', {
+            x: padL + 235, y: statY, 'font-size': '10', fill: '#9333ea', 'font-style': 'italic'
+        }));
+
+        layer.appendChild(svgText(opLabel(), {
+            x: padL + innerW / 2, y: (hbmY + hbmH + sramY) / 2 + 24, 'text-anchor': 'middle',
+            'font-size': '13', 'font-weight': '800', fill: state.flBwdSub === 2 ? '#7e22ce' : '#1e40af'
+        }));
+    }
+
+    // ===== Tile highlight helpers =====
+    function highlightFlashFwd(s, ctx) {
+        const { N, Br, Bc, Tr, Tc } = ctx;
+        const i = state.currentI, j = state.currentJ;
+        if (state.step === 0) return [];
+        const out = [];
+        if (s.name === 'Q' && i < Tr) {
+            out.push({ r0: i * Br, r1: Math.min(N, i * Br + Br), color: '#3b82f6', stroke: '#1e40af', cls: '' });
         }
+        if ((s.name === 'K' || s.name === 'V') && j >= 0 && j < Tc) {
+            out.push({ r0: j * Bc, r1: Math.min(N, j * Bc + Bc), color: s.color, stroke: s.color, cls: 'pulse-load' });
+        }
+        if (s.name === 'O' && i < Tr && j >= Tc - 1) {
+            out.push({ r0: i * Br, r1: Math.min(N, i * Br + Br), color: '#10b981', stroke: '#047857', cls: 'pulse-write' });
+        }
+        if (s.name === 'O') {
+            for (let ii = 0; ii < i; ii++) out.push({ r0: ii * Br, r1: Math.min(N, ii * Br + Br), color: '#10b981', stroke: '#10b981', cls: '', opacity: 0.55 });
+        }
+        if (s.name === 'm, ℓ' && i < Tr && j >= Tc - 1) {
+            out.push({ r0: i * Br, r1: Math.min(N, i * Br + Br), color: '#a855f7', stroke: '#7e22ce', cls: 'pulse-write' });
+        }
+        return out;
+    }
+
+    function highlightFlashBwd(s, ctx) {
+        const { N, Br, Bc, Tr, Tc } = ctx;
+        const i = state.currentI, j = state.currentJ;
+        if (state.step === 0) return [];
+        const out = [];
+        // We use the (i,j) loop the same way; flBwdSub controls which tensor pulses
+        if (s.name === 'Q' && i < Tr)        out.push({ r0: i*Br, r1: Math.min(N,i*Br+Br), color: '#3b82f6', stroke: '#1e40af', cls: 'pulse-load' });
+        if ((s.name === 'K' || s.name === 'V') && j >= 0 && j < Tc)
+            out.push({ r0: j*Bc, r1: Math.min(N,j*Bc+Bc), color: s.color, stroke: s.color, cls: 'pulse-load' });
+        if ((s.name === 'O (saved)' || s.name === 'dO') && i < Tr)
+            out.push({ r0: i*Br, r1: Math.min(N,i*Br+Br), color: s.color, stroke: s.color, cls: 'pulse-load' });
+        if (s.name === 'm,ℓ (O(N))' && i < Tr)
+            out.push({ r0: i*Br, r1: Math.min(N,i*Br+Br), color: '#a855f7', stroke: '#7e22ce', cls: 'pulse-recompute' });
+        // Writes at the end of an outer iter
+        if (j >= Tc - 1) {
+            if (s.name === 'dQ' && i < Tr)
+                out.push({ r0: i*Br, r1: Math.min(N,i*Br+Br), color: '#fb923c', stroke: '#9a3412', cls: 'pulse-write' });
+            if (s.name === 'dV' && j < Tc)
+                out.push({ r0: j*Bc, r1: Math.min(N,j*Bc+Bc), color: '#fb923c', stroke: '#9a3412', cls: 'pulse-write' });
+            if (s.name === 'dK' && j < Tc)
+                out.push({ r0: j*Bc, r1: Math.min(N,j*Bc+Bc), color: '#fb923c', stroke: '#9a3412', cls: 'pulse-write' });
+        }
+        return out;
+    }
+
+    // ===== Generic HBM row layout =====
+    function layoutHbmRow(layer, slots, padL, innerW, hbmY, hbmH, N, opts) {
+        const totalCols = slots.reduce((a, s) => a + s.cols, 0);
+        const margin = 8;
+        const usableW = innerW - margin * (slots.length - 1) - 16;
+        let x = padL + 8;
+        const coords = {};
+        const ctx = { N, Br: state.Br, Bc: state.Bc, Tr: Math.ceil(N/state.Br), Tc: Math.ceil(N/state.Bc) };
+        for (const s of slots) {
+            const w = (s.cols / totalCols) * usableW;
+            const h = (s.rows / Math.max(N, state.d)) * (hbmH - 22);
+            const rectY = hbmY + 6;
+            const opacity = (s.exists === false) ? 0.18 : 0.7;
+            const r = svgEl('rect', { x, y: rectY, width: w, height: h, rx: 4,
+                fill: s.color, opacity, stroke: s.color, 'stroke-width': 1.5 });
+            const pulseCls = opts && opts.pulse ? opts.pulse(s) : null;
+            if (pulseCls) r.classList.add(pulseCls);
+            layer.appendChild(r);
+
+            // tile highlights
+            if (opts && opts.tileHighlight) {
+                const tiles = opts.tileHighlight(s, ctx);
+                const cellH = h / N;
+                for (const t of tiles) {
+                    const rect = svgEl('rect', { x, y: rectY + t.r0 * cellH, width: w, height: (t.r1 - t.r0) * cellH,
+                        fill: t.color, opacity: t.opacity ?? 0.85, stroke: t.stroke, 'stroke-width': 1.5 });
+                    if (t.cls) rect.classList.add(t.cls);
+                    layer.appendChild(rect);
+                }
+            }
+
+            layer.appendChild(svgText(s.name, { x: x + w / 2, y: rectY + h + 14, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '700', fill: s.color }));
+            layer.appendChild(svgText(`${s.rows}×${s.cols}`, { x: x + w / 2, y: rectY + h / 2 + 4, 'text-anchor': 'middle', 'font-size': '9', 'font-weight': '700', fill: 'white', 'font-family': 'JetBrains Mono, monospace' }));
+            coords[s.name] = { x, y: rectY, w, h };
+            x += w + margin;
+        }
+        return coords;
+    }
+
+    function layoutSramRow(layer, items, padL, innerW, sramY, sramH, Br, opts) {
+        const sramX0 = padL + 8;
+        const sramAvailW = innerW - 16;
+        const totalCells = items.reduce((a, s) => a + s.cols, 0);
+        let sx = sramX0;
+        for (const s of items) {
+            const w = (s.cols / totalCells) * (sramAvailW - 12 * (items.length - 1));
+            const h = Math.min(sramH - 50, (s.rows / Br) * 60);
+            const rectY = sramY + 12;
+            const isRecomp = opts && opts.highlightRecompute && (s.name === 'S/P (recomp)' || s.name.includes('m,ℓ'));
+            const r = svgEl('rect', { x: sx, y: rectY, width: w, height: h, rx: 4,
+                fill: s.color, opacity: opts && opts.highlightAll ? 0.7 : 0.4,
+                stroke: s.color, 'stroke-width': isRecomp ? 2.5 : 1.5 });
+            if (isRecomp) r.classList.add('pulse-recompute');
+            layer.appendChild(r);
+            layer.appendChild(svgText(s.name, { x: sx + w / 2, y: rectY + h + 14, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '700', fill: s.color }));
+            layer.appendChild(svgText(`${s.rows}×${s.cols}`, { x: sx + w / 2, y: rectY + h / 2 + 4, 'text-anchor': 'middle', 'font-size': '9', 'font-weight': '700', fill: 'white', 'font-family': 'JetBrains Mono, monospace' }));
+            sx += w + 12;
+        }
+    }
+
+    // ===== Op labels & footers =====
+    function opLabel() {
+        if (state.step === 0) return 'Idle — press Step to advance';
+        if (state.mode === 'std' && state.phase === 'fwd') {
+            return ['', 'Kernel 1: S = Q·Kᵀ → HBM (N×N)', 'Kernel 2: mask(S) → HBM (N×N)', 'Kernel 3: softmax → HBM (N×N)', 'Kernel 4: O = P·V → HBM (N×d)', 'Forward done.'][state.step];
+        }
+        if (state.mode === 'std' && state.phase === 'bwd') {
+            const lbls = ['', 'Kernel 1: dV = Pᵀ · dO  (load A from HBM, write dV)', 'Kernel 2: dP = dO · Vᵀ', 'Kernel 3: dS = P ⊙ (dP − D)', 'Kernel 4: dQ = dS · K', 'Kernel 5: dK = dSᵀ · Q', 'Backward done.'];
+            return lbls[state.stdBwdSub] || lbls[0];
+        }
+        // Flash
         const Tr = Math.ceil(state.N / state.Br), Tc = Math.ceil(state.N / state.Bc);
-        if (state.currentI >= Tr) return 'Done.';
-        return `i=${state.currentI + 1}/${Tr}  ·  j=${Math.max(0, state.currentJ + 1)}/${Tc}  ·  load K_j, V_j → SRAM, update m, ℓ, O_i in SRAM`;
+        if (state.phase === 'fwd') {
+            if (state.currentI >= Tr) return 'Forward done.';
+            return `i=${state.currentI + 1}/${Tr}  ·  j=${Math.max(0, state.currentJ + 1)}/${Tc}  ·  load K_j, V_j → SRAM, update m, ℓ, O_i`;
+        }
+        // flash bwd
+        if (state.currentI >= Tr) return 'Backward done.';
+        const subLbl = ['', 'load tiles + saved (m,ℓ)', 'RECOMPUTE S, P from saved (m,ℓ)', 'dV += Pᵀ·dO', 'dP = dO·Vᵀ', 'dS = P⊙(dP−D), dQ += dS·K, dK += dSᵀ·Q'];
+        return `i=${state.currentI + 1}/${Tr}  ·  j=${Math.max(0, state.currentJ + 1)}/${Tc}  ·  ${subLbl[state.flBwdSub] || ''}`;
     }
 
     function phaseFooter() {
+        const N = state.N, d = state.d;
         if (state.mode === 'std') {
-            const total = (4 * state.N * state.d + 4 * state.N * state.N) * 2;
-            return `Standard total HBM traffic ~ ${formatBytes(total)} (Q,K,V reads + 2 N² writes + 2 N² reads + N·d write)`;
+            if (state.phase === 'fwd') {
+                const total = (4 * N * d + 4 * N * N) * 2;
+                return `Standard FWD HBM ~ ${formatBytes(total)} (Q,K,V reads + 2·N² writes + 2·N² reads + N·d write)`;
+            } else {
+                const total = (5 * N * d + 6 * N * N) * 2;
+                return `Standard BWD HBM ~ ${formatBytes(total)} (load A=N², write dP=N², write dS=N², plus dV/dQ/dK and dO/Q/K/V loads)`;
+            }
         } else {
-            const total = (2 * state.N * state.d + 2 * state.N * state.N * state.d / state.Br) * 2;
-            const std = (4 * state.N * state.d + 4 * state.N * state.N) * 2;
-            const ratio = std / Math.max(total, 1);
-            const note = ratio >= 1
-                ? `${ratio.toFixed(2)}× better than standard`
-                : `⚠ ${(1 / ratio).toFixed(2)}× WORSE — B_r=${state.Br} too small for d=${state.d} · N=${state.N}; raise B_r to fit the SRAM budget`;
-            return `Flash total HBM traffic ~ ${formatBytes(total)}  ·  K, V re-read N/B_r = ${state.N / state.Br}× — ${note}`;
+            const tilesPerOuter = state.N / state.Br;
+            if (state.phase === 'fwd') {
+                const total = (2 * N * d + 2 * N * N * d / state.Br) * 2;
+                const std = (4 * N * d + 4 * N * N) * 2;
+                const ratio = std / Math.max(total, 1);
+                return `Flash FWD HBM ~ ${formatBytes(total)} · K,V re-read ${tilesPerOuter}× — ${ratio >= 1 ? `${ratio.toFixed(2)}× better` : `⚠ ${(1/ratio).toFixed(2)}× WORSE (raise B_r)`}`;
+            } else {
+                const total = (4 * N * d + 2 * N * N * d / state.Br + 3 * N * d) * 2; // Q,K,V,O,dO loads + recompute reads + dQ/dK/dV writes
+                const std = (5 * N * d + 6 * N * N) * 2;
+                const ratio = std / Math.max(total, 1);
+                return `Flash BWD HBM ~ ${formatBytes(total)} · A NEVER loaded (recomputed from m,ℓ) — ${ratio >= 1 ? `${ratio.toFixed(2)}× better` : `⚠ ${(1/ratio).toFixed(2)}× WORSE`}`;
+            }
         }
     }
 
@@ -514,7 +942,7 @@
         if (b >= 1e9) return (b/1e9).toFixed(2) + ' GB';
         if (b >= 1e6) return (b/1e6).toFixed(1) + ' MB';
         if (b >= 1e3) return (b/1e3).toFixed(0) + ' KB';
-        return b + ' B';
+        return Math.round(b) + ' B';
     }
 
     // ===== Step machine =====
@@ -523,47 +951,77 @@
         if (state.step >= total) { stop(); return; }
         state.step++;
 
-        if (state.mode === 'std') {
-            // 4 steps: 1=write S, 2=softmax→P, 3=write O, 4=done
-            const N = state.N, d = state.d;
-            if (state.step === 1) {
-                // Read Q,K (compute S, write S to HBM)
-                state.hbmRead  += bytes(N * d * 2);   // Q + K
-                state.hbmWrite += bytes(N * N);        // S
-            } else if (state.step === 2) {
-                // Read S, write P
-                state.hbmRead  += bytes(N * N);
-                state.hbmWrite += bytes(N * N);
-            } else if (state.step === 3) {
-                // Read P + V, write O
-                state.hbmRead  += bytes(N * N + N * d);
-                state.hbmWrite += bytes(N * d);
-            }
-            state.sramPeak = Math.max(state.sramPeak, bytes(N * d * 2));  // negligible reuse
-        } else {
-            // Flash: outer over i, inner over j
-            const Tr = Math.ceil(state.N / state.Br);
-            const Tc = Math.ceil(state.N / state.Bc);
-            // Walk through (i, j) sequence
+        const N = state.N, d = state.d, Br = state.Br, Bc = state.Bc;
+
+        if (state.mode === 'std' && state.phase === 'fwd') {
+            if (state.step === 1)      { state.hbmRead += bytes(N*d*2);      state.hbmWrite += bytes(N*N); }   // K1: QK
+            else if (state.step === 2) { state.hbmRead += bytes(N*N);        state.hbmWrite += bytes(N*N); }    // K2: mask
+            else if (state.step === 3) { state.hbmRead += bytes(N*N);        state.hbmWrite += bytes(N*N); }    // K3: softmax
+            else if (state.step === 4) { state.hbmRead += bytes(N*N + N*d);  state.hbmWrite += bytes(N*d); }    // K4: PV
+            state.sramPeak = Math.max(state.sramPeak, bytes(N*d*2));
+        } else if (state.mode === 'std' && state.phase === 'bwd') {
+            // Each step is one of the 5 standard backward kernels
+            state.stdBwdSub = state.step;
+            if (state.step === 1)      { state.hbmRead += bytes(N*N + N*d);  state.hbmWrite += bytes(N*d); }       // dV: A^T·dO
+            else if (state.step === 2) { state.hbmRead += bytes(N*d*2);      state.hbmWrite += bytes(N*N); }        // dP: dO·V^T
+            else if (state.step === 3) { state.hbmRead += bytes(N*N*2 + N*d); state.hbmWrite += bytes(N*N); }       // dS: P⊙(dP−D)
+            else if (state.step === 4) { state.hbmRead += bytes(N*N + N*d);  state.hbmWrite += bytes(N*d); }        // dQ
+            else if (state.step === 5) { state.hbmRead += bytes(N*N + N*d);  state.hbmWrite += bytes(N*d); }        // dK
+            state.sramPeak = Math.max(state.sramPeak, bytes(N*d*2));
+        } else if (state.mode === 'flash' && state.phase === 'fwd') {
+            const Tr = Math.ceil(N / Br), Tc = Math.ceil(N / Bc);
             if (state.currentJ < 0) {
-                // First step in this outer iter: load Q_i
                 state.currentJ = 0;
-                state.hbmRead += bytes(state.Br * state.d);  // Q_i tile
-                state.hbmRead += bytes(state.Bc * state.d * 2);  // K_j + V_j tile
+                state.hbmRead += bytes(Br*d);              // Q_i tile
+                state.hbmRead += bytes(Bc*d*2);            // K_j + V_j tile
             } else {
                 state.currentJ++;
                 if (state.currentJ >= Tc) {
-                    // Done with this outer iter — write O_i
-                    state.hbmWrite += bytes(state.Br * state.d);
+                    state.hbmWrite += bytes(Br*d);                       // O_i tile
+                    state.hbmWrite += bytes(Br*2);                        // m_i, ℓ_i (saved for backward!)
                     state.currentI++;
                     state.currentJ = -1;
                 } else {
-                    state.hbmRead += bytes(state.Bc * state.d * 2);  // next K_j + V_j
+                    state.hbmRead += bytes(Bc*d*2);                       // next K_j + V_j
                 }
             }
-            // SRAM peak: Q_i + K_j + V_j + S_ij + O_i
-            state.sramPeak = bytes(state.Br * state.d + state.Bc * state.d * 2 + state.Br * state.Bc + state.Br * state.d);
+            state.sramPeak = bytes(Br*d + Bc*d*2 + Br*Bc + Br*d);
+        } else {
+            // FLASH BACKWARD
+            // Outer over j (KV blocks fixed in SRAM), inner over i; we model as same (i,j) loop for simplicity
+            const Tr = Math.ceil(N / Br), Tc = Math.ceil(N / Bc);
+            if (state.currentJ < 0) {
+                state.currentJ = 0;
+                state.flBwdSub = 1;
+                // Load Q_i, K_j, V_j, O_i, dO_i, saved (m_i, ℓ_i)
+                state.hbmRead += bytes(Br*d);             // Q_i
+                state.hbmRead += bytes(Bc*d*2);           // K_j, V_j
+                state.hbmRead += bytes(Br*d*2);           // O_i, dO_i
+                state.hbmRead += bytes(Br*2);             // m_i, ℓ_i (TINY!)
+                state.flBwdSub = 2; // immediately recompute conceptually
+            } else {
+                state.currentJ++;
+                if (state.currentJ >= Tc) {
+                    // Done with this outer iter — write dQ_i, dK_j, dV_j tile contributions
+                    state.hbmWrite += bytes(Br*d);   // dQ_i
+                    state.hbmWrite += bytes(Bc*d);   // dK_j (logically once per j)
+                    state.hbmWrite += bytes(Bc*d);   // dV_j
+                    state.currentI++;
+                    state.currentJ = -1;
+                    state.flBwdSub = 0;
+                } else {
+                    // Load next K_j, V_j tile (saved (m,ℓ) doesn't change since i fixed)
+                    state.hbmRead += bytes(Bc*d*2);
+                    // Cycle through grad sub-steps for visual
+                    state.flBwdSub = ((state.flBwdSub) % 5) + 1;
+                    if (state.flBwdSub < 2) state.flBwdSub = 2;
+                }
+            }
+            state.sramPeak = bytes(Br*d*3 + Bc*d*2 + Br*Bc + Br*2);
         }
+        // Sync cumulative phase totals
+        if (state.phase === 'fwd') state.fwdTotal = state.hbmRead + state.hbmWrite;
+        else state.bwdTotal = state.hbmRead + state.hbmWrite;
         draw();
         updateStatus();
     }
@@ -587,8 +1045,15 @@
         state.step = 0;
         state.hbmRead = 0; state.hbmWrite = 0; state.sramPeak = 0;
         state.currentI = 0; state.currentJ = -1;
+        state.stdBwdSub = 0; state.flBwdSub = 0;
+        if (state.phase === 'fwd') state.fwdTotal = 0;
+        else state.bwdTotal = 0;
         draw();
         updateStatus();
+    }
+    function fullReset() {
+        state.fwdTotal = 0; state.bwdTotal = 0;
+        reset();
     }
 
     function updateStatus() {
@@ -597,28 +1062,32 @@
         const pb = document.getElementById('phaseBadge');
         if (state.step === 0) {
             box.className = 'p-3 rounded-lg bg-blue-50 border border-blue-100 text-blue-900 text-xs leading-relaxed';
-            box.innerHTML = `Press <strong>Step</strong> to advance.`;
+            box.innerHTML = `Press <strong>Step</strong> to advance <strong>${state.phase === 'fwd' ? 'forward' : 'backward'}</strong> through ${state.mode === 'std' ? 'Standard' : 'FlashAttention'}.`;
             pb.textContent = 'Idle';
             pb.className = 'text-[10px] uppercase tracking-widest font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full';
         } else if (state.step >= total) {
             box.className = 'p-3 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-xs leading-relaxed';
-            box.innerHTML = state.mode === 'flash'
-                ? `Done in ${state.step} steps. Total HBM traffic: <strong>${formatBytes(state.hbmRead + state.hbmWrite)}</strong>.`
-                : `Done in ${state.step} steps. Total HBM traffic: <strong>${formatBytes(state.hbmRead + state.hbmWrite)}</strong> (most of it is the N×N matrix).`;
+            const phaseName = state.phase === 'fwd' ? 'Forward' : 'Backward';
+            const tip = state.phase === 'fwd'
+                ? ` Now switch to <strong>Backward</strong> to see the recompute trick.`
+                : ``;
+            box.innerHTML = `${phaseName} done in ${state.step} steps. HBM total: <strong>${formatBytes(state.hbmRead + state.hbmWrite)}</strong>.${tip}`;
             pb.textContent = 'Done';
             pb.className = 'text-[10px] uppercase tracking-widest font-black text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full';
         } else {
-            box.className = 'p-3 rounded-lg bg-amber-50 border border-amber-100 text-amber-900 text-xs leading-relaxed';
-            if (state.mode === 'std') {
-                box.innerHTML = `Step ${state.step}: ${['', 'Compute S = Q·K^T → write to HBM.', 'Read S, softmax → write P.', 'Read P + V, multiply → write O.'][state.step]}`;
-            } else {
-                const Tr = Math.ceil(state.N / state.Br), Tc = Math.ceil(state.N / state.Bc);
-                box.innerHTML = `Outer iter <strong>i = ${state.currentI + 1}/${Tr}</strong>, inner <strong>j = ${Math.max(state.currentJ + 1, 1)}/${Tc}</strong>. Tile streaming through SRAM.`;
-            }
-            pb.textContent = state.mode === 'std' ? 'Standard' : 'Streaming';
-            pb.className = state.mode === 'std'
-                ? 'text-[10px] uppercase tracking-widest font-black text-rose-700 bg-rose-50 px-2 py-0.5 rounded-full'
-                : 'text-[10px] uppercase tracking-widest font-black text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full';
+            const cls = state.phase === 'fwd'
+                ? 'p-3 rounded-lg bg-teal-50 border border-teal-100 text-teal-900 text-xs leading-relaxed'
+                : 'p-3 rounded-lg bg-amber-50 border border-amber-100 text-amber-900 text-xs leading-relaxed';
+            box.className = cls;
+            box.innerHTML = `<strong>${state.mode === 'std' ? 'Standard' : 'Flash'} ${state.phase === 'fwd' ? 'forward' : 'backward'}</strong>: ${opLabel()}`;
+            pb.textContent = state.phase === 'fwd' ? (state.mode === 'std' ? 'Std FWD' : 'Flash FWD') : (state.mode === 'std' ? 'Std BWD' : 'Flash BWD');
+            const colorMap = {
+                'Std FWD': 'text-rose-700 bg-rose-50',
+                'Flash FWD': 'text-teal-700 bg-teal-50',
+                'Std BWD': 'text-rose-700 bg-rose-50',
+                'Flash BWD': 'text-purple-700 bg-purple-50',
+            };
+            pb.className = `text-[10px] uppercase tracking-widest font-black ${colorMap[pb.textContent]} px-2 py-0.5 rounded-full`;
         }
     }
 
@@ -629,33 +1098,81 @@
         document.getElementById('sramPeakVal').textContent = formatBytes(state.sramPeak);
     }
 
-    function refreshMathHighlight() {
-        for (let i = 1; i <= 4; i++) document.getElementById(`math-${i}`).classList.remove('active');
-        if (state.mode !== 'flash' || state.step === 0) return;
-        const sub = (state.step - 1) % 4;
-        document.getElementById(`math-${sub + 1}`).classList.add('active');
+    function refreshPhaseBars() {
+        // Use the maximum of whichever totals are set, plus the std-equivalent for normalization
+        const N = state.N, d = state.d;
+        const stdFwd = (4 * N * d + 4 * N * N) * 2;
+        const stdBwd = (5 * N * d + 6 * N * N) * 2;
+        const denom = Math.max(stdFwd, stdBwd, 1);
+        document.getElementById('bar-fwd').style.width = `${Math.min(100, 100 * state.fwdTotal / denom)}%`;
+        document.getElementById('bar-bwd').style.width = `${Math.min(100, 100 * state.bwdTotal / denom)}%`;
+        document.getElementById('fwdTotal').textContent = formatBytes(state.fwdTotal);
+        document.getElementById('bwdTotal').textContent = formatBytes(state.bwdTotal);
+        const tot = state.fwdTotal + state.bwdTotal;
+        const stdTot = stdFwd + stdBwd;
+        const note = document.getElementById('phaseRatio');
+        if (tot > 0) {
+            const ratio = stdTot / tot;
+            note.innerHTML = `Total this mode: <strong>${formatBytes(tot)}</strong> · ${state.mode === 'flash' ? `vs Standard total ${formatBytes(stdTot)} → <strong class="text-emerald-700">${ratio.toFixed(2)}× saved</strong>` : 'baseline (try Flash to see savings)'}`;
+        } else {
+            note.innerHTML = `Run forward → backward to fill both bars. The backward bar is the savings story — recompute makes it linear in N.`;
+        }
     }
 
-    // ===== Speedup chart =====
+    function refreshMathHighlight() {
+        // Forward
+        for (let i = 1; i <= 4; i++) document.getElementById(`math-${i}`).classList.remove('active');
+        // Backward
+        for (let i = 1; i <= 6; i++) {
+            const el = document.getElementById(`bmath-${i}`);
+            el.classList.remove('active', 'bwd', 'recompute');
+        }
+        if (state.step === 0) return;
+        if (state.mode === 'flash' && state.phase === 'fwd') {
+            const sub = (state.step - 1) % 4;
+            document.getElementById(`math-${sub + 1}`).classList.add('active');
+        } else if (state.mode === 'flash' && state.phase === 'bwd') {
+            // Map flBwdSub (1..5) to bmath-1..6
+            // sub 1: load — no math; sub 2: recompute → bmath-1,2; sub 3..5: bmath-3..6
+            const m = { 2: [1, 2], 3: [3], 4: [4], 5: [5, 6] };
+            const ids = m[state.flBwdSub] || [];
+            for (const i of ids) {
+                const el = document.getElementById(`bmath-${i}`);
+                el.classList.add('active', 'bwd');
+                if (i <= 2) el.classList.add('recompute');
+            }
+        } else if (state.mode === 'std' && state.phase === 'bwd') {
+            // Map stdBwdSub (1..5) to bmath rows directly
+            const m = { 1: [3], 2: [4], 3: [5], 4: [6], 5: [6] };
+            const ids = m[state.stdBwdSub] || [];
+            for (const i of ids) document.getElementById(`bmath-${i}`).classList.add('active', 'bwd');
+        }
+    }
+
+    // ===== Chart =====
     function refreshChart() {
         const svg = document.getElementById('chartSvg');
         svg.innerHTML = '';
         const W = 880, H = 320;
-        const pad = { l: 70, r: 20, t: 20, b: 50 };
-
+        const pad = { l: 70, r: 20, t: 24, b: 50 };
         const Nmin = 8, Nmax = 8192;
-        // Standard: read Q+K once, write S, read S, write P, read P + V, write O
-        //   = 2·N·d + N² + N² + N² + N² + N·d + N·d = 4·N·d + 4·N²
-        const stdBytes = (n) => 2 * (4 * n * state.d + 4 * n * n);
-        // FlashAttention with Q-block Br: K,V are re-read N/Br times.
-        //   = 2·N·d (Q + O once each) + 2·N²·d/Br (K + V re-reads)
-        const flashBytes = (n) => 2 * (2 * n * state.d + 2 * n * n * state.d / state.Br);
-        // "Ideal" Flash if Br = N (K,V read just once total)
-        const flashIdealBytes = (n) => 2 * 4 * n * state.d;
-        const yMax = stdBytes(Nmax);
+        // FORWARD bytes (already had)
+        const stdFwd  = (n) => 2 * (4 * n * state.d + 4 * n * n);
+        const flFwd   = (n) => 2 * (2 * n * state.d + 2 * n * n * state.d / state.Br);
+        // BACKWARD bytes
+        // Standard bwd: load A (N²) for at least dV + softmax-bwd; load dO (N·d), V (N·d), Q (N·d), K (N·d);
+        //              write dV, dQ, dK (N·d each) and intermediate dP, dS (N² each).
+        //              Approx: 6·N² + 5·N·d + 3·N·d  → use (6 N² + 8 N d) bytes-elements, ×2 for FP16
+        const stdBwd  = (n) => 2 * (6 * n * n + 8 * n * state.d);
+        // Flash bwd: load Q,K,V,O,dO + saved (m,ℓ); recompute pulls K,V N/Br times; write dQ, dK, dV
+        //   Approx: 5·N·d + 2·N²·d/Br + 2·N + 3·N·d  → (8 N d + 2 N² d/Br + 2N)
+        const flBwd   = (n) => 2 * (2 * n * n * state.d / state.Br + 8 * n * state.d + 2 * n);
+        // Combined totals (forward + backward)
+        const stdTot  = (n) => stdFwd(n) + stdBwd(n);
+        const flTot   = (n) => flFwd(n)  + flBwd(n);
+        const yMax = stdTot(Nmax);
 
         const sx = (n) => {
-            // log scale on N
             const lg = Math.log10(n), lgMin = Math.log10(Nmin), lgMax = Math.log10(Nmax);
             return pad.l + ((lg - lgMin) / (lgMax - lgMin)) * (W - pad.l - pad.r);
         };
@@ -664,7 +1181,6 @@
             return H - pad.b - (lg / lgMax) * (H - pad.t - pad.b);
         };
 
-        // Axes
         svg.appendChild(svgEl('line', { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: '#cbd5e1' }));
         svg.appendChild(svgEl('line', { x1: pad.l, x2: pad.l, y1: pad.t, y2: H - pad.b, stroke: '#cbd5e1' }));
         for (const n of [16, 64, 256, 1024, 4096, 8192]) {
@@ -677,55 +1193,50 @@
             svg.appendChild(svgEl('line', { x1: pad.l, x2: W - pad.r, y1: yy, y2: yy, stroke: '#f1f5f9' }));
             svg.appendChild(svgText(formatBytes(b), { x: pad.l - 6, y: yy + 3, 'text-anchor': 'end', 'font-size': '9', fill: '#64748b', 'font-family': 'JetBrains Mono, monospace' }));
         }
-        svg.appendChild(svgText('HBM bytes per attention call (log–log)', {
+        svg.appendChild(svgText('HBM bytes per attention call (log–log) · solid = total fwd+bwd, dashed = forward only', {
             x: W / 2, y: H - 8, 'text-anchor': 'middle', 'font-size': '10', fill: '#475569', 'font-weight': '700'
         }));
 
-        // Curves
         const samples = 60;
-        const stdPts = [], flashPts = [], idealPts = [];
-        for (let i = 0; i <= samples; i++) {
-            const lg = Math.log10(Nmin) + (i / samples) * (Math.log10(Nmax) - Math.log10(Nmin));
-            const n = Math.pow(10, lg);
-            stdPts.push([sx(n), sy(stdBytes(n))]);
-            flashPts.push([sx(n), sy(flashBytes(n))]);
-            idealPts.push([sx(n), sy(flashIdealBytes(n))]);
-        }
+        const series = (fn) => {
+            const pts = [];
+            for (let i = 0; i <= samples; i++) {
+                const lg = Math.log10(Nmin) + (i / samples) * (Math.log10(Nmax) - Math.log10(Nmin));
+                const n = Math.pow(10, lg);
+                pts.push([sx(n), sy(fn(n))]);
+            }
+            return pts;
+        };
         const path = (pts) => pts.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ');
-        svg.appendChild(svgEl('path', { d: path(stdPts), fill: 'none', stroke: '#ef4444', 'stroke-width': 2.5 }));
-        // Ideal flash (B_r = N) — dashed thin reference
-        svg.appendChild(svgEl('path', { d: path(idealPts), fill: 'none', stroke: '#10b981', 'stroke-width': 1.4, 'stroke-dasharray': '4 3', opacity: 0.55 }));
-        svg.appendChild(svgEl('path', { d: path(flashPts), fill: 'none', stroke: '#10b981', 'stroke-width': 2.5 }));
 
-        // Endpoint labels
-        svg.appendChild(svgText(`Standard  O(N²)`, {
-            x: stdPts[stdPts.length - 1][0] - 8, y: stdPts[stdPts.length - 1][1] - 8,
-            'text-anchor': 'end', 'font-size': '11', fill: '#ef4444', 'font-weight': '700'
-        }));
-        svg.appendChild(svgText(`Flash @ B_r=${state.Br}  ~ N²·d / B_r`, {
-            x: flashPts[flashPts.length - 1][0] - 8, y: flashPts[flashPts.length - 1][1] - 8,
-            'text-anchor': 'end', 'font-size': '11', fill: '#10b981', 'font-weight': '700'
-        }));
-        svg.appendChild(svgText(`Flash ideal (B_r large)  O(N·d)`, {
-            x: idealPts[idealPts.length - 1][0] - 8, y: idealPts[idealPts.length - 1][1] + 14,
-            'text-anchor': 'end', 'font-size': '10', fill: '#10b981', 'font-weight': '600', opacity: 0.7
-        }));
+        const stdTotPts  = series(stdTot);
+        const stdFwdPts  = series(stdFwd);
+        const flTotPts   = series(flTot);
+        const flFwdPts   = series(flFwd);
 
-        // Marker for current N
+        // Standard: total (solid red) + forward-only (dashed thin)
+        svg.appendChild(svgEl('path', { d: path(stdTotPts), fill: 'none', stroke: '#ef4444', 'stroke-width': 2.6 }));
+        svg.appendChild(svgEl('path', { d: path(stdFwdPts), fill: 'none', stroke: '#ef4444', 'stroke-width': 1.3, 'stroke-dasharray': '4 3', opacity: 0.55 }));
+        // Flash: total (solid green) + forward-only (dashed thin)
+        svg.appendChild(svgEl('path', { d: path(flTotPts), fill: 'none', stroke: '#10b981', 'stroke-width': 2.6 }));
+        svg.appendChild(svgEl('path', { d: path(flFwdPts), fill: 'none', stroke: '#10b981', 'stroke-width': 1.3, 'stroke-dasharray': '4 3', opacity: 0.55 }));
+
+        // End labels
+        svg.appendChild(svgText('Standard total', { x: stdTotPts.at(-1)[0] - 8, y: stdTotPts.at(-1)[1] - 8, 'text-anchor': 'end', 'font-size': '11', fill: '#ef4444', 'font-weight': '800' }));
+        svg.appendChild(svgText('Standard fwd only', { x: stdFwdPts.at(-1)[0] - 8, y: stdFwdPts.at(-1)[1] + 12, 'text-anchor': 'end', 'font-size': '9', fill: '#ef4444', opacity: 0.7 }));
+        svg.appendChild(svgText('Flash total', { x: flTotPts.at(-1)[0] - 8, y: flTotPts.at(-1)[1] - 8, 'text-anchor': 'end', 'font-size': '11', fill: '#10b981', 'font-weight': '800' }));
+        svg.appendChild(svgText('Flash fwd only', { x: flFwdPts.at(-1)[0] - 8, y: flFwdPts.at(-1)[1] + 12, 'text-anchor': 'end', 'font-size': '9', fill: '#10b981', opacity: 0.7 }));
+
+        // N marker
         const cx = sx(state.N);
         svg.appendChild(svgEl('line', { x1: cx, x2: cx, y1: pad.t, y2: H - pad.b, stroke: '#0ea5e9', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
         svg.appendChild(svgText(`N = ${state.N}`, { x: cx, y: pad.t - 4, 'text-anchor': 'middle', 'font-size': '10', fill: '#0284c7', 'font-weight': '700' }));
 
-        // Savings (negative if Flash is worse)
-        const ratio = stdBytes(state.N) / Math.max(flashBytes(state.N), 1);
+        // Total savings indicator
+        const ratio = stdTot(state.N) / Math.max(flTot(state.N), 1);
         const el = document.getElementById('savingsVal');
-        if (ratio >= 1) {
-            el.textContent = `${ratio.toFixed(2)}×`;
-            el.className = 'text-2xl font-black text-emerald-600 mono';
-        } else {
-            el.textContent = `${(1/ratio).toFixed(2)}× WORSE`;
-            el.className = 'text-2xl font-black text-rose-600 mono';
-        }
+        if (ratio >= 1) { el.textContent = `${ratio.toFixed(2)}×`; el.className = 'text-2xl font-black text-emerald-600 mono'; }
+        else { el.textContent = `${(1/ratio).toFixed(2)}× WORSE`; el.className = 'text-2xl font-black text-rose-600 mono'; }
     }
 
     // ===== Bindings =====
@@ -746,18 +1257,53 @@
             stdBtn.classList.add('bg-white', 'text-slate-700', 'border-slate-200');
             stdBtn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
         }
-        document.getElementById('vizTitle').textContent = m === 'flash'
-            ? 'FlashAttention — tiled streaming'
-            : 'Standard attention — N×N matrix in HBM';
-        document.getElementById('softmaxPanel').style.display = m === 'flash' ? '' : 'none';
-        reset();
+        updateVizTitle();
+        fullReset();
+    }
+    function setPhase(p) {
+        state.phase = p;
+        const fb = document.getElementById('phase-fwd');
+        const bb = document.getElementById('phase-bwd');
+        fb.classList.toggle('active', p === 'fwd');
+        bb.classList.toggle('active', p === 'bwd');
+        if (p === 'fwd') {
+            fb.classList.add('bg-teal-600', 'text-white');
+            fb.classList.remove('bg-slate-100', 'text-slate-700');
+            bb.classList.add('bg-slate-100', 'text-slate-700');
+            bb.classList.remove('bg-amber-700', 'text-white');
+        } else {
+            bb.classList.add('bg-amber-700', 'text-white');
+            bb.classList.remove('bg-slate-100', 'text-slate-700');
+            fb.classList.add('bg-slate-100', 'text-slate-700');
+            fb.classList.remove('bg-teal-600', 'text-white');
+        }
+        document.getElementById('softmaxPanel').style.display = p === 'fwd' ? '' : 'none';
+        document.getElementById('bwdPanel').style.display     = p === 'bwd' ? '' : 'none';
+        updateVizTitle();
+        // Reset only this phase's per-pass counters; cumulative bars persist
+        state.step = 0; state.hbmRead = 0; state.hbmWrite = 0; state.sramPeak = 0;
+        state.currentI = 0; state.currentJ = -1;
+        state.stdBwdSub = 0; state.flBwdSub = 0;
+        if (p === 'fwd') state.fwdTotal = 0; else state.bwdTotal = 0;
+        draw();
+        updateStatus();
+    }
+    function updateVizTitle() {
+        const t = document.getElementById('vizTitle');
+        const m = state.mode === 'flash' ? 'FlashAttention' : 'Standard attention';
+        const p = state.phase === 'fwd' ? 'forward' : 'backward';
+        t.textContent = `${m} — ${p}${state.mode === 'flash' ? ' (tiled streaming)' : (' (' + (state.phase === 'fwd' ? 'N×N matrix in HBM' : 'reload saved A from HBM') + ')')}`;
     }
 
     function init() {
         setMode('flash');
+        setPhase('fwd');
 
         document.getElementById('tab-std').addEventListener('click', () => setMode('std'));
         document.getElementById('tab-flash').addEventListener('click', () => setMode('flash'));
+        document.getElementById('phase-fwd').addEventListener('click', () => setPhase('fwd'));
+        document.getElementById('phase-bwd').addEventListener('click', () => setPhase('bwd'));
+
         const updaters = [
             ['nIn', 'N', 'nVal'],
             ['dIn', 'd', 'dVal'],
@@ -769,17 +1315,19 @@
             el.addEventListener('input', () => {
                 state[key] = parseInt(el.value, 10);
                 document.getElementById(valId).textContent = state[key];
-                reset();
+                fullReset();
             });
         }
         document.getElementById('playBtn').addEventListener('click', () => state.playing ? stop() : play());
         document.getElementById('stepBtn').addEventListener('click', () => { stop(); step(); });
-        document.getElementById('resetBtn').addEventListener('click', reset);
+        document.getElementById('resetBtn').addEventListener('click', fullReset);
         document.addEventListener('keydown', (e) => {
             if (e.target.tagName === 'INPUT') return;
-            if (e.code === 'Space') { e.preventDefault(); state.playing ? stop() : play(); }
+            if (e.code === 'Space')      { e.preventDefault(); state.playing ? stop() : play(); }
             if (e.code === 'ArrowRight') { stop(); step(); }
-            if (e.code === 'KeyR') reset();
+            if (e.code === 'KeyR')       fullReset();
+            if (e.code === 'KeyF')       setPhase('fwd');
+            if (e.code === 'KeyB')       setPhase('bwd');
         });
     }
 
