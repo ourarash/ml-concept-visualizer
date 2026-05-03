@@ -47,6 +47,7 @@ Core concepts essential for understanding modern ML
 - Softmax activation function
 - Internal covariate shift and batch normalization
 - Backpropagation and the chain rule
+- Random forest vs gradient boosting (bagging vs sequential residual fitting)
 - Mathematical foundations
 
 ### 🗣️ NLP & Language Models

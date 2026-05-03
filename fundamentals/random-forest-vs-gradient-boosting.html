@@ -1,0 +1,2144 @@
+<!doctype html>
+<!-- Brief: Random forest (bagging) vs gradient boosting (residual fitting) comparison via 1D regression. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Random Forest vs Gradient Boosting</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            color-scheme: light;
+            --page-bg: #eef4f8;
+            --surface: #ffffff;
+            --surface-soft: rgba(255, 255, 255, 0.92);
+            --border: #d7e2eb;
+            --border-strong: #bfdbfe;
+            --text: #0f172a;
+            --muted: #475569;
+            --muted-soft: #64748b;
+            --shadow: 0 20px 48px rgba(15, 23, 42, 0.1);
+            --shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.08);
+            --rf-color: #0ea5e9;
+            --gb-color: #f97316;
+            --tree-color: #64748b;
+            --truth-color: #0f766e;
+            --baseline-color: #8b5cf6;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(14, 165, 233, 0.16), transparent 24%),
+                radial-gradient(circle at top right, rgba(249, 115, 22, 0.14), transparent 22%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--page-bg) 100%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .hero-wrap {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 48%, #b45309 100%);
+            color: white;
+        }
+
+        .hero-wrap::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.16), transparent 24%),
+                radial-gradient(circle at 82% 12%, rgba(125, 211, 252, 0.14), transparent 20%);
+            pointer-events: none;
+        }
+
+        .hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.45rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.08);
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #dbeafe;
+        }
+
+        .toc {
+            position: sticky;
+            top: 0.75rem;
+            z-index: 30;
+            display: flex;
+            gap: 0.5rem;
+            overflow-x: auto;
+            padding: 0.7rem 0.9rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(14px);
+            scrollbar-width: none;
+        }
+
+        .toc::-webkit-scrollbar { display: none; }
+
+        .toc a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            white-space: nowrap;
+            padding: 0.4rem 0.85rem;
+            border-radius: 999px;
+            color: #334155;
+            font-size: 0.85rem;
+            font-weight: 700;
+            line-height: 1;
+            transition: background 0.18s, color 0.18s;
+        }
+
+        .toc a:hover {
+            background: #e0f2fe;
+            color: var(--text);
+        }
+
+        .toc a .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.07);
+            color: #0f172a;
+            font-size: 0.7rem;
+            font-weight: 800;
+        }
+
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            background: var(--surface);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .card.section { padding: 1.75rem; }
+
+        .section-kicker {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 1.1rem;
+            background: #f8fbfd;
+            padding: 1rem;
+        }
+
+        .panel-title {
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 0.55rem;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-bottom: 0.25rem;
+            margin-top: 0.6rem;
+        }
+
+        .control-row .v {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: #cbd5e1;
+            border-radius: 999px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #0ea5e9;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #0ea5e9;
+            cursor: pointer;
+            border: 2px solid white;
+        }
+
+        select, .btn {
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 0.6rem;
+            padding: 0.4rem 0.7rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #0f172a;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        }
+
+        .btn {
+            background: #0f172a;
+            color: white;
+            border-color: #0f172a;
+        }
+
+        .btn:hover { background: #1e293b; }
+        .btn.subtle { background: white; color: #0f172a; }
+        .btn.subtle:hover { background: #f1f5f9; }
+        .btn.accent-rf { background: var(--rf-color); border-color: var(--rf-color); }
+        .btn.accent-gb { background: var(--gb-color); border-color: var(--gb-color); }
+        .btn:active { transform: translateY(1px); }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        .seg {
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            overflow: hidden;
+            background: white;
+        }
+
+        .seg button {
+            padding: 0.35rem 0.85rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #475569;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+        }
+
+        .seg button.active {
+            background: #0f172a;
+            color: white;
+        }
+
+        .toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.78rem;
+            color: var(--muted);
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle input { accent-color: #0ea5e9; }
+
+        .metric-tile {
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 0.85rem;
+            padding: 0.6rem 0.75rem;
+        }
+
+        .metric-tile .lbl {
+            font-size: 0.65rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted-soft);
+        }
+
+        .metric-tile .val {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 1.05rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 0.15rem;
+        }
+
+        .plot-wrap {
+            position: relative;
+            width: 100%;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 0.5rem;
+        }
+
+        .plot-svg {
+            display: block;
+            width: 100%;
+            height: auto;
+            font-family: inherit;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-top: 0.4rem;
+        }
+
+        .legend-line {
+            display: inline-block;
+            width: 18px;
+            height: 3px;
+            border-radius: 2px;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+
+        .legend-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+
+        .stage-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+            max-height: 220px;
+            overflow-y: auto;
+            padding-right: 0.25rem;
+        }
+
+        .stage-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.35rem 0.6rem;
+            border-radius: 0.55rem;
+            background: white;
+            border: 1px solid var(--border);
+            font-size: 0.78rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            color: #334155;
+        }
+
+        .stage-item.active {
+            background: #fff7ed;
+            border-color: #fed7aa;
+            color: #9a3412;
+            font-weight: 700;
+        }
+
+        .tree-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 0.6rem;
+            padding: 0.4rem;
+        }
+
+        .tree-card .lbl {
+            font-size: 0.65rem;
+            font-weight: 700;
+            color: var(--muted);
+            margin-bottom: 0.2rem;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        .compare-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.92rem;
+        }
+
+        .compare-table th, .compare-table td {
+            padding: 0.7rem 0.85rem;
+            border-bottom: 1px solid var(--border);
+            text-align: left;
+            vertical-align: top;
+        }
+
+        .compare-table th {
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            background: #f8fbfd;
+        }
+
+        .compare-table tr:last-child td { border-bottom: none; }
+
+        .compare-table .col-rf {
+            background: rgba(14, 165, 233, 0.05);
+        }
+
+        .compare-table .col-gb {
+            background: rgba(249, 115, 22, 0.05);
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.2rem 0.55rem;
+            border-radius: 999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #0f172a;
+            background: #e2e8f0;
+        }
+
+        .pill.rf { background: rgba(14, 165, 233, 0.12); color: #0369a1; }
+        .pill.gb { background: rgba(249, 115, 22, 0.14); color: #9a3412; }
+        .pill.tree { background: rgba(139, 92, 246, 0.12); color: #6d28d9; }
+
+        .footer-note {
+            font-size: 0.78rem;
+            color: var(--muted-soft);
+            line-height: 1.55;
+        }
+
+        .interp-text {
+            font-size: 0.85rem;
+            color: var(--muted);
+            line-height: 1.5;
+        }
+
+        @media (max-width: 1024px) {
+            .card.section { padding: 1.25rem; }
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="hero-wrap py-12 px-4 shadow-lg">
+        <div class="max-w-6xl mx-auto">
+            <p class="hero-kicker">EE508 · ML Fundamentals</p>
+            <h1 class="text-3xl md:text-5xl font-extrabold tracking-tight mt-5">
+                Random Forest vs Gradient Boosting
+            </h1>
+            <p class="text-base md:text-lg text-sky-100 max-w-3xl mt-4">
+                A single tree can fit nonlinear patterns, but it can also be unstable. Random forests and gradient
+                boosting improve tree models in different ways: one averages many trees, the other adds trees
+                sequentially to correct remaining errors.
+            </p>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-6 sm:p-6 lg:px-8 lg:py-10 space-y-8">
+        <nav class="toc" aria-label="Section navigation">
+            <a href="#sec-tree"><span class="num">1</span>Single Tree</a>
+            <a href="#sec-rf"><span class="num">2</span>Random Forest</a>
+            <a href="#sec-gb"><span class="num">3</span>Gradient Boosting</a>
+            <a href="#sec-compare"><span class="num">4</span>Side-by-Side</a>
+            <a href="#sec-summary"><span class="num">5</span>Summary</a>
+            <a href="#sec-sources"><span class="num">★</span>Sources</a>
+        </nav>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 1: SINGLE TREE BASELINE                                  -->
+        <!-- ============================================================== -->
+        <section id="sec-tree" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#ede9fe; color:#6d28d9;">1</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#6d28d9;">Section 1</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Single Tree Baseline</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        One decision tree can fit nonlinear data, but it can also overfit and vary a lot with small
+                        data changes. Establishing this baseline motivates why ensembles help.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <!-- Plot -->
+                <div class="lg:col-span-2 panel">
+                    <div class="panel-title">Tree Prediction (1D Regression)</div>
+                    <div class="plot-wrap">
+                        <svg id="tree-plot" class="plot-svg" viewBox="0 0 600 360"
+                             preserveAspectRatio="xMidYMid meet" role="img"
+                             aria-label="Single decision tree fit"></svg>
+                    </div>
+                    <div class="legend">
+                        <span><span class="legend-line" style="background:var(--truth-color);"></span>True function</span>
+                        <span><span class="legend-line" style="background:var(--baseline-color);"></span>Tree prediction (step)</span>
+                        <span><span class="legend-dot" style="background:#0f172a;"></span>Training data</span>
+                        <span><span class="legend-dot" style="background:#94a3b8;"></span>Validation data</span>
+                    </div>
+                </div>
+
+                <!-- Controls + metrics -->
+                <div class="panel">
+                    <div class="panel-title">Controls</div>
+
+                    <label class="text-xs font-bold text-slate-600 block mb-1">Dataset preset</label>
+                    <select id="tree-preset" class="w-full">
+                        <option value="smooth">Smooth curve</option>
+                        <option value="piecewise">Piecewise target</option>
+                        <option value="noisy" selected>Noisy nonlinear</option>
+                    </select>
+
+                    <div class="control-row"><span>Sample count</span><span class="v" id="tree-n-val">60</span></div>
+                    <input type="range" id="tree-n" min="20" max="120" value="60" step="2" />
+
+                    <div class="control-row"><span>Noise σ</span><span class="v" id="tree-noise-val">0.40</span></div>
+                    <input type="range" id="tree-noise" min="0" max="1.2" value="0.4" step="0.05" />
+
+                    <div class="control-row"><span>Max depth</span><span class="v" id="tree-depth-val">4</span></div>
+                    <input type="range" id="tree-depth" min="1" max="8" value="4" step="1" />
+
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button id="tree-resample" class="btn">Resample data</button>
+                    </div>
+
+                    <div class="mt-3 flex flex-col gap-1.5">
+                        <label class="toggle"><input type="checkbox" id="tree-show-splits" />Show split boundaries</label>
+                        <label class="toggle"><input type="checkbox" id="tree-show-leaves" />Show leaf means</label>
+                    </div>
+
+                    <div class="grid grid-cols-3 gap-2 mt-4">
+                        <div class="metric-tile"><div class="lbl">Train MSE</div><div class="val" id="tree-train-mse">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Val MSE</div><div class="val" id="tree-val-mse">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Leaves</div><div class="val" id="tree-leaves">–</div></div>
+                    </div>
+
+                    <p class="interp-text mt-3" id="tree-interp">
+                        Move the depth slider to see flexibility vs variance.
+                    </p>
+                </div>
+            </div>
+
+            <p class="footer-note mt-3">
+                Slide anchors: <span class="mono">ML_Lecture3Sp26_ML_Review.pdf</span> pp. 14–15 (decision tree regression).
+            </p>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 2: RANDOM FOREST BUILDER                                 -->
+        <!-- ============================================================== -->
+        <section id="sec-rf" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#e0f2fe; color:#0369a1;">2</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#0369a1;">Section 2 · Bagging</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Random Forest Builder</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        Random forest trains many trees independently on bootstrapped samples and averages their
+                        predictions. The averaging reduces variance and usually makes the result more robust than a
+                        single tree.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <!-- Main plot panel -->
+                <div class="lg:col-span-2 panel">
+                    <div class="panel-title">Forest Average vs Individual Trees</div>
+                    <div class="plot-wrap">
+                        <svg id="rf-plot" class="plot-svg" viewBox="0 0 600 360"
+                             preserveAspectRatio="xMidYMid meet" role="img"
+                             aria-label="Random forest prediction"></svg>
+                    </div>
+                    <div class="legend">
+                        <span><span class="legend-line" style="background:var(--truth-color);"></span>True function</span>
+                        <span><span class="legend-line" style="background:var(--tree-color); opacity:0.6;"></span>Individual trees</span>
+                        <span><span class="legend-line" style="background:var(--rf-color); height:4px;"></span>Forest average</span>
+                        <span><span class="legend-dot" style="background:#0f172a;"></span>Training data</span>
+                    </div>
+
+                    <div class="panel mt-3" style="background:white;">
+                        <div class="panel-title">Bagging pipeline</div>
+                        <div class="text-xs mono leading-relaxed text-slate-700">
+                            Bootstrap sample &nbsp;<span class="pill">→</span>&nbsp; train tree independently &nbsp;<span class="pill">→</span>&nbsp; repeat for B trees &nbsp;<span class="pill">→</span>&nbsp; <span class="pill rf">average predictions</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="panel">
+                    <div class="panel-title">Controls</div>
+
+                    <div class="control-row" style="margin-top:0;"><span>Number of trees</span><span class="v" id="rf-n-val">15</span></div>
+                    <input type="range" id="rf-n" min="1" max="50" value="15" step="1" />
+
+                    <div class="control-row"><span>Tree depth</span><span class="v" id="rf-depth-val">4</span></div>
+                    <input type="range" id="rf-depth" min="1" max="8" value="4" step="1" />
+
+                    <div class="mt-3 flex flex-col gap-1.5">
+                        <label class="toggle"><input type="checkbox" id="rf-bootstrap" checked />Bootstrap sampling (with replacement)</label>
+                        <label class="toggle"><input type="checkbox" id="rf-feature-rand" checked />Split-candidate randomness</label>
+                        <label class="toggle"><input type="checkbox" id="rf-show-trees" checked />Show individual trees faintly</label>
+                    </div>
+
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button id="rf-grow" class="btn accent-rf">Grow forest</button>
+                        <button id="rf-animate" class="btn subtle">Animate additions</button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 mt-4">
+                        <div class="metric-tile"><div class="lbl">Trees</div><div class="val" id="rf-count">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Avg leaves</div><div class="val" id="rf-avg-leaves">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Train MSE</div><div class="val" id="rf-train-mse">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Val MSE</div><div class="val" id="rf-val-mse">–</div></div>
+                    </div>
+
+                    <p class="interp-text mt-3" id="rf-interp">
+                        More trees → lower variance of the average prediction.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Tree gallery -->
+            <div class="panel mt-4">
+                <div class="panel-title">Tree gallery — different bootstrap samples produce different trees</div>
+                <div id="rf-gallery" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2"></div>
+                <p class="footer-note mt-2">
+                    Each thumbnail shows one tree's step-function prediction over the input range. Notice how trees
+                    disagree — averaging cancels out their independent errors.
+                </p>
+            </div>
+
+            <p class="footer-note mt-3">
+                Slide anchors: <span class="mono">ML_Lecture3Sp26_ML_Review.pdf</span> p. 28 (bagging / bootstrap aggregation), p. 29 (RF example), p. 68 (RF steps and tradeoffs).
+                Note: this is a simplified 1D forest. Real random forests also randomize feature selection at each split when input dimension &gt; 1.
+            </p>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 3: GRADIENT BOOSTING BUILDER                             -->
+        <!-- ============================================================== -->
+        <section id="sec-gb" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#ffedd5; color:#9a3412;">3</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#9a3412;">Section 3 · Boosting</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Gradient Boosting Builder</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        Gradient boosting builds trees sequentially. Each new tree learns a correction to the current
+                        model's residual error, so the final prediction is a sum of many small refinements.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <!-- Main prediction plot -->
+                <div class="lg:col-span-2 panel">
+                    <div class="panel-title">Cumulative ensemble prediction</div>
+                    <div class="plot-wrap">
+                        <svg id="gb-plot" class="plot-svg" viewBox="0 0 600 320"
+                             preserveAspectRatio="xMidYMid meet" role="img"
+                             aria-label="Gradient boosting prediction"></svg>
+                    </div>
+                    <div class="legend">
+                        <span><span class="legend-line" style="background:var(--truth-color);"></span>True function</span>
+                        <span><span class="legend-line" style="background:var(--gb-color); height:4px;"></span>Boosted prediction</span>
+                        <span><span class="legend-dot" style="background:#0f172a;"></span>Training data</span>
+                    </div>
+
+                    <div class="panel-title mt-3">Residuals + next weak learner</div>
+                    <div class="plot-wrap">
+                        <svg id="gb-residual-plot" class="plot-svg" viewBox="0 0 600 220"
+                             preserveAspectRatio="xMidYMid meet" role="img"
+                             aria-label="Residuals and next weak learner"></svg>
+                    </div>
+                    <div class="legend">
+                        <span><span class="legend-dot" style="background:#dc2626;"></span>Residual = y − F(x)</span>
+                        <span><span class="legend-line" style="background:#9a3412;"></span>Next tree fit to residuals</span>
+                        <span class="footer-note">Each new tree does not replace the model — it adds a correction to the mistakes that remain.</span>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="panel">
+                    <div class="panel-title">Controls</div>
+
+                    <div class="control-row" style="margin-top:0;"><span>Boosting stages</span><span class="v" id="gb-stages-val">10</span></div>
+                    <input type="range" id="gb-stages" min="1" max="30" value="10" step="1" />
+
+                    <div class="control-row"><span>Learning rate</span><span class="v" id="gb-lr-val">0.30</span></div>
+                    <input type="range" id="gb-lr" min="0.05" max="1.0" value="0.3" step="0.05" />
+
+                    <div class="control-row"><span>Weak-learner depth</span><span class="v" id="gb-wl-val">2</span></div>
+                    <input type="range" id="gb-wl" min="1" max="3" value="2" step="1" />
+
+                    <div class="control-row"><span>Current stage</span><span class="v" id="gb-cur-val">0</span></div>
+                    <input type="range" id="gb-cur" min="0" max="10" value="0" step="1" />
+
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button id="gb-step" class="btn accent-gb">Step one stage</button>
+                        <button id="gb-play" class="btn subtle">▶ Play</button>
+                        <button id="gb-reset" class="btn subtle">Reset</button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 mt-4">
+                        <div class="metric-tile"><div class="lbl">Stage</div><div class="val" id="gb-stage-now">0</div></div>
+                        <div class="metric-tile"><div class="lbl">Trees so far</div><div class="val" id="gb-trees">0</div></div>
+                        <div class="metric-tile"><div class="lbl">Train MSE</div><div class="val" id="gb-train-mse">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Val MSE</div><div class="val" id="gb-val-mse">–</div></div>
+                    </div>
+
+                    <p class="interp-text mt-3" id="gb-interp">
+                        Higher learning rate → larger jumps per stage; lower → slower, smoother improvement.
+                    </p>
+                </div>
+            </div>
+
+            <!-- Stage stack -->
+            <div class="panel mt-4">
+                <div class="panel-title">Ensemble build stack</div>
+                <div id="gb-stack" class="stage-stack"></div>
+            </div>
+
+            <p class="footer-note mt-3">
+                Slide anchors: <span class="mono">ML_Lecture3Sp26_ML_Review.pdf</span> pp. 20–24 (GBM concept &amp; steps), p. 26 (iterative process), p. 27 (learning-rate effect).
+            </p>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 4: SIDE-BY-SIDE COMPARISON                               -->
+        <!-- ============================================================== -->
+        <section id="sec-compare" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#dcfce7; color:#15803d;">4</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#15803d;">Section 4</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Side-by-Side Comparison</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        On the same training data, compare a single tree against a random forest and a gradient
+                        boosting model. The shapes of their predictions reveal what each method is doing.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="lg:col-span-2 panel">
+                    <div class="panel-title">Shared prediction plot</div>
+                    <div class="plot-wrap">
+                        <svg id="cmp-plot" class="plot-svg" viewBox="0 0 600 360"
+                             preserveAspectRatio="xMidYMid meet" role="img"
+                             aria-label="Random forest vs gradient boosting comparison"></svg>
+                    </div>
+                    <div class="legend">
+                        <span><span class="legend-line" style="background:var(--truth-color);"></span>True function</span>
+                        <span><span class="legend-line" style="background:var(--baseline-color); height:3px;"></span>Single tree</span>
+                        <span><span class="legend-line" style="background:var(--rf-color); height:4px;"></span>Random forest</span>
+                        <span><span class="legend-line" style="background:var(--gb-color); height:4px;"></span>Gradient boosting</span>
+                        <span><span class="legend-dot" style="background:#0f172a;"></span>Training data</span>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">Controls</div>
+
+                    <label class="text-xs font-bold text-slate-600 block mb-1">Dataset preset</label>
+                    <select id="cmp-preset" class="w-full">
+                        <option value="smooth">Smooth curve</option>
+                        <option value="piecewise">Piecewise target</option>
+                        <option value="noisy" selected>Noisy nonlinear</option>
+                    </select>
+
+                    <div class="control-row"><span>Sample count</span><span class="v" id="cmp-n-val">70</span></div>
+                    <input type="range" id="cmp-n" min="20" max="120" value="70" step="2" />
+
+                    <div class="control-row"><span>Noise σ</span><span class="v" id="cmp-noise-val">0.45</span></div>
+                    <input type="range" id="cmp-noise" min="0" max="1.2" value="0.45" step="0.05" />
+
+                    <div class="control-row"><span>Outliers</span><span class="v" id="cmp-out-val">0</span></div>
+                    <input type="range" id="cmp-out" min="0" max="6" value="0" step="1" />
+
+                    <div class="control-row"><span>RF: # trees</span><span class="v" id="cmp-rfn-val">25</span></div>
+                    <input type="range" id="cmp-rfn" min="1" max="50" value="25" step="1" />
+
+                    <div class="control-row"><span>RF: depth</span><span class="v" id="cmp-rfd-val">4</span></div>
+                    <input type="range" id="cmp-rfd" min="1" max="8" value="4" step="1" />
+
+                    <div class="control-row"><span>GB: stages</span><span class="v" id="cmp-gbs-val">25</span></div>
+                    <input type="range" id="cmp-gbs" min="1" max="40" value="25" step="1" />
+
+                    <div class="control-row"><span>GB: learning rate</span><span class="v" id="cmp-gblr-val">0.30</span></div>
+                    <input type="range" id="cmp-gblr" min="0.05" max="1.0" value="0.3" step="0.05" />
+
+                    <div class="control-row"><span>GB: depth</span><span class="v" id="cmp-gbd-val">2</span></div>
+                    <input type="range" id="cmp-gbd" min="1" max="3" value="2" step="1" />
+
+                    <div class="mt-3 flex flex-wrap gap-2">
+                        <button id="cmp-resample" class="btn">Resample data</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Process cards + metrics -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
+                <div class="panel" style="background:rgba(14,165,233,0.06); border-color:#bae6fd;">
+                    <div class="panel-title" style="color:#0369a1;">Random Forest</div>
+                    <ul class="text-sm text-slate-700 space-y-1 list-disc list-inside">
+                        <li><strong>Parallel</strong> trees, trained independently</li>
+                        <li><strong>Bootstrap samples</strong> create diverse training subsets</li>
+                        <li>Final prediction is the <strong>average</strong> across trees</li>
+                        <li>Mainly fights <strong>variance</strong> &amp; instability</li>
+                    </ul>
+                    <div class="grid grid-cols-2 gap-2 mt-3">
+                        <div class="metric-tile"><div class="lbl">Train MSE</div><div class="val" id="cmp-rf-train">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Val MSE</div><div class="val" id="cmp-rf-val">–</div></div>
+                        <div class="metric-tile"><div class="lbl"># trees</div><div class="val" id="cmp-rf-size">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Avg depth</div><div class="val" id="cmp-rf-depth">–</div></div>
+                    </div>
+                    <p class="interp-text mt-2" id="cmp-rf-interp">Averaging smooths out individual tree noise.</p>
+                </div>
+
+                <div class="panel" style="background:rgba(249,115,22,0.06); border-color:#fed7aa;">
+                    <div class="panel-title" style="color:#9a3412;">Gradient Boosting</div>
+                    <ul class="text-sm text-slate-700 space-y-1 list-disc list-inside">
+                        <li><strong>Sequential</strong> trees built in order</li>
+                        <li>Each new tree fits the <strong>residual error</strong></li>
+                        <li>Final prediction is an <strong>additive sum</strong> of corrections</li>
+                        <li>Mainly improves <strong>fit / bias</strong> step by step</li>
+                    </ul>
+                    <div class="grid grid-cols-2 gap-2 mt-3">
+                        <div class="metric-tile"><div class="lbl">Train MSE</div><div class="val" id="cmp-gb-train">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Val MSE</div><div class="val" id="cmp-gb-val">–</div></div>
+                        <div class="metric-tile"><div class="lbl"># stages</div><div class="val" id="cmp-gb-size">–</div></div>
+                        <div class="metric-tile"><div class="lbl">Stage depth</div><div class="val" id="cmp-gb-depth">–</div></div>
+                    </div>
+                    <p class="interp-text mt-2" id="cmp-gb-interp">Each stage chips away at the remaining error.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 5: KEY DIFFERENCES SUMMARY                               -->
+        <!-- ============================================================== -->
+        <section id="sec-summary" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#fef3c7; color:#92400e;">5</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#92400e;">Section 5</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Key Differences Summary</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        A concise side-by-side after you've explored both ensembles.
+                    </p>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto">
+                <table class="compare-table">
+                    <thead>
+                        <tr>
+                            <th>Concept</th>
+                            <th class="col-rf">Random Forest <span class="pill rf">bagging</span></th>
+                            <th class="col-gb">Gradient Boosting <span class="pill gb">boosting</span></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Build style</td>
+                            <td class="col-rf">Parallel</td>
+                            <td class="col-gb">Sequential</td>
+                        </tr>
+                        <tr>
+                            <td>Data usage</td>
+                            <td class="col-rf">Bootstrap resampling</td>
+                            <td class="col-gb">Residual fitting on the same training set</td>
+                        </tr>
+                        <tr>
+                            <td>Combination</td>
+                            <td class="col-rf">Average predictions</td>
+                            <td class="col-gb">Add scaled corrections</td>
+                        </tr>
+                        <tr>
+                            <td>Main effect</td>
+                            <td class="col-rf">Reduce variance</td>
+                            <td class="col-gb">Reduce residual error step by step</td>
+                        </tr>
+                        <tr>
+                            <td>Typical weakness</td>
+                            <td class="col-rf">Larger model, less interpretable</td>
+                            <td class="col-gb">Can overfit if too aggressive</td>
+                        </tr>
+                        <tr>
+                            <td>Key control</td>
+                            <td class="col-rf">Number / depth of trees</td>
+                            <td class="col-gb">Learning rate + number of stages</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <p class="interp-text mt-4">
+                <strong>One-line takeaway.</strong> Random forest improves stability by averaging many imperfect models.
+                Gradient boosting improves fit by repeatedly correcting mistakes.
+            </p>
+
+            <p class="footer-note mt-3">
+                These descriptions are simplified for intuition. In practice, behavior depends on data, tree depth,
+                learning rate, and other hyperparameters.
+            </p>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SOURCES                                                          -->
+        <!-- ============================================================== -->
+        <section id="sec-sources" class="card section">
+            <h2 class="text-xl font-bold">Sources</h2>
+            <ul class="text-sm text-slate-700 mt-3 space-y-1 list-disc list-inside">
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> pp. 14–15 — random forest regression alongside decision trees</li>
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> pp. 20–24 — gradient boosting concept &amp; sequential residual-correction steps</li>
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> p. 26 — iterative process of gradient boosting</li>
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> p. 27 — learning-rate effect</li>
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> p. 28 — random forest bagging / bootstrap aggregation / averaging</li>
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> p. 29 — random forest example</li>
+                <li><span class="mono">Slides/ML_Lecture3Sp26_ML_Review.pdf</span> p. 68 — random forest steps, strengths, and tradeoffs</li>
+            </ul>
+        </section>
+    </main>
+
+    <script>
+        "use strict";
+
+        /* =====================================================================
+         * Deterministic PRNG so resamples are reproducible per session.
+         * =================================================================== */
+        function mulberry32(seed) {
+            let t = seed >>> 0;
+            return function () {
+                t = (t + 0x6D2B79F5) >>> 0;
+                let r = Math.imul(t ^ (t >>> 15), 1 | t);
+                r = (r + Math.imul(r ^ (r >>> 7), 61 | r)) ^ r;
+                return ((r ^ (r >>> 14)) >>> 0) / 4294967296;
+            };
+        }
+
+        function gauss(rng) {
+            // Box-Muller
+            let u = 0, v = 0;
+            while (u === 0) u = rng();
+            while (v === 0) v = rng();
+            return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+        }
+
+        /* =====================================================================
+         * Synthetic 1D regression presets.  Domain x in [-4, 4].
+         * =================================================================== */
+        const X_MIN = -4, X_MAX = 4;
+
+        function trueFn(preset) {
+            if (preset === "smooth") {
+                return (x) => Math.sin(1.2 * x) + 0.2 * x;
+            }
+            if (preset === "piecewise") {
+                return (x) => {
+                    if (x < -1.5) return -1.5;
+                    if (x < 1.5) return 0.4 * x;
+                    return 1.8;
+                };
+            }
+            // noisy nonlinear
+            return (x) => 0.25 * x * x * x - x + 0.5 * Math.sin(2 * x);
+        }
+
+        function generateData({ preset, n, sigma, outliers = 0, seed = 1 }) {
+            const rng = mulberry32(seed);
+            const f = trueFn(preset);
+            const xs = new Array(n);
+            for (let i = 0; i < n; i++) xs[i] = X_MIN + (X_MAX - X_MIN) * rng();
+            xs.sort((a, b) => a - b);
+            const ys = xs.map((x) => f(x) + sigma * gauss(rng));
+
+            // Optional outliers — uniform y blasts
+            for (let k = 0; k < outliers; k++) {
+                const idx = Math.floor(rng() * n);
+                ys[idx] += (rng() < 0.5 ? -1 : 1) * (2 + 1.5 * rng());
+            }
+
+            // Validation set — independent draw from same distribution
+            const nv = Math.max(40, Math.floor(n * 0.6));
+            const vx = new Array(nv);
+            for (let i = 0; i < nv; i++) vx[i] = X_MIN + (X_MAX - X_MIN) * rng();
+            vx.sort((a, b) => a - b);
+            const vy = vx.map((x) => f(x) + sigma * gauss(rng));
+
+            return { xs, ys, vx, vy, f };
+        }
+
+        /* =====================================================================
+         * 1D CART-style regression tree.
+         *   - splits on a single x feature
+         *   - split criterion: minimize sum-of-squared error
+         *   - leaf prediction: mean y in leaf
+         *   - hyperparameters: maxDepth, minSamples
+         * =================================================================== */
+        function buildTree(xs, ys, opts) {
+            const maxDepth = opts.maxDepth ?? 4;
+            const minSamples = opts.minSamples ?? 2;
+            const featureRandom = opts.featureRandom ?? false;
+            const rng = opts.rng;
+
+            function bestSplit(idxs) {
+                if (idxs.length < 2 * minSamples) return null;
+                // sort indices by x for split candidate sweep
+                const sortedIdx = [...idxs].sort((a, b) => xs[a] - xs[b]);
+                let sumAll = 0;
+                for (const i of sortedIdx) sumAll += ys[i];
+                const N = sortedIdx.length;
+
+                // Optional split-candidate randomness: randomly pick subset of mid-points
+                const candidates = [];
+                for (let k = minSamples - 1; k < N - minSamples; k++) {
+                    const xL = xs[sortedIdx[k]];
+                    const xR = xs[sortedIdx[k + 1]];
+                    if (xL === xR) continue;
+                    candidates.push(k);
+                }
+                if (!candidates.length) return null;
+
+                let useCandidates = candidates;
+                if (featureRandom && candidates.length > 4 && rng) {
+                    const m = Math.max(2, Math.floor(Math.sqrt(candidates.length)));
+                    const picked = [];
+                    const seen = new Set();
+                    while (picked.length < m && seen.size < candidates.length) {
+                        const j = Math.floor(rng() * candidates.length);
+                        if (seen.has(j)) continue;
+                        seen.add(j);
+                        picked.push(candidates[j]);
+                    }
+                    useCandidates = picked;
+                }
+
+                let bestErr = Infinity, bestK = -1, bestThresh = 0;
+                for (const k of useCandidates) {
+                    let sumL = 0;
+                    for (let j = 0; j <= k; j++) sumL += ys[sortedIdx[j]];
+                    const nL = k + 1;
+                    const nR = N - nL;
+                    const sumR = sumAll - sumL;
+                    // SSE contribution = sum(y^2) - (sum y)^2 / n.  Constant
+                    // sum(y^2) cancels across candidates, so compare -(sumL^2/nL + sumR^2/nR).
+                    const score = -((sumL * sumL) / nL + (sumR * sumR) / nR);
+                    if (score < bestErr) {
+                        bestErr = score;
+                        bestK = k;
+                        bestThresh = 0.5 * (xs[sortedIdx[k]] + xs[sortedIdx[k + 1]]);
+                    }
+                }
+                if (bestK < 0) return null;
+
+                const leftIdx = sortedIdx.slice(0, bestK + 1);
+                const rightIdx = sortedIdx.slice(bestK + 1);
+                return { thresh: bestThresh, leftIdx, rightIdx };
+            }
+
+            function build(idxs, depth) {
+                if (!idxs.length) return { isLeaf: true, value: 0, n: 0 };
+                let mean = 0;
+                for (const i of idxs) mean += ys[i];
+                mean /= idxs.length;
+
+                if (depth >= maxDepth || idxs.length < 2 * minSamples) {
+                    return { isLeaf: true, value: mean, n: idxs.length };
+                }
+                const split = bestSplit(idxs);
+                if (!split) return { isLeaf: true, value: mean, n: idxs.length };
+
+                return {
+                    isLeaf: false,
+                    thresh: split.thresh,
+                    left: build(split.leftIdx, depth + 1),
+                    right: build(split.rightIdx, depth + 1),
+                    n: idxs.length,
+                };
+            }
+
+            const allIdx = xs.map((_, i) => i);
+            return build(allIdx, 0);
+        }
+
+        function treePredict(tree, x) {
+            let node = tree;
+            while (!node.isLeaf) {
+                node = x <= node.thresh ? node.left : node.right;
+            }
+            return node.value;
+        }
+
+        function treeLeafCount(tree) {
+            if (tree.isLeaf) return 1;
+            return treeLeafCount(tree.left) + treeLeafCount(tree.right);
+        }
+
+        function treeDepth(tree) {
+            if (tree.isLeaf) return 0;
+            return 1 + Math.max(treeDepth(tree.left), treeDepth(tree.right));
+        }
+
+        function collectThresholds(tree, out = []) {
+            if (tree.isLeaf) return out;
+            out.push(tree.thresh);
+            collectThresholds(tree.left, out);
+            collectThresholds(tree.right, out);
+            return out;
+        }
+
+        function collectLeafIntervals(tree, lo, hi, out = []) {
+            if (tree.isLeaf) {
+                out.push({ lo, hi, value: tree.value });
+                return out;
+            }
+            collectLeafIntervals(tree.left, lo, tree.thresh, out);
+            collectLeafIntervals(tree.right, tree.thresh, hi, out);
+            return out;
+        }
+
+        /* =====================================================================
+         * Random forest = bagged trees, average predictions.
+         * =================================================================== */
+        function buildForest({ xs, ys, nTrees, maxDepth, bootstrap, featureRandom, seed }) {
+            const rng = mulberry32(seed);
+            const N = xs.length;
+            const trees = [];
+            for (let t = 0; t < nTrees; t++) {
+                let bxs, bys;
+                if (bootstrap) {
+                    bxs = new Array(N);
+                    bys = new Array(N);
+                    for (let i = 0; i < N; i++) {
+                        const j = Math.floor(rng() * N);
+                        bxs[i] = xs[j];
+                        bys[i] = ys[j];
+                    }
+                } else {
+                    bxs = xs;
+                    bys = ys;
+                }
+                const tree = buildTree(bxs, bys, {
+                    maxDepth,
+                    minSamples: 2,
+                    featureRandom,
+                    rng,
+                });
+                trees.push(tree);
+            }
+            return trees;
+        }
+
+        function forestPredict(trees, x) {
+            if (!trees.length) return 0;
+            let sum = 0;
+            for (const t of trees) sum += treePredict(t, x);
+            return sum / trees.length;
+        }
+
+        /* =====================================================================
+         * Gradient boosting (squared-error regression).
+         *   F_0(x) = mean(y)
+         *   r_i = y_i - F_m(x_i)
+         *   tree_{m+1} fits r_i
+         *   F_{m+1}(x) = F_m(x) + lr * tree_{m+1}(x)
+         * Returns the full sequence of stages so we can step interactively.
+         * =================================================================== */
+        function buildBoosting({ xs, ys, stages, lr, depth, seed }) {
+            const rng = mulberry32(seed);
+            let baseline = 0;
+            for (const y of ys) baseline += y;
+            baseline /= ys.length;
+
+            const cur = ys.map(() => baseline);
+            const stagesOut = [];
+            for (let s = 0; s < stages; s++) {
+                const residuals = ys.map((y, i) => y - cur[i]);
+                const tree = buildTree(xs, residuals, {
+                    maxDepth: depth,
+                    minSamples: 2,
+                    featureRandom: false,
+                    rng,
+                });
+                stagesOut.push({ tree, residualsBefore: residuals.slice() });
+                for (let i = 0; i < xs.length; i++) {
+                    cur[i] += lr * treePredict(tree, xs[i]);
+                }
+            }
+            return { baseline, stages: stagesOut };
+        }
+
+        function boostingPredict(model, lr, x, upTo) {
+            const k = upTo == null ? model.stages.length : Math.min(upTo, model.stages.length);
+            let v = model.baseline;
+            for (let i = 0; i < k; i++) v += lr * treePredict(model.stages[i].tree, x);
+            return v;
+        }
+
+        /* =====================================================================
+         * MSE helper.
+         * =================================================================== */
+        function mse(predFn, xs, ys) {
+            let s = 0;
+            for (let i = 0; i < xs.length; i++) {
+                const e = ys[i] - predFn(xs[i]);
+                s += e * e;
+            }
+            return s / xs.length;
+        }
+
+        /* =====================================================================
+         * SVG plotting helpers (viewBox 600 x H).
+         * Each plot has a small margin and a y-range fitted around data.
+         * =================================================================== */
+        function makeScale(domain, range) {
+            const [d0, d1] = domain;
+            const [r0, r1] = range;
+            const k = (r1 - r0) / (d1 - d0 || 1);
+            return (v) => r0 + (v - d0) * k;
+        }
+
+        function svgEl(name, attrs = {}, children = []) {
+            const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+            for (const [k, v] of Object.entries(attrs)) {
+                if (v == null) continue;
+                el.setAttribute(k, String(v));
+            }
+            for (const c of children) el.appendChild(c);
+            return el;
+        }
+
+        function clearSvg(svg) {
+            while (svg.firstChild) svg.removeChild(svg.firstChild);
+        }
+
+        function drawAxes(svg, W, H, M, xScale, yScale, yMin, yMax) {
+            // axes
+            svg.appendChild(svgEl("rect", {
+                x: M.l, y: M.t, width: W - M.l - M.r, height: H - M.t - M.b,
+                fill: "#ffffff", stroke: "#e2e8f0",
+            }));
+            // y=0 line
+            const y0 = yScale(0);
+            if (y0 >= M.t && y0 <= H - M.b) {
+                svg.appendChild(svgEl("line", {
+                    x1: M.l, x2: W - M.r, y1: y0, y2: y0,
+                    stroke: "#e2e8f0", "stroke-dasharray": "3 3",
+                }));
+            }
+            // x ticks
+            for (let xv = -4; xv <= 4; xv += 1) {
+                const xp = xScale(xv);
+                svg.appendChild(svgEl("line", {
+                    x1: xp, x2: xp, y1: H - M.b, y2: H - M.b + 4,
+                    stroke: "#94a3b8",
+                }));
+                const t = svgEl("text", {
+                    x: xp, y: H - M.b + 16,
+                    "text-anchor": "middle",
+                    "font-size": 10,
+                    fill: "#64748b",
+                });
+                t.textContent = xv.toString();
+                svg.appendChild(t);
+            }
+            // y ticks (5)
+            for (let i = 0; i <= 4; i++) {
+                const yv = yMin + (i / 4) * (yMax - yMin);
+                const yp = yScale(yv);
+                svg.appendChild(svgEl("line", {
+                    x1: M.l - 4, x2: M.l, y1: yp, y2: yp,
+                    stroke: "#94a3b8",
+                }));
+                const t = svgEl("text", {
+                    x: M.l - 6, y: yp + 3,
+                    "text-anchor": "end",
+                    "font-size": 10,
+                    fill: "#64748b",
+                });
+                t.textContent = yv.toFixed(1);
+                svg.appendChild(t);
+            }
+        }
+
+        function pathFromPoints(points, xScale, yScale) {
+            if (!points.length) return "";
+            let d = `M ${xScale(points[0][0])} ${yScale(points[0][1])}`;
+            for (let i = 1; i < points.length; i++) {
+                d += ` L ${xScale(points[i][0])} ${yScale(points[i][1])}`;
+            }
+            return d;
+        }
+
+        function stepPathFromTree(tree, xScale, yScale, xMin, xMax) {
+            // produce step path covering [xMin, xMax]
+            const intervals = collectLeafIntervals(tree, xMin, xMax);
+            intervals.sort((a, b) => a.lo - b.lo);
+            let d = "";
+            for (let i = 0; i < intervals.length; i++) {
+                const { lo, hi, value } = intervals[i];
+                const x0 = xScale(lo), x1 = xScale(hi), y = yScale(value);
+                if (i === 0) d += `M ${x0} ${y}`;
+                else d += ` L ${x0} ${y}`;
+                d += ` L ${x1} ${y}`;
+            }
+            return d;
+        }
+
+        function stepPathFromPredFn(predFn, xScale, yScale, xMin, xMax, steps = 240) {
+            // sample finely; works for any prediction function (forest avg, boosting cumulative, etc.)
+            let d = "";
+            for (let i = 0; i <= steps; i++) {
+                const x = xMin + (i / steps) * (xMax - xMin);
+                const y = predFn(x);
+                if (i === 0) d += `M ${xScale(x)} ${yScale(y)}`;
+                else d += ` L ${xScale(x)} ${yScale(y)}`;
+            }
+            return d;
+        }
+
+        /* =====================================================================
+         * Common Y-range helper: pick y-range from data + true function.
+         * =================================================================== */
+        function computeYRange(ys, vy, extras = []) {
+            let lo = Infinity, hi = -Infinity;
+            for (const a of [ys, vy, extras]) {
+                for (const v of a) {
+                    if (v < lo) lo = v;
+                    if (v > hi) hi = v;
+                }
+            }
+            if (!isFinite(lo) || !isFinite(hi)) { lo = -3; hi = 3; }
+            const pad = 0.15 * (hi - lo + 0.5);
+            return [lo - pad, hi + pad];
+        }
+
+        /* =====================================================================
+         * SECTION 1 - Single tree baseline
+         * =================================================================== */
+        const TreeUI = (() => {
+            const dom = {
+                preset: document.getElementById("tree-preset"),
+                n: document.getElementById("tree-n"),
+                noise: document.getElementById("tree-noise"),
+                depth: document.getElementById("tree-depth"),
+                resample: document.getElementById("tree-resample"),
+                showSplits: document.getElementById("tree-show-splits"),
+                showLeaves: document.getElementById("tree-show-leaves"),
+                nVal: document.getElementById("tree-n-val"),
+                noiseVal: document.getElementById("tree-noise-val"),
+                depthVal: document.getElementById("tree-depth-val"),
+                trainMse: document.getElementById("tree-train-mse"),
+                valMse: document.getElementById("tree-val-mse"),
+                leaves: document.getElementById("tree-leaves"),
+                interp: document.getElementById("tree-interp"),
+                svg: document.getElementById("tree-plot"),
+            };
+            let seed = 11;
+
+            function update() {
+                dom.nVal.textContent = dom.n.value;
+                dom.noiseVal.textContent = parseFloat(dom.noise.value).toFixed(2);
+                dom.depthVal.textContent = dom.depth.value;
+
+                const preset = dom.preset.value;
+                const n = +dom.n.value;
+                const sigma = +dom.noise.value;
+                const depth = +dom.depth.value;
+                const data = generateData({ preset, n, sigma, seed });
+                const tree = buildTree(data.xs, data.ys, { maxDepth: depth });
+
+                const trainMse = mse((x) => treePredict(tree, x), data.xs, data.ys);
+                const valMse = mse((x) => treePredict(tree, x), data.vx, data.vy);
+                const leaves = treeLeafCount(tree);
+
+                dom.trainMse.textContent = trainMse.toFixed(3);
+                dom.valMse.textContent = valMse.toFixed(3);
+                dom.leaves.textContent = leaves;
+
+                let msg = "";
+                if (depth <= 2) {
+                    msg = "Shallow tree: lower flexibility, higher bias. Cannot capture the curve.";
+                } else if (depth >= 7) {
+                    msg = "Deep tree: lower training error, higher variance risk — sensitive to noise.";
+                } else {
+                    msg = "Moderate depth balances bias and variance for this data.";
+                }
+                if (valMse > trainMse * 2 + 0.1) {
+                    msg += " Validation MSE > train MSE → overfitting signature.";
+                }
+                dom.interp.textContent = msg;
+
+                drawPlot(data, tree);
+            }
+
+            function drawPlot(data, tree) {
+                const svg = dom.svg;
+                clearSvg(svg);
+                const W = 600, H = 360;
+                const M = { t: 16, r: 16, b: 28, l: 36 };
+                const [yMin, yMax] = computeYRange(data.ys, data.vy);
+                const xScale = makeScale([X_MIN, X_MAX], [M.l, W - M.r]);
+                const yScale = makeScale([yMin, yMax], [H - M.b, M.t]);
+                drawAxes(svg, W, H, M, xScale, yScale, yMin, yMax);
+
+                // true function
+                const truePts = [];
+                for (let i = 0; i <= 240; i++) {
+                    const x = X_MIN + (i / 240) * (X_MAX - X_MIN);
+                    truePts.push([x, data.f(x)]);
+                }
+                svg.appendChild(svgEl("path", {
+                    d: pathFromPoints(truePts, xScale, yScale),
+                    fill: "none", stroke: "var(--truth-color)", "stroke-width": 2, "stroke-dasharray": "5 4",
+                }));
+
+                // split boundaries
+                if (dom.showSplits.checked) {
+                    const ts = collectThresholds(tree);
+                    for (const t of ts) {
+                        svg.appendChild(svgEl("line", {
+                            x1: xScale(t), x2: xScale(t),
+                            y1: M.t, y2: H - M.b,
+                            stroke: "#cbd5e1", "stroke-dasharray": "2 4",
+                        }));
+                    }
+                }
+
+                // leaf-mean horizontal segments
+                if (dom.showLeaves.checked) {
+                    const intervals = collectLeafIntervals(tree, X_MIN, X_MAX);
+                    for (const lf of intervals) {
+                        svg.appendChild(svgEl("line", {
+                            x1: xScale(lf.lo), x2: xScale(lf.hi),
+                            y1: yScale(lf.value), y2: yScale(lf.value),
+                            stroke: "var(--baseline-color)", "stroke-width": 4, opacity: 0.25,
+                        }));
+                    }
+                }
+
+                // tree prediction (step)
+                svg.appendChild(svgEl("path", {
+                    d: stepPathFromTree(tree, xScale, yScale, X_MIN, X_MAX),
+                    fill: "none", stroke: "var(--baseline-color)", "stroke-width": 2.5,
+                }));
+
+                // validation points (faint)
+                for (let i = 0; i < data.vx.length; i++) {
+                    svg.appendChild(svgEl("circle", {
+                        cx: xScale(data.vx[i]), cy: yScale(data.vy[i]),
+                        r: 1.8, fill: "#94a3b8", opacity: 0.55,
+                    }));
+                }
+                // training points
+                for (let i = 0; i < data.xs.length; i++) {
+                    svg.appendChild(svgEl("circle", {
+                        cx: xScale(data.xs[i]), cy: yScale(data.ys[i]),
+                        r: 2.6, fill: "#0f172a",
+                    }));
+                }
+            }
+
+            function bind() {
+                ["preset", "n", "noise", "depth"].forEach((k) => {
+                    dom[k].addEventListener("input", update);
+                    dom[k].addEventListener("change", update);
+                });
+                dom.showSplits.addEventListener("change", update);
+                dom.showLeaves.addEventListener("change", update);
+                dom.resample.addEventListener("click", () => {
+                    seed = (seed * 1103515245 + 12345) >>> 0;
+                    update();
+                });
+            }
+
+            return { update, bind };
+        })();
+
+        /* =====================================================================
+         * SECTION 2 - Random forest builder
+         * =================================================================== */
+        const RfUI = (() => {
+            const dom = {
+                n: document.getElementById("rf-n"),
+                depth: document.getElementById("rf-depth"),
+                bootstrap: document.getElementById("rf-bootstrap"),
+                featureRand: document.getElementById("rf-feature-rand"),
+                showTrees: document.getElementById("rf-show-trees"),
+                grow: document.getElementById("rf-grow"),
+                animate: document.getElementById("rf-animate"),
+                nVal: document.getElementById("rf-n-val"),
+                depthVal: document.getElementById("rf-depth-val"),
+                count: document.getElementById("rf-count"),
+                avgLeaves: document.getElementById("rf-avg-leaves"),
+                trainMse: document.getElementById("rf-train-mse"),
+                valMse: document.getElementById("rf-val-mse"),
+                interp: document.getElementById("rf-interp"),
+                svg: document.getElementById("rf-plot"),
+                gallery: document.getElementById("rf-gallery"),
+            };
+
+            let seed = 41;
+            let data = null;
+            let trees = [];
+            let visibleTrees = 0;
+            let animTimer = null;
+
+            function buildData() {
+                data = generateData({ preset: "noisy", n: 70, sigma: 0.5, seed });
+            }
+
+            function buildTrees() {
+                const nTrees = +dom.n.value;
+                const depth = +dom.depth.value;
+                trees = buildForest({
+                    xs: data.xs,
+                    ys: data.ys,
+                    nTrees,
+                    maxDepth: depth,
+                    bootstrap: dom.bootstrap.checked,
+                    featureRandom: dom.featureRand.checked,
+                    seed: seed + 1,
+                });
+                visibleTrees = trees.length;
+            }
+
+            function update(rebuild = true) {
+                dom.nVal.textContent = dom.n.value;
+                dom.depthVal.textContent = dom.depth.value;
+                if (rebuild) buildTrees();
+
+                const usable = trees.slice(0, visibleTrees);
+                const predFn = (x) => forestPredict(usable, x);
+                const trainMse = usable.length ? mse(predFn, data.xs, data.ys) : NaN;
+                const valMse = usable.length ? mse(predFn, data.vx, data.vy) : NaN;
+                const avgLeaves = usable.length
+                    ? usable.reduce((s, t) => s + treeLeafCount(t), 0) / usable.length
+                    : 0;
+
+                dom.count.textContent = usable.length;
+                dom.avgLeaves.textContent = avgLeaves.toFixed(1);
+                dom.trainMse.textContent = isFinite(trainMse) ? trainMse.toFixed(3) : "–";
+                dom.valMse.textContent = isFinite(valMse) ? valMse.toFixed(3) : "–";
+
+                if (usable.length === 1) {
+                    dom.interp.textContent = "One tree → high variance. Watch what happens as you grow the forest.";
+                } else if (usable.length < 5) {
+                    dom.interp.textContent = "A few trees already cancel some noise, but the average is still rough.";
+                } else if (usable.length < 20) {
+                    dom.interp.textContent = "The averaged prediction starts to resemble the underlying signal.";
+                } else {
+                    dom.interp.textContent = "Many trees → smooth, stable average. Trees are still independent — no residual chaining.";
+                }
+
+                drawPlot(usable, predFn);
+                drawGallery(usable);
+            }
+
+            function drawPlot(usable, predFn) {
+                const svg = dom.svg;
+                clearSvg(svg);
+                const W = 600, H = 360;
+                const M = { t: 16, r: 16, b: 28, l: 36 };
+                const [yMin, yMax] = computeYRange(data.ys, data.vy);
+                const xScale = makeScale([X_MIN, X_MAX], [M.l, W - M.r]);
+                const yScale = makeScale([yMin, yMax], [H - M.b, M.t]);
+                drawAxes(svg, W, H, M, xScale, yScale, yMin, yMax);
+
+                // truth
+                const truePts = [];
+                for (let i = 0; i <= 240; i++) {
+                    const x = X_MIN + (i / 240) * (X_MAX - X_MIN);
+                    truePts.push([x, data.f(x)]);
+                }
+                svg.appendChild(svgEl("path", {
+                    d: pathFromPoints(truePts, xScale, yScale),
+                    fill: "none", stroke: "var(--truth-color)", "stroke-width": 2, "stroke-dasharray": "5 4",
+                }));
+
+                // individual trees (faint)
+                if (dom.showTrees.checked) {
+                    for (const t of usable) {
+                        svg.appendChild(svgEl("path", {
+                            d: stepPathFromTree(t, xScale, yScale, X_MIN, X_MAX),
+                            fill: "none", stroke: "var(--tree-color)", "stroke-width": 1, opacity: 0.32,
+                        }));
+                    }
+                }
+
+                // forest average
+                if (usable.length) {
+                    svg.appendChild(svgEl("path", {
+                        d: stepPathFromPredFn(predFn, xScale, yScale, X_MIN, X_MAX, 320),
+                        fill: "none", stroke: "var(--rf-color)", "stroke-width": 3.2,
+                    }));
+                }
+
+                // training points
+                for (let i = 0; i < data.xs.length; i++) {
+                    svg.appendChild(svgEl("circle", {
+                        cx: xScale(data.xs[i]), cy: yScale(data.ys[i]),
+                        r: 2.4, fill: "#0f172a",
+                    }));
+                }
+            }
+
+            function drawGallery(usable) {
+                dom.gallery.innerHTML = "";
+                const samples = usable.slice(0, 6);
+                samples.forEach((tree, idx) => {
+                    const card = document.createElement("div");
+                    card.className = "tree-card";
+                    const lbl = document.createElement("div");
+                    lbl.className = "lbl";
+                    lbl.innerHTML = `<span>Tree #${idx + 1}</span><span>${treeLeafCount(tree)} leaves</span>`;
+                    card.appendChild(lbl);
+
+                    const W = 180, H = 80;
+                    const M = { t: 4, r: 4, b: 4, l: 4 };
+                    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+                    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+                    svg.setAttribute("class", "plot-svg");
+                    const [yMin, yMax] = computeYRange(data.ys, []);
+                    const xScale = makeScale([X_MIN, X_MAX], [M.l, W - M.r]);
+                    const yScale = makeScale([yMin, yMax], [H - M.b, M.t]);
+                    svg.appendChild(svgEl("rect", {
+                        x: 0, y: 0, width: W, height: H, fill: "#f8fbfd",
+                    }));
+                    svg.appendChild(svgEl("path", {
+                        d: stepPathFromTree(tree, xScale, yScale, X_MIN, X_MAX),
+                        fill: "none", stroke: "var(--tree-color)", "stroke-width": 1.2,
+                    }));
+                    card.appendChild(svg);
+                    dom.gallery.appendChild(card);
+                });
+
+                if (!samples.length) {
+                    dom.gallery.innerHTML = '<p class="footer-note">No trees yet — press "Grow forest".</p>';
+                }
+            }
+
+            function bind() {
+                ["n", "depth"].forEach((k) => {
+                    dom[k].addEventListener("input", () => update(true));
+                });
+                dom.bootstrap.addEventListener("change", () => update(true));
+                dom.featureRand.addEventListener("change", () => update(true));
+                dom.showTrees.addEventListener("change", () => update(false));
+                dom.grow.addEventListener("click", () => {
+                    seed = (seed * 1664525 + 1013904223) >>> 0;
+                    buildData();
+                    update(true);
+                });
+                dom.animate.addEventListener("click", () => {
+                    if (animTimer) {
+                        clearInterval(animTimer);
+                        animTimer = null;
+                        dom.animate.textContent = "Animate additions";
+                        return;
+                    }
+                    buildTrees();
+                    visibleTrees = 1;
+                    dom.animate.textContent = "■ Stop";
+                    update(false);
+                    animTimer = setInterval(() => {
+                        visibleTrees++;
+                        if (visibleTrees > trees.length) {
+                            clearInterval(animTimer);
+                            animTimer = null;
+                            dom.animate.textContent = "Animate additions";
+                            visibleTrees = trees.length;
+                            update(false);
+                            return;
+                        }
+                        update(false);
+                    }, 220);
+                });
+            }
+
+            function init() {
+                buildData();
+                update(true);
+                bind();
+            }
+
+            return { init };
+        })();
+
+        /* =====================================================================
+         * SECTION 3 - Gradient boosting builder
+         * =================================================================== */
+        const GbUI = (() => {
+            const dom = {
+                stages: document.getElementById("gb-stages"),
+                lr: document.getElementById("gb-lr"),
+                wl: document.getElementById("gb-wl"),
+                cur: document.getElementById("gb-cur"),
+                step: document.getElementById("gb-step"),
+                play: document.getElementById("gb-play"),
+                reset: document.getElementById("gb-reset"),
+                stagesVal: document.getElementById("gb-stages-val"),
+                lrVal: document.getElementById("gb-lr-val"),
+                wlVal: document.getElementById("gb-wl-val"),
+                curVal: document.getElementById("gb-cur-val"),
+                stageNow: document.getElementById("gb-stage-now"),
+                trees: document.getElementById("gb-trees"),
+                trainMse: document.getElementById("gb-train-mse"),
+                valMse: document.getElementById("gb-val-mse"),
+                interp: document.getElementById("gb-interp"),
+                svg: document.getElementById("gb-plot"),
+                resSvg: document.getElementById("gb-residual-plot"),
+                stack: document.getElementById("gb-stack"),
+            };
+
+            let seed = 91;
+            let data = null;
+            let model = null;
+            let lrUsed = 0.3;
+            let playTimer = null;
+            let curStage = 0;
+
+            function buildData() {
+                data = generateData({ preset: "noisy", n: 70, sigma: 0.5, seed });
+            }
+
+            function buildModel() {
+                const stages = +dom.stages.value;
+                const lr = +dom.lr.value;
+                const depth = +dom.wl.value;
+                lrUsed = lr;
+                model = buildBoosting({ xs: data.xs, ys: data.ys, stages, lr, depth, seed: seed + 7 });
+
+                dom.cur.max = stages;
+                if (curStage > stages) curStage = stages;
+                dom.cur.value = curStage;
+            }
+
+            function update(rebuild = true) {
+                dom.stagesVal.textContent = dom.stages.value;
+                dom.lrVal.textContent = parseFloat(dom.lr.value).toFixed(2);
+                dom.wlVal.textContent = dom.wl.value;
+                if (rebuild) buildModel();
+                dom.curVal.textContent = curStage;
+
+                const predFn = (x) => boostingPredict(model, lrUsed, x, curStage);
+                const trainMse = mse(predFn, data.xs, data.ys);
+                const valMse = mse(predFn, data.vx, data.vy);
+
+                dom.stageNow.textContent = curStage;
+                dom.trees.textContent = curStage;
+                dom.trainMse.textContent = trainMse.toFixed(3);
+                dom.valMse.textContent = valMse.toFixed(3);
+
+                const lr = +dom.lr.value;
+                let msg = "";
+                if (lr >= 0.7) {
+                    msg = "Large learning rate: aggressive corrections, fewer stages needed but jumpy.";
+                } else if (lr <= 0.1) {
+                    msg = "Small learning rate: many small corrections — slow but smooth improvement.";
+                } else {
+                    msg = "Moderate learning rate: balanced step size, classic boosting trade-off.";
+                }
+                if (curStage >= +dom.stages.value && +dom.stages.value > 15 && lr >= 0.7) {
+                    msg += " Notice how aggressive boosting can start to hug noise — early signs of overfit.";
+                }
+                dom.interp.textContent = msg;
+
+                drawPredictionPlot(predFn);
+                drawResidualPlot();
+                drawStack();
+            }
+
+            function drawPredictionPlot(predFn) {
+                const svg = dom.svg;
+                clearSvg(svg);
+                const W = 600, H = 320;
+                const M = { t: 16, r: 16, b: 28, l: 36 };
+                const [yMin, yMax] = computeYRange(data.ys, data.vy);
+                const xScale = makeScale([X_MIN, X_MAX], [M.l, W - M.r]);
+                const yScale = makeScale([yMin, yMax], [H - M.b, M.t]);
+                drawAxes(svg, W, H, M, xScale, yScale, yMin, yMax);
+
+                const truePts = [];
+                for (let i = 0; i <= 240; i++) {
+                    const x = X_MIN + (i / 240) * (X_MAX - X_MIN);
+                    truePts.push([x, data.f(x)]);
+                }
+                svg.appendChild(svgEl("path", {
+                    d: pathFromPoints(truePts, xScale, yScale),
+                    fill: "none", stroke: "var(--truth-color)", "stroke-width": 2, "stroke-dasharray": "5 4",
+                }));
+
+                svg.appendChild(svgEl("path", {
+                    d: stepPathFromPredFn(predFn, xScale, yScale, X_MIN, X_MAX, 320),
+                    fill: "none", stroke: "var(--gb-color)", "stroke-width": 3.2,
+                }));
+
+                for (let i = 0; i < data.xs.length; i++) {
+                    svg.appendChild(svgEl("circle", {
+                        cx: xScale(data.xs[i]), cy: yScale(data.ys[i]),
+                        r: 2.4, fill: "#0f172a",
+                    }));
+                }
+            }
+
+            function drawResidualPlot() {
+                const svg = dom.resSvg;
+                clearSvg(svg);
+                const W = 600, H = 220;
+                const M = { t: 14, r: 16, b: 26, l: 36 };
+
+                // residuals at curStage = y - F_curStage
+                const xs = data.xs;
+                const ys = data.ys;
+                const residuals = ys.map((y, i) =>
+                    y - boostingPredict(model, lrUsed, xs[i], curStage)
+                );
+
+                let lo = Math.min(...residuals, 0);
+                let hi = Math.max(...residuals, 0);
+                if (!isFinite(lo) || !isFinite(hi)) { lo = -1; hi = 1; }
+                const pad = 0.18 * (hi - lo + 0.2);
+                const yMin = lo - pad, yMax = hi + pad;
+
+                const xScale = makeScale([X_MIN, X_MAX], [M.l, W - M.r]);
+                const yScale = makeScale([yMin, yMax], [H - M.b, M.t]);
+                drawAxes(svg, W, H, M, xScale, yScale, yMin, yMax);
+
+                // residual points
+                for (let i = 0; i < xs.length; i++) {
+                    svg.appendChild(svgEl("circle", {
+                        cx: xScale(xs[i]), cy: yScale(residuals[i]),
+                        r: 2.4, fill: "#dc2626", opacity: 0.85,
+                    }));
+                }
+
+                // next tree (if available) — model.stages[curStage]
+                if (curStage < model.stages.length) {
+                    const next = model.stages[curStage].tree;
+                    svg.appendChild(svgEl("path", {
+                        d: stepPathFromTree(next, xScale, yScale, X_MIN, X_MAX),
+                        fill: "none", stroke: "#9a3412", "stroke-width": 2.5,
+                    }));
+                }
+            }
+
+            function drawStack() {
+                dom.stack.innerHTML = "";
+                const total = model.stages.length;
+                const baseline = model.baseline;
+                const baseRow = document.createElement("div");
+                baseRow.className = "stage-item" + (curStage === 0 ? " active" : "");
+                baseRow.innerHTML = `<span>F₀(x) = mean target</span><span>${baseline.toFixed(3)}</span>`;
+                dom.stack.appendChild(baseRow);
+
+                for (let i = 0; i < total; i++) {
+                    const row = document.createElement("div");
+                    const isActive = curStage === i + 1;
+                    const beyond = i >= curStage;
+                    row.className = "stage-item" + (isActive ? " active" : "");
+                    if (beyond) row.style.opacity = "0.45";
+                    row.innerHTML = `<span>+ ${lrUsed.toFixed(2)} · tree<sub>${i + 1}</sub>(x)</span>`
+                        + `<span>depth ${treeDepth(model.stages[i].tree)}</span>`;
+                    dom.stack.appendChild(row);
+                }
+            }
+
+            function bind() {
+                ["stages", "lr", "wl"].forEach((k) => {
+                    dom[k].addEventListener("input", () => {
+                        if (k === "stages" && curStage > +dom.stages.value) curStage = +dom.stages.value;
+                        update(true);
+                    });
+                });
+                dom.cur.addEventListener("input", () => {
+                    curStage = +dom.cur.value;
+                    update(false);
+                });
+                dom.step.addEventListener("click", () => {
+                    if (curStage < model.stages.length) {
+                        curStage++;
+                        dom.cur.value = curStage;
+                        update(false);
+                    }
+                });
+                dom.play.addEventListener("click", () => {
+                    if (playTimer) {
+                        clearInterval(playTimer);
+                        playTimer = null;
+                        dom.play.textContent = "▶ Play";
+                        return;
+                    }
+                    if (curStage >= model.stages.length) curStage = 0;
+                    dom.cur.value = curStage;
+                    update(false);
+                    dom.play.textContent = "■ Stop";
+                    playTimer = setInterval(() => {
+                        if (curStage >= model.stages.length) {
+                            clearInterval(playTimer);
+                            playTimer = null;
+                            dom.play.textContent = "▶ Play";
+                            return;
+                        }
+                        curStage++;
+                        dom.cur.value = curStage;
+                        update(false);
+                    }, 320);
+                });
+                dom.reset.addEventListener("click", () => {
+                    curStage = 0;
+                    dom.cur.value = 0;
+                    update(false);
+                });
+            }
+
+            function init() {
+                buildData();
+                update(true);
+                bind();
+            }
+
+            return { init };
+        })();
+
+        /* =====================================================================
+         * SECTION 4 - Side-by-side comparison
+         * =================================================================== */
+        const CmpUI = (() => {
+            const dom = {
+                preset: document.getElementById("cmp-preset"),
+                n: document.getElementById("cmp-n"),
+                noise: document.getElementById("cmp-noise"),
+                out: document.getElementById("cmp-out"),
+                rfn: document.getElementById("cmp-rfn"),
+                rfd: document.getElementById("cmp-rfd"),
+                gbs: document.getElementById("cmp-gbs"),
+                gblr: document.getElementById("cmp-gblr"),
+                gbd: document.getElementById("cmp-gbd"),
+                resample: document.getElementById("cmp-resample"),
+                nVal: document.getElementById("cmp-n-val"),
+                noiseVal: document.getElementById("cmp-noise-val"),
+                outVal: document.getElementById("cmp-out-val"),
+                rfnVal: document.getElementById("cmp-rfn-val"),
+                rfdVal: document.getElementById("cmp-rfd-val"),
+                gbsVal: document.getElementById("cmp-gbs-val"),
+                gblrVal: document.getElementById("cmp-gblr-val"),
+                gbdVal: document.getElementById("cmp-gbd-val"),
+                rfTrain: document.getElementById("cmp-rf-train"),
+                rfVal: document.getElementById("cmp-rf-val"),
+                rfSize: document.getElementById("cmp-rf-size"),
+                rfDepthMet: document.getElementById("cmp-rf-depth"),
+                gbTrain: document.getElementById("cmp-gb-train"),
+                gbVal: document.getElementById("cmp-gb-val"),
+                gbSize: document.getElementById("cmp-gb-size"),
+                gbDepthMet: document.getElementById("cmp-gb-depth"),
+                rfInterp: document.getElementById("cmp-rf-interp"),
+                gbInterp: document.getElementById("cmp-gb-interp"),
+                svg: document.getElementById("cmp-plot"),
+            };
+
+            let seed = 23;
+
+            function update() {
+                dom.nVal.textContent = dom.n.value;
+                dom.noiseVal.textContent = parseFloat(dom.noise.value).toFixed(2);
+                dom.outVal.textContent = dom.out.value;
+                dom.rfnVal.textContent = dom.rfn.value;
+                dom.rfdVal.textContent = dom.rfd.value;
+                dom.gbsVal.textContent = dom.gbs.value;
+                dom.gblrVal.textContent = parseFloat(dom.gblr.value).toFixed(2);
+                dom.gbdVal.textContent = dom.gbd.value;
+
+                const data = generateData({
+                    preset: dom.preset.value,
+                    n: +dom.n.value,
+                    sigma: +dom.noise.value,
+                    outliers: +dom.out.value,
+                    seed,
+                });
+
+                const baseTree = buildTree(data.xs, data.ys, { maxDepth: +dom.rfd.value });
+
+                const rfTrees = buildForest({
+                    xs: data.xs, ys: data.ys,
+                    nTrees: +dom.rfn.value,
+                    maxDepth: +dom.rfd.value,
+                    bootstrap: true,
+                    featureRandom: true,
+                    seed: seed + 11,
+                });
+
+                const lr = +dom.gblr.value;
+                const gbModel = buildBoosting({
+                    xs: data.xs, ys: data.ys,
+                    stages: +dom.gbs.value,
+                    lr,
+                    depth: +dom.gbd.value,
+                    seed: seed + 23,
+                });
+
+                const treeFn = (x) => treePredict(baseTree, x);
+                const rfFn = (x) => forestPredict(rfTrees, x);
+                const gbFn = (x) => boostingPredict(gbModel, lr, x);
+
+                const rfTrain = mse(rfFn, data.xs, data.ys);
+                const rfVal = mse(rfFn, data.vx, data.vy);
+                const gbTrain = mse(gbFn, data.xs, data.ys);
+                const gbVal = mse(gbFn, data.vx, data.vy);
+
+                dom.rfTrain.textContent = rfTrain.toFixed(3);
+                dom.rfVal.textContent = rfVal.toFixed(3);
+                dom.rfSize.textContent = rfTrees.length;
+                const avgD = rfTrees.length
+                    ? (rfTrees.reduce((s, t) => s + treeDepth(t), 0) / rfTrees.length).toFixed(1)
+                    : "–";
+                dom.rfDepthMet.textContent = avgD;
+
+                dom.gbTrain.textContent = gbTrain.toFixed(3);
+                dom.gbVal.textContent = gbVal.toFixed(3);
+                dom.gbSize.textContent = gbModel.stages.length;
+                dom.gbDepthMet.textContent = +dom.gbd.value;
+
+                dom.rfInterp.textContent = rfVal < gbVal
+                    ? "On this draw, RF generalizes better — averaging tames the noise."
+                    : "On this draw, RF is steady but GB pushes lower — boosting fits the trend more closely.";
+                dom.gbInterp.textContent = gbVal < rfVal
+                    ? "On this draw, GB wins on validation — sequential corrections fit the structure better."
+                    : "On this draw, GB sits behind RF — try more stages or a different learning rate.";
+
+                drawPlot(data, baseTree, rfTrees, gbModel, lr);
+            }
+
+            function drawPlot(data, baseTree, rfTrees, gbModel, lr) {
+                const svg = dom.svg;
+                clearSvg(svg);
+                const W = 600, H = 360;
+                const M = { t: 16, r: 16, b: 28, l: 36 };
+                const [yMin, yMax] = computeYRange(data.ys, data.vy);
+                const xScale = makeScale([X_MIN, X_MAX], [M.l, W - M.r]);
+                const yScale = makeScale([yMin, yMax], [H - M.b, M.t]);
+                drawAxes(svg, W, H, M, xScale, yScale, yMin, yMax);
+
+                // truth
+                const truePts = [];
+                for (let i = 0; i <= 240; i++) {
+                    const x = X_MIN + (i / 240) * (X_MAX - X_MIN);
+                    truePts.push([x, data.f(x)]);
+                }
+                svg.appendChild(svgEl("path", {
+                    d: pathFromPoints(truePts, xScale, yScale),
+                    fill: "none", stroke: "var(--truth-color)", "stroke-width": 2, "stroke-dasharray": "5 4",
+                }));
+
+                // single tree (dashed)
+                svg.appendChild(svgEl("path", {
+                    d: stepPathFromTree(baseTree, xScale, yScale, X_MIN, X_MAX),
+                    fill: "none", stroke: "var(--baseline-color)", "stroke-width": 2,
+                    "stroke-dasharray": "4 3", opacity: 0.85,
+                }));
+
+                // RF
+                svg.appendChild(svgEl("path", {
+                    d: stepPathFromPredFn((x) => forestPredict(rfTrees, x), xScale, yScale, X_MIN, X_MAX, 320),
+                    fill: "none", stroke: "var(--rf-color)", "stroke-width": 3,
+                }));
+
+                // GB
+                svg.appendChild(svgEl("path", {
+                    d: stepPathFromPredFn((x) => boostingPredict(gbModel, lr, x), xScale, yScale, X_MIN, X_MAX, 320),
+                    fill: "none", stroke: "var(--gb-color)", "stroke-width": 3,
+                }));
+
+                // training points
+                for (let i = 0; i < data.xs.length; i++) {
+                    svg.appendChild(svgEl("circle", {
+                        cx: xScale(data.xs[i]), cy: yScale(data.ys[i]),
+                        r: 2.4, fill: "#0f172a",
+                    }));
+                }
+            }
+
+            function bind() {
+                ["preset", "n", "noise", "out", "rfn", "rfd", "gbs", "gblr", "gbd"].forEach((k) => {
+                    dom[k].addEventListener("input", update);
+                    dom[k].addEventListener("change", update);
+                });
+                dom.resample.addEventListener("click", () => {
+                    seed = (seed * 22695477 + 1) >>> 0;
+                    update();
+                });
+            }
+
+            function init() {
+                update();
+                bind();
+            }
+
+            return { init };
+        })();
+
+        /* =====================================================================
+         * Boot
+         * =================================================================== */
+        function init() {
+            TreeUI.bind();
+            TreeUI.update();
+            RfUI.init();
+            GbUI.init();
+            CmpUI.init();
+        }
+
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", init);
+        } else {
+            init();
+        }
+
+        // Keep SVG plots responsive on resize.  All plots are declared via viewBox + auto height,
+        // but a redraw lets us recompute axes/labels cleanly when the layout flexes.
+        let resizeTimer = null;
+        window.addEventListener("resize", () => {
+            if (resizeTimer) clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                TreeUI.update();
+                // Random forest, gradient boosting, and comparison sections render purely
+                // from their internal state — re-call their currently-bound update via input
+                // dispatch on the active range to repaint axes.
+                document.getElementById("rf-n").dispatchEvent(new Event("input"));
+                document.getElementById("gb-cur").dispatchEvent(new Event("input"));
+                document.getElementById("cmp-n").dispatchEvent(new Event("input"));
+            }, 120);
+        });
+    </script>
+</body>
+
+</html>
