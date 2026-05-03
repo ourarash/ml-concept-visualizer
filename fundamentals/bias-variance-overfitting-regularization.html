@@ -6,6 +6,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Bias-Variance &amp; Regularization Explorer</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='0' y='13' font-size='13'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         window.MathJax = {
@@ -369,6 +370,10 @@
             transition: opacity 0.25s ease, stroke 0.25s ease;
         }
 
+        .card.section {
+            scroll-margin-top: 5rem;
+        }
+
         @media (max-width: 1024px) {
             .card.section { padding: 1.25rem; }
         }
@@ -635,9 +640,10 @@
                     <div>
                         <div class="panel-title">Strength λ</div>
                         <label class="block">
-                            <div class="control-row"><span>λ</span><span class="v" id="reg-lam-v">0.50</span></div>
-                            <input id="reg-lam" type="range" min="0" max="5" step="0.01" value="0.5" />
+                            <div class="control-row"><span>λ</span><span class="v" id="reg-lam-v">0.10</span></div>
+                            <input id="reg-lam" type="range" min="0" max="1" step="0.005" value="0.1" />
                         </label>
+                        <p class="ghost mt-1">L1 reaches sparsity at smaller λ than L2 — that asymmetry is part of the lesson.</p>
                     </div>
                     <div>
                         <div class="panel-title">Dataset</div>
@@ -1876,8 +1882,8 @@
         document.getElementById("reg-resample").addEventListener("click", () => { regSampleData(); regRenderAll(); });
         document.getElementById("reg-reset").addEventListener("click", () => {
             const el = document.getElementById("reg-lam");
-            el.value = "0.5";
-            document.getElementById("reg-lam-v").textContent = "0.50";
+            el.value = "0.1";
+            document.getElementById("reg-lam-v").textContent = "0.10";
             regRenderAll();
         });
         document.getElementById("reg-compare").addEventListener("change", (e) => {
