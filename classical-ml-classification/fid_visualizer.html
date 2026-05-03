@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FID Explorer: Generative AI Evaluation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['$$', '$$'], ['\\[', '\\]']]
+            },
+            svg: { fontCache: 'global' }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <style>
+        .latent-point { 
+            transition: all 0.6s cubic-bezier(0.34, 1.56, 0.64, 1); 
+            will-change: transform;
+        }
+        .stats-card { 
+            background: rgba(15, 23, 42, 0.6); 
+            backdrop-filter: blur(12px); 
+        }
+        @keyframes pulse-ring { 
+            0% { transform: scale(0.95); opacity: 0.5; } 
+            50% { transform: scale(1.05); opacity: 0.2; } 
+            100% { transform: scale(0.95); opacity: 0.5; } 
+        }
+        .distribution-area { 
+            animation: pulse-ring 6s infinite ease-in-out; 
+            transform-origin: center;
+        }
+        /* Custom Scrollbar for sleekness */
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-200 p-4 md:p-8 font-sans overflow-x-hidden min-h-screen flex flex-col">
+    
+    <div class="max-w-7xl mx-auto w-full flex-grow flex flex-col">
+        
+        <header class="flex flex-col md:flex-row justify-between items-start md:items-end mb-8 border-b border-slate-800 pb-6 gap-4">
+            <div>
+                <h1 class="text-4xl md:text-5xl font-black tracking-tight text-slate-100">
+                    FID <span class="text-slate-600 font-light">EXPLORER</span>
+                </h1>
+                <p class="text-slate-400 mt-2 text-sm md:text-base max-w-2xl">
+                    Visualizing the <b>Fréchet Inception Distance</b>. We evaluate Generative AI not by comparing pixels, but by extracting features using an Inception Network and comparing their statistical distributions in a latent space.
+                </p>
+            </div>
+            <div class="text-left md:text-right bg-slate-900 border border-slate-800 p-4 rounded-xl shadow-lg min-w-[200px]">
+                <div class="text-xs uppercase tracking-widest text-slate-500 mb-1">Total FID Score</div>
+                <div id="fid-score" class="text-5xl font-mono font-black text-orange-500 transition-colors duration-300">0.00</div>
+                <div id="fid-status" class="text-xs mt-1 text-slate-400 font-bold uppercase">Evaluating...</div>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-grow">
+            
+            <div class="lg:col-span-3 flex flex-col gap-6">
+                
+                <div class="stats-card p-5 rounded-2xl border border-slate-800 shadow-xl">
+                    <h3 class="text-xs font-bold text-slate-300 uppercase tracking-widest mb-4 flex items-center gap-2">
+                        <svg class="w-4 h-4 text-orange-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 6V4m0 2a2 2 0 100 4m0-4a2 2 0 110 4m-6 8a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4m6 6v10m6-2a2 2 0 100-4m0 4a2 2 0 110-4m0 4v2m0-6V4"></path></svg>
+                        AI Model Tuning
+                    </h3>
+                    
+                    <div class="space-y-5">
+                        <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-800/50">
+                            <h4 class="text-[10px] text-slate-500 uppercase mb-3">Feature Averages ($\mu_g$)</h4>
+                            <div class="space-y-4">
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1 text-slate-400"><span>Shift X</span> <span id="val-mu-x" class="font-mono text-orange-400">0</span></div>
+                                    <input type="range" id="mu-x" min="10" max="90" value="70" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500">
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1 text-slate-400"><span>Shift Y</span> <span id="val-mu-y" class="font-mono text-orange-400">0</span></div>
+                                    <input type="range" id="mu-y" min="10" max="90" value="70" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="p-3 bg-slate-900/50 rounded-lg border border-slate-800/50">
+                            <h4 class="text-[10px] text-slate-500 uppercase mb-3">Feature Variance ($\Sigma_g$)</h4>
+                            <div class="space-y-4">
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1 text-slate-400"><span>Diversity X</span> <span id="val-sig-x" class="font-mono text-orange-400">0</span></div>
+                                    <input type="range" id="sig-x" min="2" max="30" value="8" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500">
+                                </div>
+                                <div>
+                                    <div class="flex justify-between text-xs mb-1 text-slate-400"><span>Diversity Y</span> <span id="val-sig-y" class="font-mono text-orange-400">0</span></div>
+                                    <input type="range" id="sig-y" min="2" max="30" value="15" class="w-full h-1 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-orange-500">
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="stats-card p-5 rounded-2xl border border-slate-800 shadow-xl">
+                    <h3 class="text-xs font-bold text-slate-300 uppercase tracking-widest mb-3">Training Scenarios</h3>
+                    <div class="grid grid-cols-1 gap-2">
+                        <button onclick="applyPreset(30, 50, 15, 15)" class="text-left text-xs p-3 rounded bg-slate-800 hover:bg-slate-700 transition border border-slate-700">
+                            <span class="block text-green-400 font-bold mb-1">Perfect Convergence</span>
+                            Matches Real Data perfectly. Low FID.
+                        </button>
+                        <button onclick="applyPreset(30, 50, 2, 2)" class="text-left text-xs p-3 rounded bg-slate-800 hover:bg-slate-700 transition border border-slate-700">
+                            <span class="block text-red-400 font-bold mb-1">Mode Collapse</span>
+                            Accurate features, but zero diversity.
+                        </button>
+                        <button onclick="applyPreset(80, 20, 25, 25)" class="text-left text-xs p-3 rounded bg-slate-800 hover:bg-slate-700 transition border border-slate-700">
+                            <span class="block text-yellow-400 font-bold mb-1">Noisy / Hallucination</span>
+                            Wrong features, massive variance.
+                        </button>
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="lg:col-span-6 flex flex-col">
+                <div class="relative bg-[#050B14] rounded-2xl border-2 border-slate-800 shadow-2xl overflow-hidden flex-grow min-h-[400px]">
+                    
+                    <div class="absolute inset-0" style="background-image: linear-gradient(#1e293b 1px, transparent 1px), linear-gradient(90deg, #1e293b 1px, transparent 1px); background-size: 40px 40px; opacity: 0.3;"></div>
+
+                    <svg id="viz-svg" class="absolute inset-0 w-full h-full pointer-events-none z-10">
+                        <defs>
+                            <radialGradient id="realGrad"><stop offset="0%" stop-color="#0d9488" stop-opacity="0.25"/><stop offset="100%" stop-color="#0d9488" stop-opacity="0"/></radialGradient>
+                            <radialGradient id="genGrad"><stop offset="0%" stop-color="#f97316" stop-opacity="0.25"/><stop offset="100%" stop-color="#f97316" stop-opacity="0"/></radialGradient>
+                        </defs>
+                        
+                        <ellipse id="real-dist" class="distribution-area" fill="url(#realGrad)" stroke="#0d9488" stroke-width="1" stroke-dasharray="4" />
+                        <ellipse id="gen-dist" class="distribution-area" fill="url(#genGrad)" stroke="#f97316" stroke-width="1" stroke-dasharray="4" />
+                        
+                        <line id="distance-line" x1="0" y1="0" x2="0" y2="0" stroke="#94a3b8" stroke-width="2" stroke-dasharray="6" />
+                        <circle id="real-center" cx="0" cy="0" r="4" fill="#2dd4bf" />
+                        <circle id="gen-center" cx="0" cy="0" r="4" fill="#fdba74" />
+                    </svg>
+
+                    <div id="points-container" class="absolute inset-0 z-20"></div>
+
+                    <div class="absolute top-4 left-4 flex flex-col gap-2 z-30 bg-slate-950/80 p-3 rounded-lg border border-slate-800 backdrop-blur">
+                        <div class="flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-full bg-teal-500 shadow-[0_0_8px_#14b8a6]"></div>
+                            <span class="text-[10px] font-bold uppercase text-slate-300 tracking-widest">Real Images (Baseline)</span>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <div class="w-3 h-3 rounded-full bg-orange-500 shadow-[0_0_8px_#f97316]"></div>
+                            <span class="text-[10px] font-bold uppercase text-slate-300 tracking-widest">AI Generated (Current)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="lg:col-span-3 flex flex-col gap-6">
+                
+                <div class="stats-card p-5 rounded-2xl border border-slate-800 shadow-xl">
+                    <h3 class="text-xs font-bold text-slate-300 uppercase tracking-widest mb-4">The FID Formula</h3>
+                    
+                    <div class="bg-slate-900 p-4 rounded-xl border border-slate-700 text-sm overflow-x-auto text-center mb-6 shadow-inner">
+                        $$ d^2 = ||\mu_r - \mu_g||^2 + Tr(\Sigma_r + \Sigma_g - 2\sqrt{\Sigma_r\Sigma_g}) $$
+                    </div>
+
+                    <div class="space-y-6">
+                        <div>
+                            <div class="flex justify-between items-end mb-1">
+                                <span class="text-xs font-bold text-slate-300 flex items-center gap-1">
+                                    <span class="w-2 h-2 rounded-full bg-blue-500"></span> Mean Penalty
+                                </span>
+                                <span id="score-mu" class="text-sm font-mono text-blue-400">0.0</span>
+                            </div>
+                            <p class="text-[10px] text-slate-500 mb-2 leading-tight">Euclidean distance between centers $||\mu_r - \mu_g||^2$. Penalizes AI for generating the wrong *kind* of features.</p>
+                            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                                <div id="bar-mu" class="h-full bg-blue-500 transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between items-end mb-1">
+                                <span class="text-xs font-bold text-slate-300 flex items-center gap-1">
+                                    <span class="w-2 h-2 rounded-full bg-purple-500"></span> Covariance Penalty
+                                </span>
+                                <span id="score-sig" class="text-sm font-mono text-purple-400">0.0</span>
+                            </div>
+                            <p class="text-[10px] text-slate-500 mb-2 leading-tight">Difference in distribution shapes (Trace term). Penalizes AI for lacking diversity or having the wrong variation.</p>
+                            <div class="h-1.5 w-full bg-slate-800 rounded-full overflow-hidden">
+                                <div id="bar-sig" class="h-full bg-purple-500 transition-all duration-300" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="p-5 rounded-2xl bg-teal-900/20 border border-teal-500/20">
+                    <h4 class="text-xs font-bold text-teal-400 mb-2">Why is it called "Inception"?</h4>
+                    <p class="text-xs text-slate-400 leading-relaxed">
+                        We don't calculate this on raw pixels. We pass images through a pre-trained image classifier called <b>InceptionV3</b>. We chop off the final classification layer and look at the 2,048-dimensional feature vector it produces. This visualizer is a 2D simplification of that 2,048D space.
+                    </p>
+                </div>
+
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const container = document.getElementById('points-container');
+        const numPoints = 80; // High count for elaborate visual
+        
+        // Target Variables (Constant Real Data)
+        // Values represent percentage of container width/height (0-100)
+        const REAL_MU_X = 30;
+        const REAL_MU_Y = 50;
+        const REAL_SIG_X = 15;
+        const REAL_SIG_Y = 15;
+
+        // Data Arrays
+        let realPoints = [];
+        let genPoints = [];
+
+        // Box-Muller Transform to generate Normally Distributed random numbers
+        function randomGaussian() {
+            let u = 0, v = 0;
+            while(u === 0) u = Math.random();
+            while(v === 0) v = Math.random();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        function init() {
+            // Generate Real Points (Teal)
+            for(let i=0; i<numPoints; i++) {
+                const p = document.createElement('div');
+                p.className = 'latent-point absolute w-1.5 h-1.5 rounded-full bg-teal-400 opacity-80';
+                container.appendChild(p);
+                
+                // Store the base Gaussian multiplier
+                realPoints.push({
+                    el: p,
+                    gx: randomGaussian(),
+                    gy: randomGaussian()
+                });
+            }
+
+            // Generate AI Points (Orange)
+            for(let i=0; i<numPoints; i++) {
+                const p = document.createElement('div');
+                p.className = 'latent-point absolute w-1.5 h-1.5 rounded-full bg-orange-500 opacity-90 shadow-[0_0_5px_#f97316]';
+                container.appendChild(p);
+                
+                genPoints.push({
+                    el: p,
+                    gx: randomGaussian(),
+                    gy: randomGaussian()
+                });
+            }
+            
+            updateVisuals();
+        }
+
+        // Programmatic Preset Controller
+        function applyPreset(mx, my, sx, sy) {
+            document.getElementById('mu-x').value = mx;
+            document.getElementById('mu-y').value = my;
+            document.getElementById('sig-x').value = sx;
+            document.getElementById('sig-y').value = sy;
+            updateVisuals();
+        }
+
+        function updateVisuals() {
+            const width = container.clientWidth;
+            const height = container.clientHeight;
+
+            // Read values from sliders
+            const genMuX = parseFloat(document.getElementById('mu-x').value);
+            const genMuY = parseFloat(document.getElementById('mu-y').value);
+            const genSigX = parseFloat(document.getElementById('sig-x').value);
+            const genSigY = parseFloat(document.getElementById('sig-y').value);
+
+            // Update UI Labels
+            document.getElementById('val-mu-x').innerText = genMuX;
+            document.getElementById('val-mu-y').innerText = genMuY;
+            document.getElementById('val-sig-x').innerText = genSigX;
+            document.getElementById('val-sig-y').innerText = genSigY;
+
+            // 1. Move DOM Points
+            realPoints.forEach(p => {
+                const px = (REAL_MU_X + (p.gx * REAL_SIG_X)) / 100 * width;
+                const py = (REAL_MU_Y + (p.gy * REAL_SIG_Y)) / 100 * height;
+                p.el.style.transform = `translate(${px}px, ${py}px)`;
+            });
+
+            genPoints.forEach(p => {
+                const px = (genMuX + (p.gx * genSigX)) / 100 * width;
+                const py = (genMuY + (p.gy * genSigY)) / 100 * height;
+                p.el.style.transform = `translate(${px}px, ${py}px)`;
+            });
+
+            // 2. Update SVG Ellipses & Vector Line
+            const rCx = (REAL_MU_X/100) * width;
+            const rCy = (REAL_MU_Y/100) * height;
+            const gCx = (genMuX/100) * width;
+            const gCy = (genMuY/100) * height;
+
+            // SVG scales distribution radii visually (2.5 std devs captures ~99%)
+            document.getElementById('real-dist').setAttribute('cx', rCx);
+            document.getElementById('real-dist').setAttribute('cy', rCy);
+            document.getElementById('real-dist').setAttribute('rx', (REAL_SIG_X/100) * width * 2.5);
+            document.getElementById('real-dist').setAttribute('ry', (REAL_SIG_Y/100) * height * 2.5);
+            document.getElementById('real-center').setAttribute('cx', rCx);
+            document.getElementById('real-center').setAttribute('cy', rCy);
+
+            document.getElementById('gen-dist').setAttribute('cx', gCx);
+            document.getElementById('gen-dist').setAttribute('cy', gCy);
+            document.getElementById('gen-dist').setAttribute('rx', (genSigX/100) * width * 2.5);
+            document.getElementById('gen-dist').setAttribute('ry', (genSigY/100) * height * 2.5);
+            document.getElementById('gen-center').setAttribute('cx', gCx);
+            document.getElementById('gen-center').setAttribute('cy', gCy);
+
+            document.getElementById('distance-line').setAttribute('x1', rCx);
+            document.getElementById('distance-line').setAttribute('y1', rCy);
+            document.getElementById('distance-line').setAttribute('x2', gCx);
+            document.getElementById('distance-line').setAttribute('y2', gCy);
+
+            // 3. Calculate Math (Simplified 2D FID)
+            // Term 1: Squared Distance between means
+            const meanDistSq = Math.pow(REAL_MU_X - genMuX, 2) + Math.pow(REAL_MU_Y - genMuY, 2);
+            
+            // Term 2: Trace penalty (Assuming axis-aligned, uncorrelated matrices for visualizer math)
+            // Tr(Sigma_r + Sigma_g - 2 * sqrt(Sigma_r * Sigma_g))
+            const traceX = Math.pow(REAL_SIG_X - genSigX, 2);
+            const traceY = Math.pow(REAL_SIG_Y - genSigY, 2);
+            const covPenalty = traceX + traceY;
+
+            // Total Score
+            const rawFid = meanDistSq + covPenalty;
+            const scaledFid = rawFid / 10; // Scaled for UI readability
+
+            // 4. Update UI Dashboard
+            const scoreEl = document.getElementById('fid-score');
+            const statusEl = document.getElementById('fid-status');
+            
+            scoreEl.innerText = scaledFid.toFixed(1);
+
+            // Coloring based on score
+            if(scaledFid < 20) {
+                scoreEl.className = "text-5xl font-mono font-black text-teal-400";
+                statusEl.innerText = "Excellent Quality";
+            } else if (scaledFid < 100) {
+                scoreEl.className = "text-5xl font-mono font-black text-yellow-400";
+                statusEl.innerText = "Acceptable Variance";
+            } else {
+                scoreEl.className = "text-5xl font-mono font-black text-red-500";
+                statusEl.innerText = "Poor Distribution";
+            }
+
+            // Update Progress Bars
+            document.getElementById('score-mu').innerText = (meanDistSq/10).toFixed(1);
+            document.getElementById('score-sig').innerText = (covPenalty/10).toFixed(1);
+            
+            document.getElementById('bar-mu').style.width = Math.min((meanDistSq / 3000) * 100, 100) + '%';
+            document.getElementById('bar-sig').style.width = Math.min((covPenalty / 1000) * 100, 100) + '%';
+        }
+
+        // Event Listeners
+        window.addEventListener('resize', updateVisuals);
+        document.querySelectorAll('input[type=range]').forEach(i => {
+            i.addEventListener('input', updateVisuals);
+        });
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
