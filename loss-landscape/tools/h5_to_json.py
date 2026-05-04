@@ -79,6 +79,11 @@ def h5_to_dict(
         ycoords: np.ndarray = f["ycoordinates"][:]
         z_raw: np.ndarray = f[loss_key][:]
 
+    if xcoords.size == 0 or ycoords.size == 0:
+        raise ValueError("xcoordinates or ycoordinates is empty in the HDF5 file")
+    if z_raw.ndim != 2:
+        raise ValueError(f"Expected 2-D dataset at '{loss_key}', got shape {z_raw.shape}")
+
     # The h5 stores z[i][j] where i indexes xcoordinates, j indexes
     # ycoordinates.  Our visualizer expects z[row][col] where rows map
     # to the Plotly y-axis and cols to the x-axis — so we transpose.

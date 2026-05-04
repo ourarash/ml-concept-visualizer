@@ -715,10 +715,10 @@ function zLogTransform(z) {
 
 /* 3D surface trace */
 function surfTrace3D(z) {
-  const n = z.length;
+  var rows = z.length, cols = z[0].length;
   return {
     type: 'surface', z: zLogTransform(z),
-    x: linspace(-1,1,n), y: linspace(-1,1,n),
+    x: linspace(-1,1,cols), y: linspace(-1,1,rows),
     colorscale: 'Viridis', showscale: false, opacity: 0.92,
     contours: { z: { show: true, usecolormap: true, project: { z: false } } },
     hoverinfo: 'z',
@@ -756,10 +756,10 @@ function lay3D(cam) {
 
 /* 2D contour trace */
 function contTrace2D(z) {
-  const n = z.length;
+  var rows = z.length, cols = z[0].length;
   return {
     type: 'contour', z: zLogTransform(z),
-    x: linspace(-1,1,n), y: linspace(-1,1,n),
+    x: linspace(-1,1,cols), y: linspace(-1,1,rows),
     colorscale: 'Viridis', showscale: false,
     contours: { coloring: 'heatmap' },
     line: { smoothing: 0.85, width: 0.5, color: 'rgba(255,255,255,0.15)' },
@@ -796,7 +796,7 @@ function lay2D() {
 
 /* Build full plots (newPlot) */
 function buildPlot3D(cam) {
-  Plotly.newPlot('plot',
+  return Plotly.newPlot('plot',
     [ surfTrace3D(S.surface.z), emptyBalls3D() ],
     lay3D(cam),
     { responsive: true, displaylogo: false,
@@ -805,7 +805,7 @@ function buildPlot3D(cam) {
 }
 
 function buildPlot2D() {
-  Plotly.newPlot('plot',
+  return Plotly.newPlot('plot',
     [ contTrace2D(S.surface.z), emptyBalls2D() ],
     lay2D(),
     { responsive: true, displaylogo: false }
@@ -999,11 +999,11 @@ async function swapSurface() {
    Must use Plotly.newPlot — 3D (scene) and 2D (xaxis/yaxis) are
    fundamentally different layout types and cannot be Plotly.react'd.
    ═══════════════════════════════════════════════════════════════════ */
-function switchView(view) {
+async function switchView(view) {
   var wasRunning = S.running;
   stop();
   S.view = view;
-  if (view === '3d') buildPlot3D(); else buildPlot2D();
+  if (view === '3d') await buildPlot3D(); else await buildPlot2D();
   renderOnce();
   if (wasRunning) start();
 }
@@ -1137,6 +1137,8 @@ async function init() {
   } catch (e) {
     console.error('Init failed:', e);
     document.getElementById('model-label').textContent = 'Error loading surface data';
+    showLoading(false);
+    return;  /* Don't wire controls if surface failed to load */
   }
   showLoading(false);
   wireControls();
