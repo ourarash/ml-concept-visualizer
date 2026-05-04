@@ -15,6 +15,12 @@ An interactive 3D visualization of the core finding from Li et al., *"Visualizin
 
 The live counter provides a *quantitative* version of the paper's qualitative finding — exact convergence fractions, not just pictures.
 
+## Demo Video
+
+[![Watch the demo](https://img.youtube.com/vi/7Awu2rn7oeE/maxresdefault.jpg)](https://youtu.be/7Awu2rn7oeE)
+
+[Watch on YouTube](https://youtu.be/7Awu2rn7oeE)
+
 ## How to Run
 
 Open `loss-landscape-skip-connections.html` in any modern browser. No server required — all data is embedded.
