@@ -1,0 +1,272 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GEMM Memory Tiling Animation</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #eeeeee;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+        h2 { color: #61dafb; margin-bottom: 5px; }
+        .controls { margin-bottom: 20px; }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 0 10px;
+            cursor: pointer;
+            background-color: #007acc;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        button:hover { background-color: #005f9e; }
+        button:disabled { background-color: #555; cursor: not-allowed; }
+        
+        .status-box {
+            width: 80%;
+            background-color: #2d2d2d;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 18px;
+            text-align: center;
+            min-height: 60px;
+            border-left: 5px solid #61dafb;
+            line-height: 1.4;
+        }
+
+        .container {
+            display: flex;
+            gap: 40px;
+            justify-content: center;
+            margin-bottom: 30px;
+        }
+
+        .matrix-wrapper {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .matrix {
+            display: grid;
+            grid-template-columns: repeat(8, 25px);
+            grid-template-rows: repeat(8, 25px);
+            gap: 2px;
+            background-color: #333;
+            padding: 5px;
+            border-radius: 5px;
+        }
+
+        .cell {
+            width: 25px;
+            height: 25px;
+            background-color: #444;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 10px;
+            color: #aaa;
+            transition: background-color 0.2s;
+        }
+
+        /* Animation State Colors */
+        .fetch-dram { background-color: #e74c3c !important; color: white; } /* Red: DRAM Fetch (Useful) */
+        .waste-dram { background-color: #8e44ad !important; color: white; } /* Purple: Fetched but wasted */
+        .in-sram { background-color: #2ecc71 !important; color: black; }    /* Green: Cached in SRAM */
+        .compute { background-color: #f1c40f !important; color: black; font-weight: bold; } /* Yellow: Active MAC */
+        .done { background-color: #3498db !important; color: white; }       /* Blue: Completed */
+
+        .legend {
+            display: flex;
+            gap: 20px;
+            margin-top: 10px;
+            font-size: 14px;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .color-box { width: 15px; height: 15px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+
+    <h2>Matrix Multiplication: 8x8 (Cache Line = 4)</h2>
+    <p>C = A × B | Optimizing for Data Locality</p>
+
+    <div class="controls">
+        <button id="btn-naive" onclick="runNaive()">Play: Naive (No Tiling)</button>
+        <button id="btn-tiled" onclick="runTiled()">Play: Tiled (4x4 Blocks)</button>
+    </div>
+
+    <div class="status-box" id="status-text">
+        Click a button to start the animation.<br>
+        <strong>Key Concept:</strong> Every DRAM access fetches a full Cache Line (4 contiguous elements).
+    </div>
+
+    <div class="container">
+        <div class="matrix-wrapper">
+            <h3>Matrix A (DRAM)</h3>
+            <div class="matrix" id="matrix-a"></div>
+        </div>
+        <div class="matrix-wrapper">
+            <h3>Matrix B (DRAM)</h3>
+            <div class="matrix" id="matrix-b"></div>
+        </div>
+        <div class="matrix-wrapper">
+            <h3>Matrix C (Output)</h3>
+            <div class="matrix" id="matrix-c"></div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-item"><div class="color-box" style="background-color: #e74c3c;"></div> DRAM Fetch (Used)</div>
+        <div class="legend-item"><div class="color-box" style="background-color: #8e44ad;"></div> DRAM Waste (Fetched but unused)</div>
+        <div class="legend-item"><div class="color-box" style="background-color: #2ecc71;"></div> Loaded in SRAM (Reusable)</div>
+        <div class="legend-item"><div class="color-box" style="background-color: #f1c40f;"></div> MAC Operation</div>
+    </div>
+
+    <script>
+        function createMatrix(id) {
+            const container = document.getElementById(id);
+            container.innerHTML = '';
+            for (let i = 0; i < 8; i++) {
+                for (let j = 0; j < 8; j++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'cell';
+                    cell.id = `${id}-${i}-${j}`;
+                    container.appendChild(cell);
+                }
+            }
+        }
+
+        function resetMatrices() {
+            createMatrix('matrix-a');
+            createMatrix('matrix-b');
+            createMatrix('matrix-c');
+        }
+
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        let isAnimating = false;
+
+        function setStatus(text) {
+            document.getElementById('status-text').innerHTML = text;
+        }
+
+        function getCell(matrix, r, c) {
+            return document.getElementById(`matrix-${matrix}-${r}-${c}`);
+        }
+
+        // ==========================================
+        // Animation 1: Naive Implementation
+        // ==========================================
+        async function runNaive() {
+            if (isAnimating) return;
+            isAnimating = true;
+            document.getElementById('btn-naive').disabled = true;
+            document.getElementById('btn-tiled').disabled = true;
+            resetMatrices();
+
+            setStatus("<strong>[Naive Mode]</strong><br>Calculating C[0][0]. Requires Row 0 of A and Col 0 of B.");
+            await sleep(2000);
+
+            setStatus("Fetching Cache Line from DRAM: A[0][0..3]<br>(Efficient for Row A, elements are contiguous).");
+            for(let i=0; i<4; i++) getCell('a', 0, i).classList.add('fetch-dram');
+            await sleep(1500);
+
+            setStatus("Fetching B[0][0]. <strong>Problem:</strong> Hardware must fetch a full line (B[0][0..3]).<br>Elements B[0][1..3] are loaded but NOT used yet!");
+            getCell('b', 0, 0).classList.add('fetch-dram');
+            for(let i=1; i<4; i++) getCell('b', 0, i).classList.add('waste-dram');
+            await sleep(2500);
+
+            setStatus("Executing first Multiply-Accumulate (MAC)...");
+            getCell('a', 0, 0).classList.replace('fetch-dram', 'compute');
+            getCell('b', 0, 0).classList.replace('fetch-dram', 'compute');
+            getCell('c', 0, 0).classList.add('compute');
+            await sleep(1500);
+
+            setStatus("Cache Flush... Preparing to fetch B[1][0].<br>Because B is accessed by column, we keep wasting bandwidth. This is <strong>Memory-Bound</strong>.");
+            resetMatrices();
+            getCell('c', 0, 0).classList.add('compute'); 
+            await sleep(2000);
+            
+            setStatus("In Naive mode, this bandwidth waste repeats for every element of C, leading to low hardware utilization.");
+            
+            isAnimating = false;
+            document.getElementById('btn-naive').disabled = false;
+            document.getElementById('btn-tiled').disabled = false;
+        }
+
+        // ==========================================
+        // Animation 2: Tiled Implementation
+        // ==========================================
+        async function runTiled() {
+            if (isAnimating) return;
+            isAnimating = true;
+            document.getElementById('btn-naive').disabled = true;
+            document.getElementById('btn-tiled').disabled = true;
+            resetMatrices();
+
+            setStatus("<strong>[Tiling Mode]</strong><br>Partitioning SRAM to hold 4x4 blocks (Tiles) of A and B.");
+            await sleep(2000);
+
+            setStatus("<strong>Step 1:</strong> Load 4x4 Tile of A into SRAM.<br>Using 4 contiguous DRAM bursts. 100% efficiency, 0 waste!");
+            for (let r = 0; r < 4; r++) {
+                for (let c = 0; c < 4; c++) getCell('a', r, c).classList.add('fetch-dram');
+                await sleep(400);
+            }
+            for (let r = 0; r < 4; r++) {
+                for (let c = 0; c < 4; c++) getCell('a', r, c).classList.replace('fetch-dram', 'in-sram');
+            }
+            await sleep(1000);
+
+            setStatus("<strong>Step 2:</strong> Load 4x4 Tile of B into SRAM.<br>Even with column access, we buffer the whole block. 0 waste!");
+            for (let r = 0; r < 4; r++) {
+                for (let c = 0; c < 4; c++) getCell('b', r, c).classList.add('fetch-dram');
+                await sleep(400);
+            }
+            for (let r = 0; r < 4; r++) {
+                for (let c = 0; c < 4; c++) getCell('b', r, c).classList.replace('fetch-dram', 'in-sram');
+            }
+            await sleep(1500);
+
+            setStatus("<strong>Step 3:</strong> High-speed SRAM computation!<br>Data for 64 MAC operations is now local. <strong>No DRAM access needed</strong> for this phase.");
+            await sleep(2000);
+
+            for (let r = 0; r < 4; r++) {
+                for (let c = 0; c < 4; c++) {
+                    getCell('c', r, c).classList.add('compute');
+                    
+                    for(let k=0; k<4; k++) {
+                        getCell('a', r, k).classList.add('compute');
+                        getCell('b', k, c).classList.add('compute');
+                    }
+                    
+                    await sleep(100); 
+                    
+                    for(let k=0; k<4; k++) {
+                        getCell('a', r, k).classList.remove('compute');
+                        getCell('b', k, c).classList.remove('compute');
+                    }
+                    getCell('c', r, c).classList.replace('compute', 'done');
+                }
+            }
+
+            setStatus("<strong>Done!</strong><br>Tiling maximizes <strong>Temporal Locality</strong>. By reusing data in SRAM, we break the Memory Wall.");
+
+            isAnimating = false;
+            document.getElementById('btn-naive').disabled = false;
+            document.getElementById('btn-tiled').disabled = false;
+        }
+
+        resetMatrices();
+    </script>
+</body>
+</html>
