@@ -1,500 +1,1280 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>PagedAttention Interactive Visualizer</title>
+    <title>PagedAttention Visualizer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
-        canvas {
-            background-color: #1e293b;
-            border-radius: 0.75rem;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
-            max-width: 100%;
-            height: auto;
-            cursor: crosshair;
+        :root {
+            color-scheme: light;
+            --ink: #0f172a;
+            --muted: #475569;
+            --panel: rgba(255, 255, 255, 0.92);
+            --border: #dbe5f0;
+            --shadow: 0 18px 40px rgba(15, 23, 42, 0.10);
+            --hero: linear-gradient(135deg, #0f172a 0%, #1d4ed8 52%, #0f766e 100%);
         }
-        .btn {
-            transition: all 0.2s ease;
+
+        body {
+            min-height: 100vh;
+            background:
+                radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.14), transparent 28%),
+                radial-gradient(circle at 100% 8%, rgba(20, 184, 166, 0.12), transparent 24%),
+                linear-gradient(180deg, #f8fbff 0%, #eef5fc 100%);
+            color: var(--ink);
         }
-        .btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
+
+        .glass {
+            background: var(--panel);
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(10px);
         }
-        #sandboxControls {
-            display: none;
+
+        .hero {
+            background: var(--hero);
+            color: white;
+        }
+
+        .tab-btn,
+        .request-card,
+        .memory-block,
+        .step-dot,
+        .legend-chip {
+            transition: all 0.22s ease;
+        }
+
+        .tab-btn.active {
+            background: linear-gradient(135deg, #0f766e 0%, #1d4ed8 100%);
+            color: white;
+            border-color: transparent;
+            transform: translateY(-1px);
+            box-shadow: 0 14px 28px rgba(29, 78, 216, 0.18);
+        }
+
+        .request-card.active {
+            border-color: #7dd3fc;
+            box-shadow: 0 16px 34px rgba(14, 165, 233, 0.12);
+            transform: translateY(-2px);
+        }
+
+        .request-card.waiting {
+            opacity: 0.7;
+        }
+
+        .memory-block.active {
+            transform: translateY(-2px);
+            box-shadow: 0 16px 30px rgba(15, 23, 42, 0.10);
+        }
+
+        .memory-block.shared {
+            background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+            border-color: #93c5fd;
+        }
+
+        .memory-block.reserved {
+            background: linear-gradient(180deg, #faf5ff 0%, #f3e8ff 100%);
+            border-color: #d8b4fe;
+        }
+
+        .memory-block.free {
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+            border-style: dashed;
+        }
+
+        .slot {
+            min-height: 2.35rem;
+            border-radius: 0.85rem;
+            border: 1px solid #dbe7f3;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 0.18rem;
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.01em;
+        }
+
+        .slot.filled {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .slot.shared {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .slot.reserved {
+            background: #f3e8ff;
+            color: #7c3aed;
+            border-style: dashed;
+        }
+
+        .slot.empty {
+            background: #f8fafc;
+            color: #94a3b8;
+            border-style: dashed;
+        }
+
+        .token-chip {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 2.2rem;
+            padding: 0.35rem 0.6rem;
+            border-radius: 999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            background: white;
+            border: 1px solid #dbe7f3;
+        }
+
+        .step-dot {
+            width: 0.78rem;
+            height: 0.78rem;
+            border-radius: 999px;
+            border: 2px solid #cbd5e1;
+            background: white;
+        }
+
+        .step-dot.active {
+            border-color: #0f766e;
+            background: #14b8a6;
+            box-shadow: 0 0 0 5px rgba(20, 184, 166, 0.12);
+        }
+
+        .linear-cell {
+            min-height: 3rem;
+            border-radius: 0.9rem;
+            border: 1px solid #dbe7f3;
+            padding: 0.35rem 0.25rem;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 0.15rem;
+        }
+
+        .linear-cell.filled {
+            background: #e2e8f0;
+            color: #0f172a;
+        }
+
+        .linear-cell.reserved {
+            background: #f3e8ff;
+            color: #7c3aed;
+            border-style: dashed;
+        }
+
+        .linear-cell.free {
+            background: #ffffff;
+            color: #94a3b8;
+            border-style: dashed;
+        }
+
+        .linear-cell.shared {
+            background: #dbeafe;
+            color: #1d4ed8;
+        }
+
+        .linear-cell.block-start {
+            box-shadow: inset 3px 0 0 #0f172a;
+        }
+
+        .linear-index {
+            font-size: 0.6rem;
+            font-weight: 800;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            opacity: 0.7;
+        }
+
+        .linear-token {
+            font-size: 0.68rem;
+            font-weight: 800;
+            line-height: 1.05;
+        }
+
+        .step-dot.done {
+            border-color: #1d4ed8;
+            background: #bfdbfe;
         }
     </style>
 </head>
-<body class="min-h-screen flex flex-col items-center justify-center p-4">
 
-    <div class="max-w-5xl w-full flex flex-col gap-6">
-
-        <!-- Header -->
-        <div class="text-center">
-            <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-emerald-400 mb-2">
-                Understanding PagedAttention
-            </h1>
-            <p class="text-slate-400 text-lg">Interactive visualization of LLM KV Cache memory management.</p>
-        </div>
-
-        <!-- Main Content Area -->
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start">
-
-            <!-- Canvas Container (Left 2/3) -->
-            <div class="lg:col-span-2 flex flex-col gap-4">
-                <div class="relative">
-                    <canvas id="simCanvas" width="800" height="450" class="w-full border border-slate-700"></canvas>
-                    <!-- Sandbox Floating Control -->
-                    <div id="sandboxControls" class="absolute top-4 left-4 flex gap-2">
-                        <button id="btnGenToken" class="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-bold shadow-lg flex items-center gap-2">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path d="M12 4v16m8-8H4" stroke-width="2" stroke-linecap="round"/></svg> Generate Token
-                        </button>
-                        <button id="btnResetSandbox" class="px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-sm font-bold shadow-lg">
-                            Reset
-                        </button>
+<body class="p-4 md:p-6 lg:p-8">
+    <main class="max-w-7xl mx-auto space-y-6">
+        <section class="hero rounded-[2rem] p-6 md:p-8 lg:p-10 shadow-[0_24px_64px_rgba(15,23,42,0.16)]">
+            <div class="grid lg:grid-cols-[1.5fr_0.9fr] gap-6 items-end">
+                <div class="space-y-5">
+                    <div class="inline-flex items-center gap-2 rounded-full border border-white/20 bg-white/10 px-4 py-2 text-[11px] font-bold uppercase tracking-[0.24em] text-sky-100">
+                        PagedAttention from arXiv:2309.06180
                     </div>
-                </div>
-
-                <!-- Controls -->
-                <div class="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
-                    <button id="btnBack" class="btn px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold flex items-center gap-2">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> Back
-                    </button>
-                    <div class="flex items-center gap-4">
-                        <div class="text-slate-300 font-mono tracking-widest text-sm font-bold" id="stepCounter">
-                            STEP 1 / 7
+                    <div>
+                        <h1 class="text-3xl md:text-5xl font-black tracking-tight">32-token memory, with and without paging</h1>
+                        <p class="mt-3 max-w-3xl text-sm md:text-base leading-relaxed text-sky-50/90">
+                            A simple animation of why reserving a full 32-token region for every request wastes memory, and how paged KV blocks let three requests prefill and decode together.
+                        </p>
+                    </div>
+                    <div class="flex flex-wrap gap-3 text-xs md:text-sm">
+                        <div class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                            <div class="text-sky-100/70 uppercase tracking-[0.18em] text-[10px] font-bold">Memory</div>
+                            <div class="mt-1 text-lg font-black">32 tokens</div>
                         </div>
-                        <button id="btnReplay" class="text-slate-400 hover:text-white transition-colors" title="Replay Animation">
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>
-                        </button>
+                        <div class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                            <div class="text-sky-100/70 uppercase tracking-[0.18em] text-[10px] font-bold">Block size</div>
+                            <div class="mt-1 text-lg font-black">4 tokens</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/15 bg-white/10 px-4 py-3">
+                            <div class="text-sky-100/70 uppercase tracking-[0.18em] text-[10px] font-bold">Requests</div>
+                            <div class="mt-1 text-lg font-black">A, B, C</div>
+                        </div>
                     </div>
-                    <button id="btnNext" class="btn px-6 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg font-semibold flex items-center gap-2">
-                        Next <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
-                    </button>
+                </div>
+
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="rounded-2xl border border-white/15 bg-slate-950/20 px-4 py-4">
+                        <div id="hero-active" class="text-2xl font-black">A</div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-sky-100/70">Active request</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/15 bg-slate-950/20 px-4 py-4">
+                        <div id="hero-resident" class="text-2xl font-black">1</div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-sky-100/70">Resident requests</div>
+                    </div>
+                    <div class="rounded-2xl border border-white/15 bg-slate-950/20 px-4 py-4">
+                        <div id="hero-used" class="text-2xl font-black">32</div>
+                        <div class="mt-1 text-[11px] uppercase tracking-[0.18em] text-sky-100/70">Allocated tokens</div>
+                    </div>
                 </div>
             </div>
+        </section>
 
-            <!-- Text/Explanation Panel (Right 1/3) -->
-            <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 h-full flex flex-col">
-                <h2 id="stepTitle" class="text-2xl font-bold text-blue-400 mb-4 border-b border-slate-600 pb-2">Title</h2>
-                <div id="stepDesc" class="text-slate-300 space-y-4 leading-relaxed flex-grow text-[15px]">
-                    Description goes here.
+        <section class="glass rounded-[1.75rem] p-4 md:p-5 lg:p-6 space-y-4">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div>
+                    <div class="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Tabs</div>
+                    <div id="tab-buttons" class="mt-3 flex flex-wrap gap-3"></div>
                 </div>
-
-                <!-- Legend -->
-                <div class="mt-6 pt-4 border-t border-slate-700">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Legend</h3>
-                    <div class="grid grid-cols-2 gap-3 text-sm text-slate-300">
-                        <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-sm bg-blue-500"></div> Request A</div>
-                        <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-sm bg-emerald-500"></div> Request B</div>
-                        <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-sm bg-cyan-500"></div> Shared Block</div>
-                        <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-sm bg-rose-500/50 border border-rose-500"></div> Wasted / OOM</div>
-                    </div>
-                    <p class="mt-4 text-[10px] text-slate-500 italic">Tip: Hover over Logical Blocks to see mappings.</p>
+                <div class="rounded-2xl bg-slate-50 px-4 py-3 border border-slate-200 max-w-2xl">
+                    <div class="text-[11px] uppercase tracking-[0.18em] font-bold text-slate-500">What this tab shows</div>
+                    <div id="scenario-summary" class="mt-1 text-sm font-semibold text-slate-800"></div>
                 </div>
             </div>
+            <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                    <div class="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Step timeline</div>
+                    <div id="step-indicators" class="mt-2 flex flex-wrap items-center gap-2"></div>
+                </div>
+                <div class="flex flex-wrap items-center gap-3">
+                    <button id="prev-btn" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed">Previous</button>
+                    <button id="play-btn" class="rounded-xl bg-teal-600 px-4 py-2 text-sm font-semibold text-white hover:bg-teal-700">Autoplay</button>
+                    <button id="next-btn" class="rounded-xl bg-slate-900 px-4 py-2 text-sm font-semibold text-white hover:bg-slate-800">Next</button>
+                    <button id="reset-btn" class="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Reset</button>
+                </div>
+            </div>
+        </section>
 
-        </div>
-    </div>
+        <section class="grid gap-6 xl:grid-cols-[0.92fr_1.48fr]">
+            <aside class="space-y-6">
+                <section class="glass rounded-[1.75rem] p-5 md:p-6">
+                    <div class="text-[11px] font-bold uppercase tracking-[0.22em] text-slate-500">Current step</div>
+                    <h2 id="step-title" class="mt-2 text-2xl font-black tracking-tight text-slate-900"></h2>
+                    <p id="step-description" class="mt-4 text-sm leading-7 text-slate-600"></p>
+                </section>
+
+                <section class="glass rounded-[1.75rem] p-5 md:p-6">
+                    <h3 class="text-lg font-black text-slate-900">Requests</h3>
+                    <p class="mt-1 text-sm text-slate-500">All three requests stay visible. The active one is highlighted.</p>
+                    <div id="requests-list" class="mt-4 space-y-3"></div>
+                </section>
+
+                <section class="glass rounded-[1.75rem] p-5 md:p-6">
+                    <h3 class="text-lg font-black text-slate-900">Legend</h3>
+                    <div class="mt-4 flex flex-wrap gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-slate-500">
+                        <span class="legend-chip rounded-full px-3 py-2 bg-slate-100 border border-slate-200">Gray = filled KV</span>
+                        <span class="legend-chip rounded-full px-3 py-2 bg-violet-50 border border-violet-200 text-violet-700">Violet = reserved</span>
+                        <span class="legend-chip rounded-full px-3 py-2 bg-blue-50 border border-blue-200 text-blue-700">Blue = shared block table idea</span>
+                        <span class="legend-chip rounded-full px-3 py-2 bg-white border border-slate-200">White = free</span>
+                    </div>
+                </section>
+            </aside>
+
+            <div class="space-y-6">
+                <section class="glass rounded-[1.75rem] p-5 md:p-6">
+                    <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <h3 class="text-lg font-black text-slate-900">32-token memory</h3>
+                            <p class="mt-1 text-sm text-slate-500">8 physical blocks x 4 tokens each.</p>
+                        </div>
+                        <div class="text-right">
+                            <div id="memory-caption" class="text-sm font-semibold text-slate-700"></div>
+                            <div id="memory-side-note" class="mt-1 text-xs font-bold uppercase tracking-[0.14em] text-violet-700"></div>
+                        </div>
+                    </div>
+                    <div class="mt-5">
+                        <div class="mb-3 text-[11px] font-bold uppercase tracking-[0.18em] text-slate-500">Linear 32-slot view</div>
+                        <div id="linear-memory" class="grid grid-cols-4 gap-2 sm:grid-cols-8 xl:grid-cols-16"></div>
+                    </div>
+                    <div id="memory-grid" class="mt-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"></div>
+                </section>
+
+                <section class="glass rounded-[1.75rem] p-5 md:p-6">
+                    <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                        <div>
+                            <h3 class="text-lg font-black text-slate-900">What is happening in this step</h3>
+                            <p class="mt-1 text-sm text-slate-500">Prefill and decode are shown one step at a time.</p>
+                        </div>
+                        <div id="step-badge" class="rounded-full bg-slate-100 px-3 py-2 text-xs font-black uppercase tracking-[0.18em] text-slate-600"></div>
+                    </div>
+                    <div id="step-note" class="mt-4 rounded-[1.2rem] border border-slate-200 bg-slate-50 p-4 text-sm leading-7 text-slate-600"></div>
+                </section>
+            </div>
+        </section>
+    </main>
 
     <script>
-        const canvas = document.getElementById('simCanvas');
-        const ctx = canvas.getContext('2d');
+        const REQUESTS = {
+            A: {
+                id: 'A',
+                label: 'Request A',
+                badge: 'bg-sky-50 text-sky-700 border-sky-200',
+                promptLength: 4,
+                tokens: ['who', 'are', 'you', '?', 'I', 'am', 'the', 'agent']
+            },
+            B: {
+                id: 'B',
+                label: 'Request B',
+                badge: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                promptLength: 4,
+                tokens: ['where', 'are', 'you', '?', 'I', 'am', 'in', 'main', 'memory']
+            },
+            C: {
+                id: 'C',
+                label: 'Request C',
+                badge: 'bg-amber-50 text-amber-700 border-amber-200',
+                promptLength: 4,
+                tokens: ['what', 'is', 'this', '?', 'this', 'is', 'a', 'small', 'paged', 'demo']
+            }
+        };
+
+        const SCENARIOS = {
+            legacy: {
+                label: 'Without PagedAttention',
+                summary: 'Each short request reserves the whole 32-token region because the final output length is unknown ahead of time. The extra reserved blocks become memory waste, often described as fragmentation or stranded capacity.',
+                steps: [
+                    {
+                        title: '1. Request A prefill',
+                        activeRequest: 'A',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Prefill',
+                        caption: 'A owns all 8 blocks even though only its 4 prompt tokens are present.',
+                        description: 'The first request arrives. Its prompt is "who are you ?" which is 4 tokens, but because the maximum size is 32, the system reserves the full 32-token memory region for A.',
+                        note: 'This is step 1 of 5 for request A: 1 prefill step, then 4 decode steps. Requests B and C are visible below but cannot enter memory yet.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Processing now: prompt prefill', shown: 4 },
+                            { id: 'B', state: 'waiting', note: 'Waiting for A to finish', shown: 0 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for A to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 1, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 2, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'A', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '2. Request A decode step 1',
+                        activeRequest: 'A',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 1',
+                        caption: 'A still owns the whole memory. Only one new token was added.',
+                        description: 'A generates its first answer token: "I". Memory still reserves all 32 tokens for A.',
+                        note: 'Only one decode token was added, but B and C are still blocked because no part of the reserved region can be reused.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Processing now: decoded "I"', shown: 5 },
+                            { id: 'B', state: 'waiting', note: 'Waiting for A to finish', shown: 0 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for A to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 1, owner: 'A', state: 'filled', slots: ['I', null, null, null] },
+                            { id: 2, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'A', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '3. Request A decode step 2',
+                        activeRequest: 'A',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 2',
+                        caption: 'A now has 6 real tokens, but still holds 32 slots.',
+                        description: 'A generates "am". We are still inside the same oversized reservation.',
+                        note: 'This is why the memory picture matters more than the token count alone. Actual usage is small, but admitted concurrency is still only 1 request.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Processing now: decoded "I am"', shown: 6 },
+                            { id: 'B', state: 'waiting', note: 'Waiting for A to finish', shown: 0 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for A to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 1, owner: 'A', state: 'filled', slots: ['I', 'am', null, null] },
+                            { id: 2, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'A', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '4. Request A decode step 3',
+                        activeRequest: 'A',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 3',
+                        caption: 'Only the second 4-token block is filling; six other blocks are still reserved waste.',
+                        description: 'A generates "the". We are near the end of this request, but the other two requests still cannot prefill.',
+                        note: 'The service is stepping one request at a time, not because decode requires it, but because the reservation policy forces it.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Processing now: decoded "I am the"', shown: 7 },
+                            { id: 'B', state: 'waiting', note: 'Waiting for A to finish', shown: 0 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for A to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 1, owner: 'A', state: 'filled', slots: ['I', 'am', 'the', null] },
+                            { id: 2, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'A', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '5. Request A decode step 4, then B can finally start',
+                        activeRequest: 'A',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 4',
+                        caption: 'A used only 8 real tokens total, but held the 32-token memory until completion.',
+                        description: 'A generates its last token: "agent". Now the total request length is 8 tokens. Only after A fully finishes can the next request begin its own 5-step sequence.',
+                        note: 'The same pattern repeats for B, then again for C. So the no-paging story is: A takes 5 steps, then B takes 5 steps, then C takes 5 steps.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Finished now: "who are you ? I am the agent"', shown: 8 },
+                            { id: 'B', state: 'waiting', note: 'Starts only after A leaves memory', shown: 0 },
+                            { id: 'C', state: 'waiting', note: 'Still behind B in the queue', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 1, owner: 'A', state: 'filled', slots: ['I', 'am', 'the', 'agent'] },
+                            { id: 2, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'A', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '6. Request B prefill',
+                        activeRequest: 'B',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Prefill',
+                        caption: 'A is gone. The full 32-token region is now reserved for B.',
+                        description: 'After step 5, A finishes and frees memory. So in step 6, request B is finally prefilling. Its prompt is "where are you ?" and, again, the system reserves the whole 32-token memory region for B.',
+                        note: 'This is step 1 of 5 for request B. The legacy system repeats the exact same waste pattern for every request.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Finished and removed from memory', shown: 8 },
+                            { id: 'B', state: 'active', note: 'Processing now: prompt prefill', shown: 4 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for B to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'B', state: 'filled', slots: ['where', 'are', 'you', '?'] },
+                            { id: 1, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 2, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'B', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '7. Request B decode step 1',
+                        activeRequest: 'B',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 1',
+                        caption: 'B adds its first answer token, but still owns all 32 slots.',
+                        description: 'B generates "I". Even though B is another short 8-token request, the allocator still keeps the entire memory reserved for it.',
+                        note: 'Nothing about B is special. The same over-allocation happens again.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'active', note: 'Processing now: decoded "I"', shown: 5 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for B to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'B', state: 'filled', slots: ['where', 'are', 'you', '?'] },
+                            { id: 1, owner: 'B', state: 'filled', slots: ['I', null, null, null] },
+                            { id: 2, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'B', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '8. Request B decode step 2',
+                        activeRequest: 'B',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 2',
+                        caption: 'The second block fills slowly while six other blocks remain reserved.',
+                        description: 'B generates "am". The active request is still B alone, with C unable to enter memory.',
+                        note: 'The request only needs 2 physical blocks in the end, but the legacy allocator reserves 8.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'active', note: 'Processing now: decoded "I am"', shown: 6 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for B to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'B', state: 'filled', slots: ['where', 'are', 'you', '?'] },
+                            { id: 1, owner: 'B', state: 'filled', slots: ['I', 'am', null, null] },
+                            { id: 2, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'B', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '9. Request B decode step 3',
+                        activeRequest: 'B',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 3',
+                        caption: 'B is still the only resident request.',
+                        description: 'B generates "in". The queue still cannot move forward because the whole 32-token region is private to B.',
+                        note: 'C has to wait even though most of the reserved memory is still unused future capacity.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'active', note: 'Processing now: decoded "I am in"', shown: 7 },
+                            { id: 'C', state: 'waiting', note: 'Waiting for B to finish', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'B', state: 'filled', slots: ['where', 'are', 'you', '?'] },
+                            { id: 1, owner: 'B', state: 'filled', slots: ['I', 'am', 'in', null] },
+                            { id: 2, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'B', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '10. Request B decode step 4, then C can start',
+                        activeRequest: 'B',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 4',
+                        caption: 'B completes its 8-token request and only then releases memory.',
+                        description: 'B generates its last token: "memory". Now B finishes, and only after that can request C begin its own prefill step.',
+                        note: 'So far the sequential story is exactly what we wanted to show: A took 5 steps, and B took another 5 steps.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'active', note: 'Finished now: "where are you ? I am in memory"', shown: 8 },
+                            { id: 'C', state: 'waiting', note: 'Starts only after B leaves memory', shown: 0 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'B', state: 'filled', slots: ['where', 'are', 'you', '?'] },
+                            { id: 1, owner: 'B', state: 'filled', slots: ['I', 'am', 'in', 'memory'] },
+                            { id: 2, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'B', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'B', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '11. Request C prefill',
+                        activeRequest: 'C',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Prefill',
+                        caption: 'B is gone. The same full 32-token region is now reserved for C.',
+                        description: 'After B completes, request C finally enters memory. Its prompt is "what is this ?" and, just like A and B, it reserves the full 32-token memory region even though it is also only an 8-token request.',
+                        note: 'This begins the last 5-step sequence in the no-paging tab.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'C', state: 'active', note: 'Processing now: prompt prefill', shown: 4 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['what', 'is', 'this', '?'] },
+                            { id: 1, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 2, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'C', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '12. Request C decode step 1',
+                        activeRequest: 'C',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 1',
+                        caption: 'C begins filling its answer block.',
+                        description: 'C generates "this". Again, the same oversized reservation pattern repeats.',
+                        note: 'The visual repetition is the point: every request suffers the same 32-token reservation even when the true length is tiny.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'C', state: 'active', note: 'Processing now: decoded "this"', shown: 5 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['what', 'is', 'this', '?'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['this', null, null, null] },
+                            { id: 2, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'C', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '13. Request C decode step 2',
+                        activeRequest: 'C',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 2',
+                        caption: 'The second block fills a little more, but six blocks remain pure reservation.',
+                        description: 'C generates "is". The allocator still cannot admit any other request because C owns the full region.',
+                        note: 'By now the pattern should be clear: short requests are serialized by memory policy, not by token count.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'C', state: 'active', note: 'Processing now: decoded "this is"', shown: 6 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['what', 'is', 'this', '?'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['this', 'is', null, null] },
+                            { id: 2, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'C', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '14. Request C decode step 3',
+                        activeRequest: 'C',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 3',
+                        caption: 'C is still the only resident request in memory.',
+                        description: 'C generates "a". Almost the whole memory is still reserved for future capacity that never gets used.',
+                        note: 'This is the third time the allocator has repeated the same inefficient pattern.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'C', state: 'active', note: 'Processing now: decoded "this is a"', shown: 7 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['what', 'is', 'this', '?'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['this', 'is', 'a', null] },
+                            { id: 2, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'C', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '15. Request C decode step 4',
+                        activeRequest: 'C',
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: 'Decode 4',
+                        caption: 'C finishes, ending the full A -> B -> C sequential schedule.',
+                        description: 'C generates its final token: "demo". Now the third and last 8-token request is complete. The legacy tab has shown the full sequence: 5 steps for A, then 5 for B, then 5 for C.',
+                        note: 'This is exactly why the paged tab is better: there, the same 32-token pool keeps A, B, and C resident together instead of forcing 15 sequential steps.',
+                        requests: [
+                            { id: 'A', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'B', state: 'waiting', note: 'Already finished', shown: 8 },
+                            { id: 'C', state: 'active', note: 'Finished now: "what is this ? this is a demo"', shown: 8 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['what', 'is', 'this', '?'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['this', 'is', 'a', 'demo'] },
+                            { id: 2, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 3, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 4, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 5, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 6, owner: 'C', state: 'reserved', slots: [null, null, null, null] },
+                            { id: 7, owner: 'C', state: 'reserved', slots: [null, null, null, null] }
+                        ]
+                    }
+                ]
+            },
+            paged: {
+                label: 'With PagedAttention',
+                summary: 'All three requests prefill into different 4-token blocks, then they decode together in batch. Memory grows only where tokens actually exist.',
+                steps: [
+                    {
+                        title: '1. All three requests prefill together',
+                        activeRequest: 'A, B, C',
+                        residentCount: 3,
+                        allocatedTokens: 12,
+                        badge: 'Prefill batch',
+                        caption: 'Each prompt uses just one 4-token block, so all three fit at once.',
+                        description: 'With paging, the three prompts prefill together. Each prompt is 4 tokens, so A, B, and C each get one physical block. Only 12 tokens of memory are allocated, not 96.',
+                        note: 'This is the key picture: the same 32-token memory can already hold all three active requests because space is allocated on demand in 4-token pages.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Processing in batch: prompt prefilling', shown: 4 },
+                            { id: 'B', state: 'active', note: 'Processing in batch: prompt prefilling', shown: 4 },
+                            { id: 'C', state: 'active', note: 'Processing in batch: prompt prefilling', shown: 4 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['tell', 'me', 'about', 'llms'] },
+                            { id: 1, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 2, owner: 'B', state: 'filled', slots: ['what', 'can', 'you', 'do'] },
+                            { id: 3, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 4, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 5, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 7, owner: '', state: 'free', slots: [null, null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '2. Decode batch step 1',
+                        activeRequest: 'A, B, C',
+                        residentCount: 3,
+                        allocatedTokens: 24,
+                        badge: 'Batch decode 1',
+                        caption: 'Each request gets a tail block for its first generated token.',
+                        description: 'Now the batch decodes one token for each request. A gets "I", B gets "for", and C gets "with". Three new tail blocks are allocated.',
+                        note: 'Instead of one request using all 32 slots, three requests are all making progress in the same decode round.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Decoded token 5: "I"', shown: 5 },
+                            { id: 'B', state: 'active', note: 'Decoded token 5: "for"', shown: 5 },
+                            { id: 'C', state: 'active', note: 'Decoded token 5: "with"', shown: 5 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['tell', 'me', 'about', 'llms'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['with', null, null, null] },
+                            { id: 2, owner: 'B', state: 'filled', slots: ['what', 'can', 'you', 'do'] },
+                            { id: 3, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'filled', slots: ['for', null, null, null] },
+                            { id: 5, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 7, owner: 'A', state: 'filled', slots: ['I', null, null, null] }
+                        ]
+                    },
+                    {
+                        title: '3. Decode batch step 2',
+                        activeRequest: 'A, B, C',
+                        residentCount: 3,
+                        allocatedTokens: 24,
+                        badge: 'Batch decode 2',
+                        caption: 'The same three tail blocks keep filling.',
+                        description: 'The second batched decode round happens. A gets "am", B gets "me", and C gets "small".',
+                        note: 'Memory does not jump by another 32 tokens per request. The existing tail blocks simply fill in their next positions.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Decoded "I am"', shown: 6 },
+                            { id: 'B', state: 'active', note: 'Decoded "for me"', shown: 6 },
+                            { id: 'C', state: 'active', note: 'Decoded "with small"', shown: 6 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['tell', 'me', 'about', 'llms'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['with', 'small', null, null] },
+                            { id: 2, owner: 'B', state: 'filled', slots: ['what', 'can', 'you', 'do'] },
+                            { id: 3, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'filled', slots: ['for', 'me', null, null] },
+                            { id: 5, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 7, owner: 'A', state: 'filled', slots: ['I', 'am', null, null] }
+                        ]
+                    },
+                    {
+                        title: '4. Decode batch step 3',
+                        activeRequest: 'A, B, C',
+                        residentCount: 3,
+                        allocatedTokens: 24,
+                        badge: 'Batch decode 3',
+                        caption: 'Three requests are still moving forward together.',
+                        description: 'The third batched decode round happens. A gets "the", B gets "today", and C gets "examples".',
+                        note: 'This is the direct contrast with the first tab. Here the memory is still only 24 allocated tokens while all three requests are active.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Decoded "I am the"', shown: 7 },
+                            { id: 'B', state: 'active', note: 'Decoded "for me today"', shown: 7 },
+                            { id: 'C', state: 'active', note: 'Decoded "with small examples"', shown: 7 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['tell', 'me', 'about', 'llms'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['with', 'small', 'examples', null] },
+                            { id: 2, owner: 'B', state: 'filled', slots: ['what', 'can', 'you', 'do'] },
+                            { id: 3, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'filled', slots: ['for', 'me', 'today', null] },
+                            { id: 5, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 7, owner: 'A', state: 'filled', slots: ['I', 'am', 'the', null] }
+                        ]
+                    },
+                    {
+                        title: '5. Decode batch step 4',
+                        activeRequest: 'A, B, C',
+                        residentCount: 3,
+                        allocatedTokens: 24,
+                        badge: 'Batch decode 4',
+                        caption: 'The batch completes with only 6 blocks allocated for all three requests.',
+                        description: 'The final batched decode round happens. A gets "agent", B gets "?", and C gets "please". All three requests complete while sharing the same 32-token memory pool.',
+                        note: 'This is why paging is better in this example: one 32-token memory can hold three active requests and let them decode together, instead of forcing A then B then C in sequence.',
+                        requests: [
+                            { id: 'A', state: 'active', note: 'Finished: "who are you ? I am the agent"', shown: 8 },
+                            { id: 'B', state: 'active', note: 'Finished: "what can you do for me today ?"', shown: 8 },
+                            { id: 'C', state: 'active', note: 'Finished: "tell me about llms with small examples please"', shown: 8 }
+                        ],
+                        memory: [
+                            { id: 0, owner: 'C', state: 'filled', slots: ['tell', 'me', 'about', 'llms'] },
+                            { id: 1, owner: 'C', state: 'filled', slots: ['with', 'small', 'examples', 'please'] },
+                            { id: 2, owner: 'B', state: 'filled', slots: ['what', 'can', 'you', 'do'] },
+                            { id: 3, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 4, owner: 'B', state: 'filled', slots: ['for', 'me', 'today', '?'] },
+                            { id: 5, owner: '', state: 'free', slots: [null, null, null, null] },
+                            { id: 6, owner: 'A', state: 'filled', slots: ['who', 'are', 'you', '?'] },
+                            { id: 7, owner: 'A', state: 'filled', slots: ['I', 'am', 'the', 'agent'] }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        function makeEmptyBlock(id) {
+            return { id, owner: '', state: 'free', slots: [null, null, null, null] };
+        }
+
+        function fillSlots(tokens, owner, fillState, emptyState = fillState) {
+            return Array.from({ length: 4 }, (_, index) => tokens[index] || null);
+        }
+
+        function buildLegacyMemory(requestId, shownTokens) {
+            const req = REQUESTS[requestId];
+            const blocks = Array.from({ length: 8 }, (_, id) => ({
+                id,
+                owner: requestId,
+                state: 'reserved',
+                slots: [null, null, null, null]
+            }));
+
+            const usedBlockCount = Math.ceil(shownTokens / 4);
+            for (let blockIndex = 0; blockIndex < usedBlockCount; blockIndex += 1) {
+                const chunk = req.tokens.slice(blockIndex * 4, Math.min((blockIndex + 1) * 4, shownTokens));
+                blocks[blockIndex].state = 'filled';
+                blocks[blockIndex].slots = fillSlots(chunk, requestId, 'filled');
+            }
+            return blocks;
+        }
+
+        function requestStateEntries(activeRequestId, shownTokens) {
+            return Object.keys(REQUESTS).map((id) => {
+                const req = REQUESTS[id];
+                if (id === activeRequestId) {
+                    const isPrefill = shownTokens === req.promptLength;
+                    return {
+                        id,
+                        state: 'active',
+                        shown: shownTokens,
+                        note: isPrefill ? 'Processing now: prompt prefill' : `Processing now: ${req.tokens.slice(req.promptLength, shownTokens).join(' ')}`
+                    };
+                }
+                const activeIndex = Object.keys(REQUESTS).indexOf(activeRequestId);
+                const currentIndex = Object.keys(REQUESTS).indexOf(id);
+                if (currentIndex < activeIndex) {
+                    return { id, state: 'waiting', shown: req.tokens.length, note: 'Already finished' };
+                }
+                return { id, state: 'waiting', shown: 0, note: `Waiting for ${activeRequestId} to finish` };
+            });
+        }
+
+        function buildLegacySteps() {
+            const order = ['A', 'B', 'C'];
+            const steps = [];
+            let stepNumber = 1;
+
+            order.forEach((requestId, requestIndex) => {
+                const req = REQUESTS[requestId];
+                const decodeSteps = req.tokens.length - req.promptLength;
+
+                steps.push({
+                    title: `${stepNumber}. Request ${requestId} prefill`,
+                    activeRequest: requestId,
+                    residentCount: 1,
+                    allocatedTokens: 32,
+                    badge: 'Prefill',
+                    caption: `${requestId} owns all 8 blocks even though only its prompt tokens are present.`,
+                    description: `Request ${requestId} arrives. Its prompt is "${req.tokens.slice(0, req.promptLength).join(' ')}". Even though the true sequence is only ${req.tokens.length} tokens long, the allocator reserves the full 32-token memory region.`,
+                    note: `This request needs 1 prefill step and ${decodeSteps} decode steps because it has ${req.tokens.length} total tokens.`,
+                    requests: requestStateEntries(requestId, req.promptLength),
+                    memory: buildLegacyMemory(requestId, req.promptLength)
+                });
+                stepNumber += 1;
+
+                for (let shown = req.promptLength + 1, decodeIndex = 1; shown <= req.tokens.length; shown += 1, decodeIndex += 1) {
+                    const isLast = shown === req.tokens.length;
+                    const nextReq = order[requestIndex + 1];
+                    steps.push({
+                        title: `${stepNumber}. Request ${requestId} decode step ${decodeIndex}${isLast && nextReq ? `, then ${nextReq} can start` : ''}`,
+                        activeRequest: requestId,
+                        residentCount: 1,
+                        allocatedTokens: 32,
+                        badge: `Decode ${decodeIndex}`,
+                        caption: `${requestId} is still the only resident request, and it still owns the whole 32-token region.`,
+                        description: `Request ${requestId} generates "${req.tokens[shown - 1]}". The true sequence now has ${shown} tokens, but the allocator still keeps all 32 slots reserved for ${requestId}.`,
+                        note: isLast
+                            ? `Request ${requestId} has now finished with ${req.tokens.length} real tokens. Only after it leaves memory can the next request start.`
+                            : `This request has ${req.tokens.length - shown} decode tokens left, but no other request can enter memory yet.`,
+                        requests: requestStateEntries(requestId, shown),
+                        memory: buildLegacyMemory(requestId, shown)
+                    });
+                    stepNumber += 1;
+                }
+            });
+
+            SCENARIOS.legacy.summary = `Each request reserves the whole 32-token region because the output length is unknown ahead of time. The extra reserved blocks are memory waste, often described as fragmentation or stranded capacity. So A runs in ${1 + (REQUESTS.A.tokens.length - REQUESTS.A.promptLength)} steps, B runs in ${1 + (REQUESTS.B.tokens.length - REQUESTS.B.promptLength)} steps, and C runs in ${1 + (REQUESTS.C.tokens.length - REQUESTS.C.promptLength)} steps.`;
+            return steps;
+        }
+
+        function buildPagedMemory(round) {
+            const blocks = Array.from({ length: 8 }, (_, id) => makeEmptyBlock(id));
+            const placement = {
+                A: [6, 7],
+                B: [2, 4, 5],
+                C: [0, 1, 3]
+            };
+
+            Object.entries(REQUESTS).forEach(([id, req]) => {
+                const shown = Math.min(req.promptLength + round, req.tokens.length);
+                const tokens = req.tokens.slice(0, shown);
+                const blockCount = Math.ceil(tokens.length / 4);
+                for (let blockIndex = 0; blockIndex < blockCount; blockIndex += 1) {
+                    const physicalId = placement[id][blockIndex];
+                    const chunk = tokens.slice(blockIndex * 4, blockIndex * 4 + 4);
+                    blocks[physicalId] = {
+                        id: physicalId,
+                        owner: id,
+                        state: 'filled',
+                        slots: fillSlots(chunk, id, 'filled')
+                    };
+                }
+            });
+
+            return blocks;
+        }
+
+        function buildPagedRequests(round) {
+            return Object.keys(REQUESTS).map((id) => {
+                const req = REQUESTS[id];
+                const shown = Math.min(req.promptLength + round, req.tokens.length);
+                const statusText = round === 0
+                    ? 'Processing in batch: prompt prefilling'
+                    : shown === req.tokens.length
+                        ? `Finished in batch: ${req.tokens.slice(req.promptLength).join(' ')}`
+                        : `Processing in batch: ${req.tokens.slice(req.promptLength, shown).join(' ')}`;
+                return {
+                    id,
+                    state: 'active',
+                    shown,
+                    note: statusText
+                };
+            });
+        }
+
+        function buildPagedSteps() {
+            const promptLength = REQUESTS.A.promptLength;
+            const maxDecodeRounds = Math.max(...Object.values(REQUESTS).map((req) => req.tokens.length - req.promptLength));
+            const steps = [];
+
+            steps.push({
+                title: '1. All three requests prefill together',
+                activeRequest: 'A, B, C',
+                residentCount: 3,
+                allocatedTokens: 12,
+                badge: 'Prefill batch',
+                caption: 'Each prompt uses just one 4-token block, so all three fit at once.',
+                description: 'With paging, the three prompts prefill together. Each prompt is 4 tokens, so A, B, and C each get one physical block.',
+                note: 'Only the prompt blocks are allocated at this point, so the memory pool still has room to keep all three requests resident.',
+                requests: buildPagedRequests(0),
+                memory: buildPagedMemory(0)
+            });
+
+            for (let round = 1; round <= maxDecodeRounds; round += 1) {
+                const allocatedBlocks = buildPagedMemory(round).filter((block) => block.owner).length;
+                steps.push({
+                    title: `${round + 1}. Decode batch step ${round}`,
+                    activeRequest: 'A, B, C',
+                    residentCount: 3,
+                    allocatedTokens: allocatedBlocks * 4,
+                    badge: `Batch decode ${round}`,
+                    caption: 'The requests decode together, and only the needed tail blocks are filled.',
+                    description: `Batch decode round ${round} happens. Every request that still has tokens remaining advances by one token in the same step.`,
+                    note: `This round uses the true request lengths: A has ${Math.max(0, REQUESTS.A.tokens.length - promptLength - round)} decode tokens left after this step, B has ${Math.max(0, REQUESTS.B.tokens.length - promptLength - round)} left, and C has ${Math.max(0, REQUESTS.C.tokens.length - promptLength - round)} left.`,
+                    requests: buildPagedRequests(round),
+                    memory: buildPagedMemory(round)
+                });
+            }
+
+            return steps;
+        }
+
+        SCENARIOS.legacy.steps = buildLegacySteps();
+        SCENARIOS.paged.steps = buildPagedSteps();
+
+        let activeTab = 'legacy';
         let currentStep = 0;
-        let stepStartTime = 0;
-        let animationId;
+        let autoplayId = null;
 
-        // Mouse Interactivity State
-        let mouseX = 0;
-        let mouseY = 0;
-        let hoveredBlockIdx = -1; // -1 means none
+        const tabButtons = document.getElementById('tab-buttons');
+        const scenarioSummary = document.getElementById('scenario-summary');
+        const stepIndicators = document.getElementById('step-indicators');
+        const prevBtn = document.getElementById('prev-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const playBtn = document.getElementById('play-btn');
+        const resetBtn = document.getElementById('reset-btn');
 
-        // Sandbox State
-        const sandboxState = {
-            tokens: [],
-            mappings: [], // logical block index -> physical block index
-            availablePhysical: Array.from({length: 16}, (_, i) => i) // 16 physical blocks in our simplified view (8x8 grid with 4-cell blocks)
-        };
-
-        // UI Elements
-        const btnBack = document.getElementById('btnBack');
-        const btnNext = document.getElementById('btnNext');
-        const btnReplay = document.getElementById('btnReplay');
-        const btnGenToken = document.getElementById('btnGenToken');
-        const btnResetSandbox = document.getElementById('btnResetSandbox');
-        const sandboxControls = document.getElementById('sandboxControls');
-        const stepTitle = document.getElementById('stepTitle');
-        const stepDesc = document.getElementById('stepDesc');
-        const stepCounter = document.getElementById('stepCounter');
-
-        // Colors
-        const colors = {
-            grid: '#334155',
-            gridBg: '#0f172a',
-            text: '#f8fafc',
-            reqA: '#3b82f6', // Blue
-            reqB: '#10b981', // Emerald
-            reqC: '#f59e0b', // Amber
-            reqD: '#8b5cf6', // Purple
-            wasted: 'rgba(244, 63, 94, 0.2)', // Rose transparent
-            wastedStroke: '#f43f5e',
-            shared: '#06b6d4' // Cyan
-        };
-
-        const gridX = 400;
-        const gridY = 50;
-        const cellSize = 40;
-        const cols = 8;
-        const rows = 8;
-
-        const easeOutCubic = x => 1 - Math.pow(1 - x, 3);
-
-        function drawRoundedRect(ctx, x, y, width, height, radius, fill, stroke, lineWidth = 2) {
-            ctx.beginPath();
-            ctx.moveTo(x + radius, y);
-            ctx.lineTo(x + width - radius, y);
-            ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
-            ctx.lineTo(x + width, y + height - radius);
-            ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
-            ctx.lineTo(x + radius, y + height);
-            ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
-            ctx.lineTo(x, y + radius);
-            ctx.quadraticCurveTo(x, y, x + radius, y);
-            ctx.closePath();
-            if (fill) { ctx.fillStyle = fill; ctx.fill(); }
-            if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lineWidth; ctx.stroke(); }
+        function scenario() {
+            return SCENARIOS[activeTab];
         }
 
-        function drawToken(ctx, x, y, color, label, alpha = 1) {
-            ctx.globalAlpha = alpha;
-            drawRoundedRect(ctx, x + 4, y + 4, cellSize - 8, cellSize - 8, 4, color, null);
-            ctx.fillStyle = '#fff';
-            ctx.font = 'bold 12px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(label, x + cellSize/2, y + cellSize/2);
-            ctx.globalAlpha = 1;
+        function step() {
+            return scenario().steps[currentStep];
         }
 
-        function drawArrow(ctx, fromx, fromy, tox, toy, color = '#94a3b8', highlight = false) {
-            const headlen = highlight ? 14 : 10;
-            const dx = tox - fromx;
-            const dy = toy - fromy;
-            const angle = Math.atan2(dy, dx);
-
-            if (highlight) {
-                ctx.shadowBlur = 10;
-                ctx.shadowColor = color;
-                ctx.lineWidth = 4;
-            } else {
-                ctx.lineWidth = 2;
-            }
-
-            ctx.beginPath();
-            ctx.moveTo(fromx, fromy);
-            ctx.lineTo(tox, toy);
-            ctx.lineTo(tox - headlen * Math.cos(angle - Math.PI / 6), toy - headlen * Math.sin(angle - Math.PI / 6));
-            ctx.moveTo(tox, toy);
-            ctx.lineTo(tox - headlen * Math.cos(angle + Math.PI / 6), toy - headlen * Math.sin(angle + Math.PI / 6));
-            ctx.strokeStyle = color;
-            ctx.stroke();
-
-            ctx.shadowBlur = 0;
-            ctx.lineWidth = 2;
+        function renderTabs() {
+            tabButtons.innerHTML = Object.entries(SCENARIOS).map(([key, value]) => `
+                <button class="tab-btn rounded-2xl border px-4 py-3 text-left ${key === activeTab ? 'active' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50'}" onclick="switchTab('${key}')">
+                    <div class="text-sm font-black">${value.label}</div>
+                </button>
+            `).join('');
+            scenarioSummary.textContent = scenario().summary;
         }
 
-        function drawGrid(ctx, pagedMode = false, activeCells = 0, wastedCells = 0) {
-            drawRoundedRect(ctx, gridX - 10, gridY - 30, cols * cellSize + 20, rows * cellSize + 40, 8, colors.gridBg, colors.grid);
-            const totalCells = rows * cols;
-            const activePct = Math.max(0, ((activeCells / totalCells) * 100)).toFixed(1);
-            const wastedPct = Math.max(0, ((wastedCells / totalCells) * 100)).toFixed(1);
-            ctx.font = '11px monospace';
-            ctx.textAlign = 'right';
-            ctx.fillStyle = '#10b981';
-            ctx.fillText(`Active: ${activePct}%`, gridX + cols * cellSize, gridY - 12);
-            ctx.fillStyle = colors.wastedStroke;
-            ctx.fillText(`Wasted: ${wastedPct}%`, gridX + cols * cellSize - 90, gridY - 12);
-            ctx.fillStyle = '#94a3b8';
-            ctx.font = '14px Inter';
-            ctx.textAlign = 'center';
-            ctx.fillText("Physical GPU Memory", gridX + (cols * cellSize)/2, gridY - 10);
-
-            for (let r = 0; r < rows; r++) {
-                for (let c = 0; c < cols; c++) {
-                    ctx.strokeStyle = '#334155';
-                    ctx.lineWidth = 1;
-                    ctx.strokeRect(gridX + c * cellSize, gridY + r * cellSize, cellSize, cellSize);
-                }
-            }
-
-            if (pagedMode) {
-                for (let r = 0; r < rows; r++) {
-                    for (let b = 0; b < cols / 4; b++) {
-                        const blockId = r * 2 + b;
-                        ctx.strokeStyle = '#64748b';
-                        ctx.lineWidth = 2;
-                        ctx.strokeRect(gridX + b * 4 * cellSize, gridY + r * cellSize, 4 * cellSize, cellSize);
-                        ctx.fillStyle = '#475569';
-                        ctx.font = '10px monospace';
-                        ctx.textAlign = 'left';
-                        ctx.fillText(`Blk ${blockId}`, gridX + b * 4 * cellSize + 2, gridY + r * cellSize + 10);
-                    }
-                }
-            }
+        function renderIndicators() {
+            stepIndicators.innerHTML = scenario().steps.map((_, index) => `
+                <button class="group flex items-center gap-2 rounded-full px-2 py-2" onclick="setStep(${index})">
+                    <span class="step-dot ${index === currentStep ? 'active' : index < currentStep ? 'done' : ''}"></span>
+                    <span class="hidden md:inline text-xs font-bold uppercase tracking-[0.18em] text-slate-500">${index + 1}</span>
+                </button>
+            `).join('');
         }
 
-        function isMouseIn(x, y, w, h) {
-            return mouseX >= x && mouseX <= x + w && mouseY >= y && mouseY <= y + h;
+        function renderRequests() {
+            const host = document.getElementById('requests-list');
+            host.innerHTML = step().requests.map((entry) => {
+                const req = REQUESTS[entry.id];
+                const visibleTokens = req.tokens.slice(0, entry.shown);
+                const stateClass = entry.state === 'active'
+                    ? 'active'
+                    : entry.state === 'waiting'
+                        ? 'waiting'
+                        : '';
+
+                return `
+                    <div class="request-card rounded-[1.25rem] border bg-white p-4 ${stateClass}">
+                        <div class="flex items-start justify-between gap-3">
+                            <div class="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-black uppercase tracking-[0.18em] ${req.badge}">${req.label}</div>
+                            <div class="text-xs font-bold uppercase tracking-[0.18em] text-slate-400">${entry.state}</div>
+                        </div>
+                        <p class="mt-3 text-sm text-slate-600 leading-6">${entry.note}</p>
+                        <div class="mt-3 flex flex-wrap gap-2">
+                            ${visibleTokens.length ? visibleTokens.map((token) => `<span class="token-chip">${token}</span>`).join('') : '<span class="text-sm text-slate-400">No tokens in memory yet</span>'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
-        function drawMapping(ctx, startX, startY, phyBlockIdx, color, isHovered) {
-            const row = Math.floor(phyBlockIdx / 2);
-            const colIdx = phyBlockIdx % 2;
-            const targetX = gridX + colIdx * 4 * cellSize;
-            const targetY = gridY + row * cellSize;
-
-            drawArrow(ctx, startX, startY, targetX - 5, targetY + cellSize/2, color, isHovered);
-
-            if (isHovered) {
-                ctx.strokeStyle = color;
-                ctx.lineWidth = 3;
-                ctx.strokeRect(targetX, targetY, 4 * cellSize, cellSize);
-            }
+        function slotClassFor(blockState, token) {
+            if (blockState === 'reserved') return 'reserved';
+            if (blockState === 'shared') return 'shared';
+            if (token) return 'filled';
+            return 'empty';
         }
 
-        // --- STEP DEFINITIONS ---
-        const steps = [
-            {
-                title: "1. The KV Cache Problem",
-                desc: `<p>LLMs generate text one token at a time. The <strong>KV Cache</strong> saves previous states to avoid recalculation.</p><p>The right side represents Physical GPU Memory.</p>`,
-                draw: (ctx, progress) => { drawGrid(ctx, false, 0, 0); }
-            },
-            {
-                title: "2. Traditional Allocation",
-                desc: `<p>Traditional systems allocate contiguous blocks based on <em>maximum</em> length. This causes <strong>Internal Fragmentation</strong> (wasted space).</p>`,
-                draw: (ctx, progress) => {
-                    const p = easeOutCubic(Math.min(1, progress * 1.5));
-                    let tokens = Math.floor(p * 5);
-                    let reserved = (progress > 0.1) ? 16 : 0;
-                    drawGrid(ctx, false, tokens, reserved - tokens);
-                    drawRoundedRect(ctx, 40, 100, 250, 80, 8, '#1e293b', colors.reqA);
-                    ctx.fillStyle = colors.reqA; ctx.textAlign = 'left'; ctx.font = 'bold 16px Inter'; ctx.fillText("Request A (Max: 16)", 55, 125);
-                    if (progress > 0.1) {
-                        drawRoundedRect(ctx, gridX, gridY, cols * cellSize, cellSize, 4, null, colors.reqA, 2);
-                        drawRoundedRect(ctx, gridX, gridY + cellSize, cols * cellSize, cellSize, 4, null, colors.reqA, 2);
-                    }
-                    for(let i=0; i<tokens; i++) drawToken(ctx, gridX + i*cellSize, gridY, colors.reqA, `A${i+1}`);
-                    if (progress > 0.8) {
-                        ctx.fillStyle = colors.wasted; ctx.fillRect(gridX + 5*cellSize, gridY, 3*cellSize, cellSize);
-                        ctx.fillRect(gridX, gridY + cellSize, cols*cellSize, cellSize);
-                        ctx.fillStyle = colors.wastedStroke; ctx.font = 'bold 14px Inter'; ctx.textAlign = 'center'; ctx.fillText("Wasted Space", gridX + cols*cellSize/2, gridY + cellSize*1.6);
-                    }
-                }
-            },
-            {
-                title: "3. Out of Memory (OOM)",
-                desc: `<p>Reserved but empty space makes the GPU look full. New requests are rejected even if physical space exists.</p>`,
-                draw: (ctx, progress) => {
-                    drawGrid(ctx, false, 21, 11);
-                    const reqs = [{c: colors.reqA, r: 0, t: 5}, {c: colors.reqB, r: 2, t: 7}, {c: colors.reqC, r: 4, t: 3}, {c: colors.reqD, r: 6, t: 6}];
-                    reqs.forEach(req => {
-                        drawRoundedRect(ctx, gridX, gridY + req.r*cellSize, cols*cellSize, cellSize*2, 4, null, req.c, 2);
-                        for(let i=0; i<req.t; i++) drawToken(ctx, gridX + (i%cols)*cellSize, gridY + (req.r + Math.floor(i/cols))*cellSize, req.c, `T`);
-                        ctx.fillStyle = colors.wasted;
-                        ctx.fillRect(gridX + (req.t%cols)*cellSize, gridY + (req.r + Math.floor(req.t/cols))*cellSize, (cols - (req.t%cols))*cellSize, cellSize);
-                        if(req.t < cols) ctx.fillRect(gridX, gridY + (req.r+1)*cellSize, cols*cellSize, cellSize);
+        function linearClassFor(blockState, token) {
+            if (blockState === 'reserved') return 'reserved';
+            if (blockState === 'shared') return 'shared';
+            if (token) return 'filled';
+            return 'free';
+        }
+
+        function renderLinearMemory() {
+            const host = document.getElementById('linear-memory');
+            const cells = [];
+            step().memory.forEach((block) => {
+                block.slots.forEach((token, slotIndex) => {
+                    cells.push({
+                        token,
+                        blockId: block.id,
+                        slotIndex,
+                        state: block.state
                     });
-                    if (progress > 0.5) {
-                        let slideP = easeOutCubic(Math.min(1, (progress-0.5)*2));
-                        let curX = -200 + (240) * slideP;
-                        drawRoundedRect(ctx, curX, 150, 250, 80, 8, '#1e293b', colors.wastedStroke, 3);
-                        ctx.fillStyle = colors.wastedStroke; ctx.font = 'bold 16px Inter'; ctx.fillText("Request E: OOM", curX + 15, 195);
-                    }
-                }
-            },
-            {
-                title: "4. Enter PagedAttention",
-                desc: `<p>Inspired by Virtual Memory, we use fixed-size <strong>Blocks</strong> (here, 4 tokens). Allocation happens only when a block fills.</p>`,
-                draw: (ctx, progress) => {
-                    const p = easeOutCubic(Math.min(1, progress * 1.5));
-                    let tokens = Math.floor(p * 4);
-                    drawGrid(ctx, true, tokens, (progress > 0.1 ? 4 : 0) - tokens);
-                    ctx.fillStyle = '#94a3b8'; ctx.font = '14px Inter'; ctx.textAlign = 'center'; ctx.fillText("Logical View", 140, gridY - 10);
-                    drawRoundedRect(ctx, 40, 100, 200, 120, 8, '#1e293b', colors.reqA);
-                    ctx.fillStyle = colors.reqA; ctx.fillText("Logical Req A", 140, 125);
-                    const isHovered = isMouseIn(60, 140, 160, 60);
-                    drawRoundedRect(ctx, 60, 140, 160, 60, 4, isHovered ? '#1e293b' : '#0f172a', isHovered ? colors.reqA : '#475569');
-                    for(let i=0; i<tokens; i++) {
-                        drawToken(ctx, 65 + i*(cellSize-5), 165, colors.reqA, `A${i+1}`);
-                        drawToken(ctx, gridX + i*cellSize, gridY, colors.reqA, `A${i+1}`);
-                    }
-                    if (progress > 0.8) drawMapping(ctx, 220, 170, 0, colors.reqA, isHovered);
-                }
-            },
-            {
-                title: "5. Dynamic Allocation",
-                desc: `<p>New blocks don't need to be adjacent. Logical Block 1 maps to a distant Physical Block. Fragmentation is minimized.</p>`,
-                draw: (ctx, progress) => {
-                    const p = easeOutCubic(Math.min(1, progress * 1.5));
-                    let tokensNew = Math.floor(Math.min(1, Math.max(0, p - 0.2)) * 2);
-                    drawGrid(ctx, true, 4 + tokensNew, 4 + (progress > 0.2 ? 4 : 0) - (4 + tokensNew));
-                    ctx.fillStyle = '#94a3b8'; ctx.font = '14px Inter'; ctx.textAlign = 'center'; ctx.fillText("Logical View", 140, gridY - 10);
-                    drawRoundedRect(ctx, 40, 80, 220, 180, 8, '#1e293b', colors.reqA);
+                });
+            });
 
-                    const h0 = isMouseIn(60, 120, 180, 50);
-                    drawRoundedRect(ctx, 60, 120, 180, 50, 4, h0 ? '#1e293b' : '#0f172a', h0 ? colors.reqA : '#475569');
-                    for(let i=0; i<4; i++) {
-                        drawToken(ctx, 65+i*35, 140, colors.reqA, `A${i+1}`);
-                        drawToken(ctx, gridX+i*cellSize, gridY, colors.reqA, `A${i+1}`);
-                    }
-                    drawMapping(ctx, 240, 145, 0, '#475569', h0);
-
-                    const h1 = progress > 0.2 && isMouseIn(60, 180, 180, 50);
-                    if (progress > 0.2) {
-                        drawRoundedRect(ctx, 60, 180, 180, 50, 4, h1 ? '#1e293b' : '#0f172a', h1 ? colors.reqA : '#475569');
-                        if (tokensNew > 0) {
-                            drawToken(ctx, 65, 200, colors.reqA, `A5`);
-                            drawToken(ctx, gridX, gridY + 3*cellSize, colors.reqA, `A5`);
-                            drawMapping(ctx, 240, 205, 6, colors.reqA, h1);
-                        }
-                    }
-                }
-            },
-            {
-                title: "6. Memory Sharing",
-                desc: `<p>Multiple requests can point to the same physical block (e.g., shared System Prompt). This saves massive amounts of memory.</p>`,
-                draw: (ctx, progress) => {
-                    drawGrid(ctx, true, 9, 3);
-                    ctx.fillStyle = '#94a3b8'; ctx.font = '14px Inter'; ctx.textAlign = 'center'; ctx.fillText("Logical View", 140, gridY - 10);
-
-                    // Shared Physical
-                    for(let i=0; i<4; i++) drawToken(ctx, gridX + i*cellSize, gridY, colors.shared, `P${i+1}`);
-
-                    // Req A
-                    const ha0 = isMouseIn(30, 110, 130, 40);
-                    const ha1 = isMouseIn(30, 160, 130, 40);
-                    drawRoundedRect(ctx, 20, 80, 150, 140, 8, '#1e293b', colors.reqA);
-                    drawRoundedRect(ctx, 30, 110, 130, 40, 4, ha0 ? '#1e293b' : '#0f172a', colors.shared);
-                    drawRoundedRect(ctx, 30, 160, 130, 40, 4, ha1 ? '#1e293b' : '#0f172a', colors.reqA);
-                    if (progress > 0.3) {
-                        drawToken(ctx, gridX + 4*cellSize, gridY + 2*cellSize, colors.reqA, `A1`);
-                        drawToken(ctx, gridX + 5*cellSize, gridY + 2*cellSize, colors.reqA, `A2`);
-                    }
-
-                    // Req B
-                    const hb0 = isMouseIn(30, 270, 130, 40);
-                    const hb1 = isMouseIn(30, 320, 130, 40);
-                    drawRoundedRect(ctx, 20, 240, 150, 140, 8, '#1e293b', colors.reqB);
-                    drawRoundedRect(ctx, 30, 270, 130, 40, 4, hb0 ? '#1e293b' : '#0f172a', colors.shared);
-                    drawRoundedRect(ctx, 30, 320, 130, 40, 4, hb1 ? '#1e293b' : '#0f172a', colors.reqB);
-                    if (progress > 0.6) {
-                        drawToken(ctx, gridX, gridY + 5*cellSize, colors.reqB, `B1`);
-                        drawToken(ctx, gridX + cellSize, gridY + 5*cellSize, colors.reqB, `B2`);
-                    }
-
-                    if (progress > 0.8) {
-                        drawMapping(ctx, 170, 130, 0, colors.shared, ha0);
-                        drawMapping(ctx, 170, 290, 0, colors.shared, hb0);
-                        drawMapping(ctx, 170, 180, 5, colors.reqA, ha1);
-                        drawMapping(ctx, 170, 340, 10, colors.reqB, hb1);
-                    }
-                }
-            },
-            {
-                title: "7. Sandbox Mode",
-                desc: `<p>Try it yourself! Click <strong>Generate Token</strong> to watch how PagedAttention dynamically maps blocks to random physical slots.</p>`,
-                draw: (ctx, progress) => {
-                    const active = sandboxState.tokens.length;
-                    const reserved = sandboxState.mappings.length * 4;
-                    drawGrid(ctx, true, active, reserved - active);
-                    ctx.fillStyle = '#94a3b8'; ctx.font = '14px Inter'; ctx.textAlign = 'center'; ctx.fillText("Logical Sandbox", 140, gridY - 10);
-
-                    drawRoundedRect(ctx, 20, 80, 250, 350, 8, '#1e293b', colors.reqA);
-
-                    sandboxState.mappings.forEach((phyIdx, logIdx) => {
-                        const y = 100 + logIdx * 60;
-                        const isH = isMouseIn(40, y, 200, 50);
-                        drawRoundedRect(ctx, 40, y, 200, 50, 4, isH ? '#1e293b' : '#0f172a', isH ? colors.reqA : '#475569');
-                        ctx.fillStyle = '#475569'; ctx.font = '9px monospace'; ctx.fillText(`Log Blk ${logIdx}`, 50, y+10);
-
-                        // Tokens in this block
-                        for(let i=0; i<4; i++) {
-                            const tokenIdx = logIdx * 4 + i;
-                            if (tokenIdx < sandboxState.tokens.length) {
-                                drawToken(ctx, 50 + i*35, y + 15, colors.reqA, `S${tokenIdx+1}`);
-                                // Draw in Physical
-                                const row = Math.floor(phyIdx / 2);
-                                const col = (phyIdx % 2) * 4 + i;
-                                drawToken(ctx, gridX + col * cellSize, gridY + row * cellSize, colors.reqA, `S${tokenIdx+1}`);
-                            }
-                        }
-                        drawMapping(ctx, 240, y + 25, phyIdx, colors.reqA, isH);
-                    });
-
-                    // Block Table UI
-                    if (sandboxState.mappings.length > 0) {
-                        drawRoundedRect(ctx, 280, 80, 100, 350, 8, '#1e293b', '#334155');
-                        ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 10px Inter'; ctx.textAlign = 'center'; ctx.fillText("BLOCK TABLE", 330, 100);
-                        sandboxState.mappings.forEach((phy, log) => {
-                            ctx.fillStyle = colors.reqA; ctx.font = '9px monospace';
-                            ctx.fillText(`L${log} → P${phy}`, 330, 125 + log*20);
-                        });
-                    }
-                }
-            }
-        ];
-
-        function render() {
-            ctx.clearRect(0, 0, canvas.width, canvas.height);
-            const progress = (Date.now() - stepStartTime) / 1000;
-            steps[currentStep].draw(ctx, progress);
-            animationId = requestAnimationFrame(render);
+            host.innerHTML = cells.map((cell, absoluteIndex) => `
+                <div class="linear-cell ${linearClassFor(cell.state, cell.token)} ${cell.slotIndex === 0 ? 'block-start' : ''}">
+                    <div class="linear-index">t${absoluteIndex}</div>
+                    <div class="linear-token">${cell.token || (cell.state === 'reserved' ? 'reserved' : 'free')}</div>
+                    <div class="text-[10px] font-bold opacity-70">P${cell.blockId}</div>
+                </div>
+            `).join('');
         }
 
-        function updateUI() {
-            stepTitle.innerHTML = steps[currentStep].title;
-            stepDesc.innerHTML = steps[currentStep].desc;
-            stepCounter.innerText = `STEP ${currentStep + 1} / ${steps.length}`;
-            btnBack.disabled = currentStep === 0;
-            sandboxControls.style.display = currentStep === 6 ? 'flex' : 'none';
-            btnNext.innerHTML = currentStep === steps.length - 1 ? 'Restart <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path></svg>' : 'Next <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>';
+        function renderMemory() {
+            const host = document.getElementById('memory-grid');
+            const extraCaption = activeTab === 'legacy'
+                ? ' In this tab, the violet blocks highlight memory waste from reserving space for an unknown final output length.'
+                : '';
+            document.getElementById('memory-caption').textContent = step().caption + extraCaption;
+            document.getElementById('memory-side-note').textContent = activeTab === 'legacy'
+                ? 'Waste in memory due to unknown output length'
+                : '';
+            renderLinearMemory();
+            host.innerHTML = step().memory.map((block) => {
+                const blockClass = block.state === 'reserved'
+                    ? 'reserved'
+                    : block.state === 'shared'
+                        ? 'shared'
+                        : block.state === 'free'
+                            ? 'free'
+                            : '';
+                const activeClass = block.owner && step().activeRequest.includes(block.owner) ? 'active' : '';
+                const ownerText = block.owner || 'free';
+
+                return `
+                    <div class="memory-block rounded-[1.25rem] border p-4 ${blockClass} ${activeClass}">
+                        <div class="flex items-start justify-between gap-3">
+                            <div>
+                                <div class="text-[11px] font-black uppercase tracking-[0.18em] text-slate-500">Block</div>
+                                <div class="mt-1 text-xl font-black text-slate-900">P${block.id}</div>
+                            </div>
+                            <div class="text-right text-xs font-semibold text-slate-600">${ownerText}</div>
+                        </div>
+                        <div class="mt-4 grid grid-cols-2 gap-2">
+                            ${block.slots.map((token) => `<div class="slot ${slotClassFor(block.state, token)}">${token || (block.state === 'reserved' ? 'reserved' : 'free')}</div>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }).join('');
         }
 
-        function genToken() {
-            if (sandboxState.tokens.length >= 16 * 4) return; // Full GPU
-            sandboxState.tokens.push(true);
-            const neededBlocks = Math.ceil(sandboxState.tokens.length / 4);
-            if (neededBlocks > sandboxState.mappings.length) {
-                // Pick random available physical block
-                const randomIdx = Math.floor(Math.random() * sandboxState.availablePhysical.length);
-                const block = sandboxState.availablePhysical.splice(randomIdx, 1)[0];
-                sandboxState.mappings.push(block);
+        function renderStep() {
+            const s = step();
+            renderTabs();
+            renderIndicators();
+            document.getElementById('step-title').textContent = s.title;
+            document.getElementById('step-description').textContent = s.description;
+            document.getElementById('step-badge').textContent = s.badge;
+            document.getElementById('step-note').textContent = s.note;
+            document.getElementById('hero-active').textContent = s.activeRequest;
+            document.getElementById('hero-resident').textContent = String(s.residentCount);
+            document.getElementById('hero-used').textContent = String(s.allocatedTokens);
+            renderRequests();
+            renderMemory();
+            prevBtn.disabled = currentStep === 0;
+            nextBtn.disabled = currentStep === scenario().steps.length - 1;
+        }
+
+        function stopAutoplay() {
+            if (autoplayId) {
+                clearInterval(autoplayId);
+                autoplayId = null;
+                playBtn.textContent = 'Autoplay';
             }
         }
 
-        function resetSandbox() {
-            sandboxState.tokens = [];
-            sandboxState.mappings = [];
-            sandboxState.availablePhysical = Array.from({length: 16}, (_, i) => i);
+        function setStep(index) {
+            currentStep = Math.max(0, Math.min(index, scenario().steps.length - 1));
+            renderStep();
+            if (currentStep === scenario().steps.length - 1) stopAutoplay();
         }
 
-        canvas.addEventListener('mousemove', e => {
-            const rect = canvas.getBoundingClientRect();
-            mouseX = (e.clientX - rect.left) * (canvas.width / rect.width);
-            mouseY = (e.clientY - rect.top) * (canvas.height / rect.height);
+        function switchTab(tab) {
+            activeTab = tab;
+            currentStep = 0;
+            stopAutoplay();
+            renderStep();
+        }
+
+        function nextStep() {
+            if (currentStep < scenario().steps.length - 1) {
+                setStep(currentStep + 1);
+            }
+        }
+
+        function prevStep() {
+            if (currentStep > 0) {
+                setStep(currentStep - 1);
+            }
+        }
+
+        function toggleAutoplay() {
+            if (autoplayId) {
+                stopAutoplay();
+                return;
+            }
+            playBtn.textContent = 'Pause';
+            autoplayId = setInterval(() => {
+                if (currentStep === scenario().steps.length - 1) {
+                    stopAutoplay();
+                    return;
+                }
+                nextStep();
+            }, 2400);
+        }
+
+        prevBtn.addEventListener('click', prevStep);
+        nextBtn.addEventListener('click', nextStep);
+        playBtn.addEventListener('click', toggleAutoplay);
+        resetBtn.addEventListener('click', () => {
+            stopAutoplay();
+            currentStep = 0;
+            renderStep();
         });
 
-        btnBack.addEventListener('click', () => { currentStep = Math.max(0, currentStep - 1); stepStartTime = Date.now(); updateUI(); });
-        btnNext.addEventListener('click', () => { if (currentStep === steps.length-1) currentStep = 0; else currentStep++; stepStartTime = Date.now(); updateUI(); });
-        btnReplay.addEventListener('click', () => { stepStartTime = Date.now(); });
-        btnGenToken.addEventListener('click', genToken);
-        btnResetSandbox.addEventListener('click', resetSandbox);
+        window.switchTab = switchTab;
+        window.setStep = setStep;
 
-        stepStartTime = Date.now();
-        updateUI();
-        render();
+        renderStep();
     </script>
 </body>
+
 </html>

@@ -414,7 +414,7 @@
         <div class="quick-nav-wrap">
             <nav id="category-quick-nav" class="quick-nav" aria-label="Category quick navigation"></nav>
         </div>
-
+        
         <!-- AI Accelerators & CPU Architectures -->
         <section class="mb-12 catalog-section">
             <div class="category-card bg-white rounded-xl shadow-md p-8 border-l-4 border-purple-500">
@@ -969,39 +969,9 @@
                         </a>
                     </li>
                     <li>
-                        <a href="nlp/transformers/prefill-decode.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Prefill vs Decode</span>
-                            <span class="text-gray-600 text-sm block mt-1">Compare prompt prefill, token-by-token decode, arithmetic intensity, and KV cache growth</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/flash-attention-math.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">FlashAttention Math</span>
-                            <span class="text-gray-600 text-sm block mt-1">Step through online softmax updates that avoid materializing the full attention matrix</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/flash-attention-loops.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">FlashAttention Loop Schedule</span>
-                            <span class="text-gray-600 text-sm block mt-1">Visualize block-wise Q, K, V, and output movement between HBM and SRAM</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/flashattention_visualizer.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">FlashAttention Traffic Visualizer</span>
-                            <span class="text-gray-600 text-sm block mt-1">Inspect tiled attention data movement and memory traffic across compute phases</span>
-                        </a>
-                    </li>
-                    <li>
                         <a href="nlp/transformers/paged-attention.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">PagedAttention</span>
-                            <span class="text-gray-600 text-sm block mt-1">See how virtualized KV blocks reduce fragmentation during LLM serving</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/paged-attention-continuous-batching.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">PagedAttention & Continuous Batching</span>
-                            <span class="text-gray-600 text-sm block mt-1">Follow requests as token slots, page tables, and GPU batches evolve during serving</span>
+                            <span class="font-semibold text-indigo-600">PagedAttention Memory and Batching</span>
+                            <span class="text-gray-600 text-sm block mt-1">See why max-length KV reservation wastes memory and how paged blocks enable better batching</span>
                         </a>
                     </li>
                     <li>
@@ -1023,98 +993,9 @@
                         </a>
                     </li>
                     <li>
-                        <a href="nlp/transformers/masked-attention2.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Masked Attention Matrix Walkthrough</span>
-                            <span class="text-gray-600 text-sm block mt-1">Hover through QK scores, causal masks, softmax weights, and token-level labels</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/perplexity.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Perplexity Explorer</span>
-                            <span class="text-gray-600 text-sm block mt-1">Connect token probabilities, cross-entropy, and perplexity with editable language-model examples</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/beam-greedy-temperature.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Greedy, Beam, and Temperature Decoding</span>
-                            <span class="text-gray-600 text-sm block mt-1">Compare deterministic, beam-search, and temperature-controlled decoding paths</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/top-k-p.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Top-k and Top-p Sampling</span>
-                            <span class="text-gray-600 text-sm block mt-1">Interact with vocabulary truncation, nucleus thresholds, and sampled token outcomes</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/sampling-distribution-temperature-topk-topp.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Sampling Distribution Controls</span>
-                            <span class="text-gray-600 text-sm block mt-1">Adjust temperature, repetition penalty, top-k, and top-p to reshape a token distribution</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/contrastive-decoding.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Contrastive Decoding Sandbox</span>
-                            <span class="text-gray-600 text-sm block mt-1">Balance expert and amateur model probabilities to penalize degenerate generations</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/speculative-decoding.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">Speculative Decoding Sandbox</span>
-                            <span class="text-gray-600 text-sm block mt-1">See how a draft model proposes tokens and a larger model verifies them in parallel</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="nlp/transformers/rlhf.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-indigo-600">RLHF Pipeline Visualizer</span>
-                            <span class="text-gray-600 text-sm block mt-1">Trace supervised fine-tuning, preference modeling, rewards, and policy optimization</span>
-                        </a>
-                    </li>
-                    <li>
                         <a href="nlp/history-of-language-models.html" class="viz-link block p-3 rounded-lg">
                             <span class="font-semibold text-indigo-600">History of Language Models</span>
                             <span class="text-gray-600 text-sm block mt-1">Walk the timeline from N-grams and BoW through RNNs, attention, BERT, and GPT-style generation</span>
-                        </a>
-                    </li>
-                </ul>
-            </div>
-        </section>
-
-        <!-- Quantization -->
-        <section class="mb-12 catalog-section">
-            <div class="category-card bg-white rounded-xl shadow-md p-8">
-                <div class="flex items-center gap-3 mb-6">
-                    <div class="w-12 h-12 bg-cyan-100 rounded-lg flex items-center justify-center text-2xl">
-                        🧮
-                    </div>
-                    <div>
-                        <h2 class="text-2xl font-bold text-gray-900">Quantization</h2>
-                        <p class="text-gray-600 text-sm">Numeric formats, scale/zero-point math, and quantized training/inference behavior</p>
-                    </div>
-                </div>
-                <ul class="space-y-3">
-                    <li>
-                        <a href="quantization/quantization-basics.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-cyan-700">Quantization Basics</span>
-                            <span class="text-gray-600 text-sm block mt-1">Explore bit depth, scale, zero-point, clipping, rounding, and reconstruction error</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="quantization/fp32-fp16.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-cyan-700">Floating-Point Format Explorer</span>
-                            <span class="text-gray-600 text-sm block mt-1">Compare FP32, BF16, FP16, and FP8 layouts, ranges, precision, and special values</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="quantization/qat.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-cyan-700">Quantization-Aware Training</span>
-                            <span class="text-gray-600 text-sm block mt-1">Inspect fake quantization, straight-through estimators, calibration, and granularity choices</span>
-                        </a>
-                    </li>
-                    <li>
-                        <a href="quantization/qat2.html" class="viz-link block p-3 rounded-lg">
-                            <span class="font-semibold text-cyan-700">QAT Training Loop</span>
-                            <span class="text-gray-600 text-sm block mt-1">Step through forward quantization noise, backward gradients, and post-training deployment</span>
                         </a>
                     </li>
                 </ul>
