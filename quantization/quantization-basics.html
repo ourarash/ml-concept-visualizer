@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Quantization Laboratory</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        .math { font-family: 'JetBrains Mono', monospace; }
+
+        /* Custom Colors */
+        .color-r { color: #8b5cf6; } /* Purple for Real r */
+        .color-q { color: #3b82f6; } /* Blue for Quantized q */
+        .color-s { color: #ef4444; } /* Red for Scale S */
+        .color-z { color: #10b981; } /* Green for Zero Point Z */
+        .color-err { color: #f59e0b; } /* Orange for Error */
+
+        canvas {
+            touch-action: none;
+            cursor: crosshair;
+        }
+
+        input[type=range] {
+            accent-color: #8b5cf6;
+        }
+
+        .binary-box {
+            letter-spacing: 0.1em;
+        }
+    </style>
+</head>
+<body class="text-slate-800 p-4 md:p-8">
+
+<div class="max-w-6xl mx-auto bg-white rounded-xl shadow-lg overflow-hidden border border-slate-200">
+    <!-- Header -->
+    <div class="bg-slate-900 text-white p-6">
+        <h1 class="text-2xl font-bold mb-2">Interactive Quantization Laboratory</h1>
+        <p class="text-slate-300 text-sm">Visualize the mapping of continuous real values to discrete integers. New enhancements include a 2D Staircase Function, live Binary translation, an Auto-Sweep tool, a Strict Symmetric mode, and an Error Landscape visualizer.</p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-4">
+        <!-- Controls Sidebar -->
+        <div class="bg-slate-50 p-6 border-r border-slate-200 lg:col-span-1 flex flex-col gap-6">
+            <div>
+                <h3 class="font-semibold mb-3 text-slate-700 uppercase text-xs tracking-wider">Presets</h3>
+                <div class="flex flex-col gap-2">
+                    <button id="btn-sym" class="w-full bg-white border border-slate-300 hover:bg-slate-100 text-xs py-2 px-3 rounded shadow-sm transition">Symmetric Weights (e.g. W8A8)</button>
+                    <button id="btn-asym" class="w-full bg-white border border-slate-300 hover:bg-slate-100 text-xs py-2 px-3 rounded shadow-sm transition">Asymmetric Activations (e.g. ReLU)</button>
+                </div>
+            </div>
+
+            <div>
+                <h3 class="font-semibold mb-3 text-slate-700 uppercase text-xs tracking-wider">System Parameters</h3>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Bit Depth (<span class="math">b</span>): <span id="val-b" class="font-bold">4</span> bits</label>
+                    <input type="range" id="input-b" min="2" max="8" value="4" class="w-full">
+                    <div class="flex justify-between text-xs text-slate-500 mt-1"><span>2</span><span>8</span></div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="block text-sm font-medium mb-1">Target Type</label>
+                    <div class="flex flex-col gap-2 bg-white p-2 border border-slate-200 rounded">
+                        <div class="flex gap-4 text-sm">
+                            <label class="flex items-center gap-1 cursor-pointer">
+                                <input type="radio" name="signType" value="signed" checked> Signed
+                            </label>
+                            <label class="flex items-center gap-1 cursor-pointer">
+                                <input type="radio" name="signType" value="unsigned"> Unsigned
+                            </label>
+                        </div>
+                        <!-- NEW: Strict Symmetric Toggle -->
+                        <div class="pt-2 border-t border-slate-100 text-xs">
+                            <label class="flex items-center gap-1 cursor-pointer text-slate-600" id="label-strict">
+                                <input type="checkbox" id="check-strict" class="accent-indigo-600">
+                                <span>Strict Symmetric <br><span class="text-slate-400 italic">(e.g. [-127, 127] instead of [-128, 127])</span></span>
+                            </label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="block text-sm font-medium mb-1"><span class="math color-r">r<sub>min</sub></span></label>
+                        <input type="number" id="input-rmin" value="-1.0" step="0.1" class="w-full border border-slate-300 rounded px-2 py-1 text-sm math bg-white">
+                    </div>
+                    <div>
+                        <label class="block text-sm font-medium mb-1"><span class="math color-r">r<sub>max</sub></span></label>
+                        <input type="number" id="input-rmax" value="1.0" step="0.1" class="w-full border border-slate-300 rounded px-2 py-1 text-sm math bg-white">
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-indigo-50 border border-indigo-200 p-4 rounded-lg shadow-sm">
+                <div class="flex justify-between items-center mb-2">
+                    <h3 class="font-semibold text-indigo-900 uppercase text-xs tracking-wider">Test Value</h3>
+                    <button id="btn-play" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-2 py-1 rounded shadow-sm transition-colors flex items-center gap-1">
+                        <span id="play-icon">▶</span> <span id="play-text">Sweep</span>
+                    </button>
+                </div>
+                <label class="block text-sm font-medium mb-1">Real Input (<span class="math color-r">r</span>): <span id="val-r" class="font-bold color-r">0.45</span></label>
+                <input type="range" id="input-r" min="-2" max="2" value="0.45" step="0.01" class="w-full">
+            </div>
+
+            <div class="bg-white border border-slate-200 p-4 rounded-lg shadow-sm">
+                <h3 class="font-semibold mb-3 text-slate-700 uppercase text-xs tracking-wider">Display</h3>
+                <label class="flex items-start gap-2 cursor-pointer text-sm text-slate-700">
+                    <input type="checkbox" id="check-show-error" class="mt-0.5 accent-amber-500" checked>
+                    <span>
+                        Show error panels
+                        <span class="block text-xs text-slate-400 mt-0.5">Error Landscape and Error Analysis</span>
+                    </span>
+                </label>
+            </div>
+        </div>
+
+        <!-- Main Visualization -->
+        <div class="p-6 lg:col-span-3 flex flex-col">
+
+            <!-- Dual Canvas Area -> Now Triple Canvas Area -->
+            <div id="visual-grid" class="grid grid-cols-1 xl:grid-cols-3 gap-4 mb-6">
+                <!-- Canvas 1: 1D Mapping -->
+                <div class="relative w-full h-72 border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm flex flex-col">
+                    <div class="absolute top-2 left-2 text-xs text-slate-500 font-semibold pointer-events-none bg-white/90 px-2 py-1 rounded shadow-sm border border-slate-100 z-10">1D Mapping View</div>
+                    <canvas id="qCanvas" class="w-full h-full flex-1"></canvas>
+                </div>
+                <!-- Canvas 2: Staircase Transfer Function -->
+                <div class="relative w-full h-72 border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm flex flex-col">
+                    <div class="absolute top-2 left-2 text-xs text-slate-500 font-semibold pointer-events-none bg-white/90 px-2 py-1 rounded shadow-sm border border-slate-100 z-10">Staircase Transfer Function</div>
+                    <canvas id="stepCanvas" class="w-full h-full flex-1"></canvas>
+                </div>
+                <!-- Canvas 3: Error Landscape (NEW) -->
+                <div id="error-landscape-panel" class="relative w-full h-72 border border-slate-200 rounded-lg bg-white overflow-hidden shadow-sm flex flex-col">
+                    <div class="absolute top-2 left-2 text-xs text-slate-500 font-semibold pointer-events-none bg-white/90 px-2 py-1 rounded shadow-sm border border-slate-100 z-10">Error Landscape (r - r̂)</div>
+                    <canvas id="errCanvas" class="w-full h-full flex-1"></canvas>
+                </div>
+            </div>
+
+            <!-- Mathematical Formulation Board -->
+            <div id="math-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-5 rounded-lg border border-slate-200">
+
+                <!-- Constants -->
+                <div class="md:col-span-1">
+                    <h3 class="font-semibold mb-3 border-b pb-2 text-sm text-slate-600">1. Calculate Constants</h3>
+                    <div class="math text-sm space-y-3">
+                        <div class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100">
+                            <span>Target Bounds:</span>
+                            <span><span class="color-q">q</span> ∈ [<span id="out-qmin" class="font-bold">-8</span>, <span id="out-qmax" class="font-bold">7</span>]</span>
+                        </div>
+                        <div class="flex flex-col bg-white p-2 rounded shadow-sm border border-slate-100">
+                            <div class="flex gap-2">
+                                <span class="color-s font-bold">S</span> =
+                                <span class="text-center">
+                                    <span class="block border-b border-slate-400 color-r">r<sub>max</sub> - r<sub>min</sub></span>
+                                    <span class="block color-q">q<sub>max</sub> - q<sub>min</sub></span>
+                                </span>
+                                <span class="mt-2">= <span id="out-s" class="font-bold">0.1333</span></span>
+                            </div>
+                        </div>
+                        <div class="flex justify-between items-center bg-white p-2 rounded shadow-sm border border-slate-100">
+                            <span><span class="color-z font-bold">Z</span> = round(<span class="color-q">q<sub>min</sub></span> - <span class="color-r">r<sub>min</sub></span>/<span class="color-s">S</span>)</span>
+                            <span>= <span id="out-z" class="font-bold color-z">0</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Process -->
+                <div class="md:col-span-1">
+                    <h3 class="font-semibold mb-3 border-b pb-2 text-sm text-slate-600">2. Quantize & Dequantize</h3>
+                    <div class="math text-sm space-y-3">
+                        <div class="flex flex-col bg-white p-2 rounded shadow-sm border border-indigo-200">
+                            <span class="text-xs text-slate-500 mb-1">Quantize (Real → Integer):</span>
+                            <div class="flex justify-between items-end">
+                                <span><span class="color-q font-bold">q</span> = clip(round(<span class="color-r">r</span>/<span class="color-s">S</span>)+<span class="color-z">Z</span>)</span>
+                                <span class="text-right">= <span id="out-q" class="font-bold color-q text-xl">3</span></span>
+                            </div>
+                            <!-- NEW: Binary String -->
+                            <div class="mt-2 pt-2 border-t border-indigo-100 flex justify-between items-center text-xs">
+                                <span class="text-slate-500">Binary (Bits):</span>
+                                <span id="out-binary" class="font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded binary-box">0011</span>
+                            </div>
+                        </div>
+                        <div class="flex flex-col bg-white p-2 rounded shadow-sm border border-slate-100">
+                            <span class="text-xs text-slate-500 mb-1">Dequantize (Integer → Approx Real):</span>
+                            <span><span class="color-r font-bold">r̂</span> = <span class="color-s">S</span>(<span class="color-q">q</span> - <span class="color-z">Z</span>)</span>
+                            <span class="text-right">= <span id="out-rhat" class="font-bold color-r">0.4000</span></span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Error Analysis -->
+                <div id="error-analysis-panel" class="md:col-span-1">
+                    <h3 class="font-semibold mb-2 border-b pb-2 text-sm text-slate-600">3. Error Analysis (<span class="math">Error = r - r̂</span>)</h3>
+                    <div class="flex flex-col gap-2 math text-sm bg-white p-3 rounded shadow-sm border border-slate-100 h-[170px] justify-center">
+                        <div class="flex justify-between items-center border-b border-slate-100 pb-2">
+                            <span class="text-xs text-slate-500 font-semibold uppercase">Total Error</span>
+                            <span id="out-err-total" class="font-bold text-lg color-err">0.0500</span>
+                        </div>
+                        <div class="flex justify-between items-center">
+                            <span class="text-xs text-slate-500">Rounding Error</span>
+                            <span id="out-err-round" class="font-bold">0.0500</span>
+                        </div>
+                        <!-- Rounding Error visual bar -->
+                        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden mb-2">
+                            <div id="bar-err-round" class="h-full bg-amber-400 transition-all duration-75" style="width: 0%"></div>
+                        </div>
+
+                        <div class="flex justify-between items-center mt-1">
+                            <span class="text-xs text-slate-500">Clipping Error</span>
+                            <span id="out-err-clip" class="font-bold">0.0000</span>
+                        </div>
+                        <!-- Clipping Error visual bar -->
+                        <div class="w-full h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                            <div id="bar-err-clip" class="h-full bg-red-500 transition-all duration-75" style="width: 0%"></div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // System State
+    const state = {
+        b: 4,
+        rMin: -1.0,
+        rMax: 1.0,
+        isSigned: true,
+        strictSym: false, // NEW STATE
+        r: 0.45,
+        // Derived parameters
+        qMin: 0,
+        qMax: 0,
+        S: 0,
+        Z: 0,
+        q: 0,
+        rHat: 0,
+        errTotal: 0,
+        errRound: 0,
+        errClip: 0,
+        showErrorPanels: true
+    };
+
+    // Animation State
+    let isAnimating = false;
+    let animDirection = 1;
+    let animationFrameId = null;
+
+    // DOM Elements
+    const els = {
+        inputB: document.getElementById('input-b'),
+        valB: document.getElementById('val-b'),
+        inputRMin: document.getElementById('input-rmin'),
+        inputRMax: document.getElementById('input-rmax'),
+        inputR: document.getElementById('input-r'),
+        valR: document.getElementById('val-r'),
+        radiosSign: document.getElementsByName('signType'),
+        checkStrict: document.getElementById('check-strict'), // NEW ELEMENT
+        labelStrict: document.getElementById('label-strict'), // NEW ELEMENT
+        checkShowError: document.getElementById('check-show-error'),
+
+        btnSym: document.getElementById('btn-sym'),
+        btnAsym: document.getElementById('btn-asym'),
+        btnPlay: document.getElementById('btn-play'),
+        playIcon: document.getElementById('play-icon'),
+        playText: document.getElementById('play-text'),
+
+        outQmin: document.getElementById('out-qmin'),
+        outQmax: document.getElementById('out-qmax'),
+        outS: document.getElementById('out-s'),
+        outZ: document.getElementById('out-z'),
+        outQ: document.getElementById('out-q'),
+        outBinary: document.getElementById('out-binary'),
+        outRhat: document.getElementById('out-rhat'),
+
+        outErrTotal: document.getElementById('out-err-total'),
+        outErrRound: document.getElementById('out-err-round'),
+        outErrClip: document.getElementById('out-err-clip'),
+        barErrRound: document.getElementById('bar-err-round'),
+        barErrClip: document.getElementById('bar-err-clip'),
+
+        canvas: document.getElementById('qCanvas'),
+        stepCanvas: document.getElementById('stepCanvas'),
+        errCanvas: document.getElementById('errCanvas'), // NEW CANVAS
+        visualGrid: document.getElementById('visual-grid'),
+        mathGrid: document.getElementById('math-grid'),
+        errorLandscapePanel: document.getElementById('error-landscape-panel'),
+        errorAnalysisPanel: document.getElementById('error-analysis-panel')
+    };
+
+    const ctx = els.canvas.getContext('2d');
+    const stepCtx = els.stepCanvas.getContext('2d');
+    const errCtx = els.errCanvas.getContext('2d'); // NEW CONTEXT
+    let isDragging = false;
+
+    // Helper: Convert to Binary String
+    function toBinaryString(num, bits) {
+        if (num >= 0) return num.toString(2).padStart(bits, '0');
+        // Two's complement for negative
+        return ((1 << bits) + num).toString(2).padStart(bits, '0');
+    }
+
+    // Mathematics & State Update
+    function updateCalculations() {
+        // Enforce rMin < rMax
+        if (state.rMin >= state.rMax) {
+            state.rMax = state.rMin + 0.1;
+            els.inputRMax.value = state.rMax.toFixed(2);
+        }
+
+        // 1. Calculate Q bounds
+        if (state.isSigned) {
+            state.qMin = -(Math.pow(2, state.b - 1));
+            // NEW: Apply Strict Symmetric constraint
+            if (state.strictSym) state.qMin += 1;
+            state.qMax = Math.pow(2, state.b - 1) - 1;
+        } else {
+            state.qMin = 0;
+            state.qMax = Math.pow(2, state.b) - 1;
+        }
+
+        // 2. Calculate S and Z
+        state.S = (state.rMax - state.rMin) / (state.qMax - state.qMin);
+        state.Z = Math.round(state.qMin - (state.rMin / state.S));
+        if (Object.is(state.Z, -0)) state.Z = 0;
+
+        // 3. Quantize
+        let q_unclipped = Math.round(state.r / state.S) + state.Z;
+        state.q = Math.max(state.qMin, Math.min(state.qMax, q_unclipped));
+
+        // 4. Dequantize
+        state.rHat = state.S * (state.q - state.Z);
+
+        // 5. Calculate Errors
+        state.errTotal = state.r - state.rHat;
+
+        let r_clipped = Math.max(state.rMin, Math.min(state.rMax, state.r));
+        state.errClip = state.r - r_clipped;
+        state.errRound = r_clipped - state.rHat;
+
+        // Update Slider bounds to allow showing clipping
+        let padding = (state.rMax - state.rMin) * 0.3;
+        els.inputR.min = state.rMin - padding;
+        els.inputR.max = state.rMax + padding;
+
+        // Toggle visibility/opacity of strict mode based on sign
+        if (state.isSigned) {
+            els.checkStrict.disabled = false;
+            els.labelStrict.classList.remove('opacity-50', 'cursor-not-allowed');
+        } else {
+            els.checkStrict.disabled = true;
+            els.labelStrict.classList.add('opacity-50', 'cursor-not-allowed');
+            if(state.strictSym) {
+                state.strictSym = false;
+                els.checkStrict.checked = false;
+            }
+        }
+
+        updateDOM();
+        drawCanvas();
+        drawStepCanvas();
+        if (state.showErrorPanels) drawErrCanvas(); // NEW DRAW CALL
+    }
+
+    function updateErrorPanelVisibility() {
+        els.errorLandscapePanel.classList.toggle('hidden', !state.showErrorPanels);
+        els.errorAnalysisPanel.classList.toggle('hidden', !state.showErrorPanels);
+        els.visualGrid.classList.toggle('xl:grid-cols-3', state.showErrorPanels);
+        els.visualGrid.classList.toggle('xl:grid-cols-2', !state.showErrorPanels);
+        els.mathGrid.classList.toggle('md:grid-cols-3', state.showErrorPanels);
+        els.mathGrid.classList.toggle('md:grid-cols-2', !state.showErrorPanels);
+
+        requestAnimationFrame(() => {
+            drawCanvas();
+            drawStepCanvas();
+            if (state.showErrorPanels) drawErrCanvas();
+        });
+    }
+
+    function updateDOM() {
+        els.valB.textContent = state.b;
+        els.valR.textContent = state.r.toFixed(3);
+        els.inputR.value = state.r;
+        els.checkShowError.checked = state.showErrorPanels;
+
+        els.outQmin.textContent = state.qMin;
+        els.outQmax.textContent = state.qMax;
+
+        els.outS.textContent = state.S.toFixed(5);
+        els.outZ.textContent = state.Z;
+
+        els.outQ.textContent = state.q;
+
+        // Update Binary representation (Group by 4 bits for readability if 8 bits)
+        let binStr = toBinaryString(state.q, state.b);
+        if (state.b === 8) binStr = binStr.slice(0,4) + ' ' + binStr.slice(4);
+        els.outBinary.textContent = binStr;
+
+        els.outRhat.textContent = state.rHat.toFixed(4);
+
+        els.outErrTotal.textContent = Math.abs(state.errTotal).toFixed(4);
+        els.outErrRound.textContent = Math.abs(state.errRound).toFixed(4);
+        els.outErrClip.textContent = Math.abs(state.errClip).toFixed(4);
+
+        // Bar graph updates
+        const maxExpectedErr = state.S / 2; // Max rounding error
+        const maxRange = state.rMax - state.rMin;
+
+        let roundPct = Math.min(100, (Math.abs(state.errRound) / maxExpectedErr) * 100);
+        let clipPct = Math.min(100, (Math.abs(state.errClip) / maxRange) * 100 * 2);
+
+        els.barErrRound.style.width = `${roundPct}%`;
+        els.barErrClip.style.width = `${clipPct}%`;
+    }
+
+    // -- CANVAS 1: 1D Number Lines (Existing) --
+    function drawCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = els.canvas.getBoundingClientRect();
+        els.canvas.width = rect.width * dpr;
+        els.canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const width = rect.width;
+        const height = rect.height;
+
+        ctx.clearRect(0, 0, width, height);
+
+        const yR = height * 0.35;
+        const yQ = height * 0.75;
+        const marginX = 50;
+        const plotWidth = width - marginX * 2;
+
+        const rRange = state.rMax - state.rMin;
+        const pad = rRange * 0.25;
+        const visMin = state.rMin - pad;
+        const visMax = state.rMax + pad;
+
+        const rToX = (val) => marginX + ((val - visMin) / (visMax - visMin)) * plotWidth;
+        const xToR = (x) => visMin + ((x - marginX) / plotWidth) * (visMax - visMin);
+
+        // Draw Clipping Zones
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.05)';
+        ctx.fillRect(0, 0, rToX(state.rMin), height);
+        ctx.fillRect(rToX(state.rMax), 0, width, height);
+
+        // Axes
+        ctx.beginPath(); ctx.moveTo(0, yR); ctx.lineTo(width, yR); ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(0, yQ); ctx.lineTo(width, yQ); ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 2; ctx.stroke();
+
+        ctx.font = 'bold 12px "JetBrains Mono", monospace';
+        ctx.fillStyle = '#8b5cf6'; ctx.fillText('Real', 10, yR - 10);
+        ctx.fillStyle = '#3b82f6'; ctx.fillText('Int', 10, yQ + 20);
+
+        // Ticks
+        ctx.font = '10px "JetBrains Mono", monospace';
+        ctx.textAlign = 'center';
+
+        for (let qt = state.qMin; qt <= state.qMax; qt++) {
+            let rt = state.S * (qt - state.Z);
+            let xt = rToX(rt);
+
+            ctx.beginPath(); ctx.moveTo(xt, yQ - 4); ctx.lineTo(xt, yQ + 4); ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1; ctx.stroke();
+
+            let shouldLabel = (state.b <= 4) || (qt === state.qMin || qt === state.qMax || qt === state.Z) || (state.b === 8 && qt % 64 === 0);
+            if (shouldLabel) {
+                ctx.fillStyle = (qt === state.Z) ? '#10b981' : '#64748b';
+                ctx.fillText(qt, xt, yQ + 16);
+            }
+        }
+
+        // Boundaries
+        const drawBoundaryLine = (rVal, qVal, labelR) => {
+            const xr = rToX(rVal); const xq = rToX(state.S * (qVal - state.Z));
+            ctx.beginPath(); ctx.setLineDash([4, 4]); ctx.moveTo(xr, yR); ctx.lineTo(xq, yQ); ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+            ctx.beginPath(); ctx.arc(xr, yR, 3, 0, Math.PI * 2); ctx.fillStyle = '#8b5cf6'; ctx.fill(); ctx.fillText(labelR, xr, yR - 12);
+        };
+        drawBoundaryLine(state.rMin, state.qMin, 'r_min');
+        drawBoundaryLine(state.rMax, state.qMax, 'r_max');
+        drawBoundaryLine(0, state.Z, '0');
+
+        // Current Mapping
+        const rx = rToX(state.r);
+        const qx = rToX(state.rHat);
+
+        // Arrow
+        ctx.beginPath(); ctx.moveTo(rx, yR); ctx.lineTo(qx, yQ - 6); ctx.strokeStyle = state.errClip ? '#ef4444' : '#6366f1'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(qx, yQ - 2); ctx.lineTo(qx - 4, yQ - 10); ctx.lineTo(qx + 4, yQ - 10); ctx.fillStyle = state.errClip ? '#ef4444' : '#6366f1'; ctx.fill();
+
+        // Dots
+        ctx.beginPath(); ctx.arc(rx, yR, 6, 0, Math.PI * 2); ctx.fillStyle = '#8b5cf6'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.arc(qx, yQ, 6, 0, Math.PI * 2); ctx.fillStyle = '#3b82f6'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+
+        // Error Vis
+        if (Math.abs(state.errTotal) > 0.0001) {
+            ctx.beginPath(); ctx.moveTo(rx, yR + 15); ctx.lineTo(qx, yR + 15); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 2; ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(rx, yR + 10); ctx.lineTo(rx, yR + 20); ctx.moveTo(qx, yR + 10); ctx.lineTo(qx, yR + 20); ctx.stroke();
+        }
+
+        els.canvas.xToR = xToR;
+    }
+
+    // -- CANVAS 2: 2D Staircase Function (NEW) --
+    function drawStepCanvas() {
+        const dpr = window.devicePixelRatio || 1;
+        const rect = els.stepCanvas.getBoundingClientRect();
+        els.stepCanvas.width = rect.width * dpr;
+        els.stepCanvas.height = rect.height * dpr;
+        stepCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const width = rect.width;
+        const height = rect.height;
+
+        stepCtx.clearRect(0, 0, width, height);
+
+        const marginX = 40;
+        const marginY = 40;
+        const plotWidth = width - marginX * 2;
+        const plotHeight = height - marginY * 2;
+
+        const rRange = state.rMax - state.rMin;
+        const pad = rRange * 0.25;
+        const visMin = state.rMin - pad;
+        const visMax = state.rMax + pad;
+
+        const qPad = (state.qMax - state.qMin) * 0.15;
+        const qVisMin = state.qMin - qPad;
+        const qVisMax = state.qMax + qPad;
+
+        const rToX = (val) => marginX + ((val - visMin) / (visMax - visMin)) * plotWidth;
+        const qToY = (val) => height - marginY - ((val - qVisMin) / (qVisMax - qVisMin)) * plotHeight;
+
+        // Draw Clipping Zones
+        stepCtx.fillStyle = 'rgba(239, 68, 68, 0.05)';
+        stepCtx.fillRect(0, 0, rToX(state.rMin), height);
+        stepCtx.fillRect(rToX(state.rMax), 0, width, height);
+
+        // Draw Axes (X=0, Y=0 if in view)
+        stepCtx.strokeStyle = '#e2e8f0';
+        stepCtx.lineWidth = 1;
+
+        // Zero axes
+        let x0 = rToX(0);
+        if (x0 > marginX && x0 < width - marginX) {
+            stepCtx.beginPath(); stepCtx.moveTo(x0, marginY); stepCtx.lineTo(x0, height - marginY); stepCtx.stroke();
+        }
+        let y0 = qToY(0);
+        if (y0 > marginY && y0 < height - marginY) {
+             stepCtx.beginPath(); stepCtx.moveTo(marginX, y0); stepCtx.lineTo(width - marginX, y0); stepCtx.stroke();
+        }
+
+        // Draw Grid and Labels
+        stepCtx.font = '10px "JetBrains Mono", monospace';
+        stepCtx.fillStyle = '#64748b';
+        stepCtx.textAlign = 'right';
+        stepCtx.textBaseline = 'middle';
+
+        // Q labels (Y axis)
+        [state.qMin, state.Z, state.qMax].forEach(q => {
+            let y = qToY(q);
+            stepCtx.fillText(q, marginX - 5, y);
+            stepCtx.beginPath(); stepCtx.moveTo(marginX-3, y); stepCtx.lineTo(marginX, y); stepCtx.strokeStyle='#cbd5e1'; stepCtx.stroke();
+        });
+
+        // R labels (X axis)
+        stepCtx.textAlign = 'center';
+        stepCtx.textBaseline = 'top';
+        [state.rMin, 0, state.rMax].forEach(r => {
+            let x = rToX(r);
+            stepCtx.fillText(r.toFixed(1), x, height - marginY + 5);
+            stepCtx.beginPath(); stepCtx.moveTo(x, height - marginY); stepCtx.lineTo(x, height - marginY + 3); stepCtx.stroke();
+        });
+
+        // Draw Staircase Line (Perfect vertical/horizontal segments)
+        stepCtx.beginPath();
+        stepCtx.strokeStyle = '#10b981'; // Green from image 1
+        stepCtx.lineWidth = 1.5;
+
+        let prevQ = null;
+        let prevY = null;
+
+        // Iterate pixel by pixel for robust rendering of the math
+        for(let px = marginX; px <= width - marginX; px++) {
+            let rVal = visMin + ((px - marginX) / plotWidth) * (visMax - visMin);
+            let qVal = Math.max(state.qMin, Math.min(state.qMax, Math.round(rVal / state.S) + state.Z));
+            let py = qToY(qVal);
+
+            if (prevQ === null) {
+                stepCtx.moveTo(px, py);
+            } else if (qVal !== prevQ) {
+                stepCtx.lineTo(px, prevY); // Vertical wall up to new Y
+                stepCtx.lineTo(px, py);    // Start horizontal
+            } else {
+                stepCtx.lineTo(px, py);
+            }
+            prevQ = qVal;
+            prevY = py;
+        }
+        stepCtx.stroke();
+
+        // Draw Current Point
+        let currentX = rToX(state.r);
+        let currentY = qToY(state.q);
+
+        stepCtx.beginPath();
+        stepCtx.arc(currentX, currentY, 5, 0, Math.PI * 2);
+        stepCtx.fillStyle = '#3b82f6';
+        stepCtx.fill();
+        stepCtx.strokeStyle = '#ffffff';
+        stepCtx.lineWidth = 1;
+        stepCtx.stroke();
+
+        // Drop lines to axes for current point
+        stepCtx.beginPath();
+        stepCtx.setLineDash([3, 3]);
+        stepCtx.moveTo(currentX, currentY); stepCtx.lineTo(currentX, height - marginY);
+        stepCtx.moveTo(currentX, currentY); stepCtx.lineTo(marginX, currentY);
+        stepCtx.strokeStyle = '#cbd5e1';
+        stepCtx.stroke();
+        stepCtx.setLineDash([]);
+    }
+
+    // -- CANVAS 3: Error Landscape Function (NEW) --
+    function drawErrCanvas() {
+        if (!state.showErrorPanels) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        const rect = els.errCanvas.getBoundingClientRect();
+        els.errCanvas.width = rect.width * dpr;
+        els.errCanvas.height = rect.height * dpr;
+        errCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const width = rect.width;
+        const height = rect.height;
+
+        errCtx.clearRect(0, 0, width, height);
+
+        const marginX = 40;
+        const marginY = 40;
+        const plotWidth = width - marginX * 2;
+        const plotHeight = height - marginY * 2;
+
+        const rRange = state.rMax - state.rMin;
+        const pad = rRange * 0.25;
+        const visMin = state.rMin - pad;
+        const visMax = state.rMax + pad;
+
+        const rToX = (val) => marginX + ((val - visMin) / (visMax - visMin)) * plotWidth;
+
+        // Dynamic Y scale: Make the sawtooth take up roughly half the height
+        // allowing the clipping error to visibly shoot off the top/bottom.
+        const maxExpectedErr = state.S * 2;
+        const errToY = (err) => (height / 2) - (err / maxExpectedErr) * (plotHeight / 2);
+
+        // Draw Clipping Zones
+        errCtx.fillStyle = 'rgba(239, 68, 68, 0.05)';
+        errCtx.fillRect(0, 0, rToX(state.rMin), height);
+        errCtx.fillRect(rToX(state.rMax), 0, width, height);
+
+        // Draw 0 Error Line
+        errCtx.strokeStyle = '#cbd5e1';
+        errCtx.lineWidth = 1;
+        errCtx.beginPath();
+        errCtx.moveTo(marginX, height / 2);
+        errCtx.lineTo(width - marginX, height / 2);
+        errCtx.stroke();
+
+        // Draw Labels
+        errCtx.font = '10px "JetBrains Mono", monospace';
+        errCtx.fillStyle = '#64748b';
+        errCtx.textAlign = 'right';
+        errCtx.textBaseline = 'middle';
+        errCtx.fillText('0', marginX - 5, height / 2);
+        errCtx.fillText('+S/2', marginX - 5, errToY(state.S / 2));
+        errCtx.fillText('-S/2', marginX - 5, errToY(-state.S / 2));
+
+        errCtx.beginPath();
+        errCtx.setLineDash([2, 4]);
+        errCtx.moveTo(marginX, errToY(state.S / 2)); errCtx.lineTo(width - marginX, errToY(state.S / 2));
+        errCtx.moveTo(marginX, errToY(-state.S / 2)); errCtx.lineTo(width - marginX, errToY(-state.S / 2));
+        errCtx.stroke();
+        errCtx.setLineDash([]);
+
+        // Plot Error Function
+        errCtx.beginPath();
+        errCtx.strokeStyle = '#f59e0b'; // Orange for error
+        errCtx.lineWidth = 1.5;
+
+        for(let px = marginX; px <= width - marginX; px++) {
+            let rVal = visMin + ((px - marginX) / plotWidth) * (visMax - visMin);
+            let qVal = Math.max(state.qMin, Math.min(state.qMax, Math.round(rVal / state.S) + state.Z));
+            let rHatVal = state.S * (qVal - state.Z);
+            let errVal = rVal - rHatVal;
+
+            let py = errToY(errVal);
+
+            if (px === marginX) {
+                errCtx.moveTo(px, py);
+            } else {
+                errCtx.lineTo(px, py);
+            }
+        }
+        errCtx.stroke();
+
+        // Draw Current Point
+        let currentX = rToX(state.r);
+        let currentY = errToY(state.errTotal);
+
+        errCtx.beginPath();
+        errCtx.arc(currentX, currentY, 5, 0, Math.PI * 2);
+        errCtx.fillStyle = state.errClip ? '#ef4444' : '#f59e0b';
+        errCtx.fill();
+        errCtx.strokeStyle = '#ffffff';
+        errCtx.lineWidth = 1;
+        errCtx.stroke();
+
+        // Draw drop line to 0
+        errCtx.beginPath();
+        errCtx.moveTo(currentX, currentY);
+        errCtx.lineTo(currentX, height / 2);
+        errCtx.strokeStyle = state.errClip ? '#ef4444' : '#f59e0b';
+        errCtx.stroke();
+    }
+
+    // -- INTERACTION & ANIMATION --
+
+    function stopAnimation() {
+        if(isAnimating) {
+            isAnimating = false;
+            cancelAnimationFrame(animationFrameId);
+            els.playIcon.textContent = '▶';
+            els.playText.textContent = 'Sweep';
+            els.btnPlay.classList.replace('bg-red-500', 'bg-indigo-600');
+            els.btnPlay.classList.replace('hover:bg-red-600', 'hover:bg-indigo-700');
+        }
+    }
+
+    function toggleAnimation() {
+        if(isAnimating) {
+            stopAnimation();
+        } else {
+            isAnimating = true;
+            els.playIcon.textContent = '⏸';
+            els.playText.textContent = 'Stop';
+            els.btnPlay.classList.replace('bg-indigo-600', 'bg-red-500');
+            els.btnPlay.classList.replace('hover:bg-indigo-700', 'hover:bg-red-600');
+
+            let padding = (state.rMax - state.rMin) * 0.2;
+            let speed = (state.rMax - state.rMin) * 0.003;
+
+            function animate() {
+                if(!isAnimating) return;
+
+                state.r += speed * animDirection;
+
+                if (state.r > state.rMax + padding) {
+                    state.r = state.rMax + padding;
+                    animDirection = -1;
+                } else if (state.r < state.rMin - padding) {
+                    state.r = state.rMin - padding;
+                    animDirection = 1;
+                }
+
+                updateCalculations();
+                animationFrameId = requestAnimationFrame(animate);
+            }
+            animate();
+        }
+    }
+
+    function handleCanvasInteraction(e) {
+        if (!isDragging && e.type !== 'mousedown' && e.type !== 'touchstart') return;
+        stopAnimation(); // User takes control
+
+        e.preventDefault();
+        const rect = els.canvas.getBoundingClientRect();
+        let clientX = e.clientX;
+        if (e.touches && e.touches.length > 0) clientX = e.touches[0].clientX;
+
+        const x = clientX - rect.left;
+        let newR = els.canvas.xToR(x);
+
+        const rRange = state.rMax - state.rMin;
+        const visMin = state.rMin - rRange * 0.25;
+        const visMax = state.rMax + rRange * 0.25;
+
+        state.r = Math.max(visMin, Math.min(visMax, newR));
+        updateCalculations();
+    }
+
+    // Event Listeners
+    els.canvas.addEventListener('mousedown', (e) => { isDragging = true; handleCanvasInteraction(e); });
+    els.canvas.addEventListener('mousemove', handleCanvasInteraction);
+    window.addEventListener('mouseup', () => { isDragging = false; });
+    els.canvas.addEventListener('touchstart', (e) => { isDragging = true; handleCanvasInteraction(e); });
+    els.canvas.addEventListener('touchmove', handleCanvasInteraction);
+    window.addEventListener('touchend', () => { isDragging = false; });
+
+    els.inputB.addEventListener('input', (e) => { stopAnimation(); state.b = parseInt(e.target.value); updateCalculations(); });
+    els.inputRMin.addEventListener('input', (e) => { stopAnimation(); state.rMin = parseFloat(e.target.value) || 0; updateCalculations(); });
+    els.inputRMax.addEventListener('input', (e) => { stopAnimation(); state.rMax = parseFloat(e.target.value) || 0; updateCalculations(); });
+    els.inputR.addEventListener('input', (e) => { stopAnimation(); state.r = parseFloat(e.target.value); updateCalculations(); });
+
+    els.radiosSign.forEach(radio => {
+        radio.addEventListener('change', (e) => {
+            stopAnimation();
+            state.isSigned = e.target.value === 'signed';
+            updateCalculations();
+        });
+    });
+
+    // NEW: Strict Symmetric listener
+    els.checkStrict.addEventListener('change', (e) => {
+        stopAnimation();
+        state.strictSym = e.target.checked;
+        updateCalculations();
+    });
+
+    els.checkShowError.addEventListener('change', (e) => {
+        state.showErrorPanels = e.target.checked;
+        updateErrorPanelVisibility();
+    });
+
+    els.btnPlay.addEventListener('click', toggleAnimation);
+
+    // Presets
+    els.btnSym.addEventListener('click', () => {
+        stopAnimation();
+        state.b = 4; els.inputB.value = 4;
+        state.isSigned = true; document.querySelector('input[value="signed"]').checked = true;
+
+        // Emulate image 2 precisely
+        state.strictSym = true; els.checkStrict.checked = true;
+
+        state.rMin = -1.0; state.rMax = 1.0; els.inputRMin.value = "-1.0"; els.inputRMax.value = "1.0";
+        state.r = 0.45;
+        updateCalculations();
+    });
+
+    els.btnAsym.addEventListener('click', () => {
+        stopAnimation();
+        state.b = 4; els.inputB.value = 4;
+        state.isSigned = false; document.querySelector('input[value="unsigned"]').checked = true;
+
+        state.strictSym = false; els.checkStrict.checked = false;
+
+        state.rMin = 0.0; state.rMax = 6.0; els.inputRMin.value = "0.0"; els.inputRMax.value = "6.0";
+        state.r = 2.45;
+        updateCalculations();
+    });
+
+    window.addEventListener('resize', () => {
+        drawCanvas();
+        drawStepCanvas();
+        if (state.showErrorPanels) drawErrCanvas();
+    });
+
+    // Initial render
+    updateCalculations();
+    updateErrorPanelVisibility();
+
+</script>
+</body>
+</html>

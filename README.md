@@ -57,6 +57,17 @@ Interactive visualizations spanning classical text representations to modern lan
 - Word embeddings, cosine similarity, and sentence embeddings
 - RNNs, LSTMs, Seq2Seq encoder-decoder pipelines, and cross-attention
 - Pretraining, transfer learning, BERT, and the historical progression of language models
+- Transformer internals including RoPE, KV cache, prefill/decode, FlashAttention, paged attention, and masked attention
+- Decoding and alignment methods including greedy/beam search, temperature, top-k/top-p sampling, contrastive decoding, speculative decoding, perplexity, and RLHF
+
+### 🧮 Quantization
+
+Numeric formats and quantized inference/training concepts
+
+- Quantization basics: scale, zero-point, clipping, rounding, and reconstruction error
+- Floating-point format explorer for FP32, BF16, FP16, and FP8 variants
+- Quantization-aware training and fake-quantization gradient flow
+- Calibration, granularity, and INT8 deployment tradeoffs
 
 ### ⚡ GEMM Optimization
 
@@ -130,6 +141,7 @@ ml-concept-visualizer/
 ├── index.html                          # Main landing page
 ├── fundamentals/                       # Core ML concepts
 ├── nlp/                                # NLP, embeddings, sequence models, and language-model visualizations
+├── quantization/                       # Numeric formats, quantization, and QAT visualizations
 ├── classical-ml-classification/        # Traditional ML algorithms
 ├── cnn-architectures/                  # Deep learning & CNNs
 ├── gemm-optimization/                  # Matrix multiplication optimization

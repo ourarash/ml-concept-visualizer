@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FlashAttention Visualizer</title>
+<style>
+  :root {
+    --bg: #0b1020;
+    --panel: #121a33;
+    --panel2: #0f172d;
+    --text: #e7ecff;
+    --muted: #9fb0d8;
+    --accent: #66e0ff;
+    --q: #4aa3ff;
+    --k: #51d88a;
+    --v: #b084ff;
+    --score: #ffb04a;
+    --softmax: #ffe45c;
+    --out: #ff6fb1;
+    --hbm: #778199;
+    --sram: #53e6e0;
+    --danger: #ff6b6b;
+    --ok: #78f0a6;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    color: var(--text);
+    background: radial-gradient(circle at top left, #1a2650 0%, var(--bg) 45%, #050712 100%);
+  }
+  .wrap {
+    display: grid;
+    grid-template-columns: 1.45fr 0.75fr;
+    gap: 16px;
+    padding: 16px;
+    min-height: 100vh;
+  }
+  .card {
+    background: linear-gradient(180deg, rgba(18,26,51,0.96), rgba(11,16,32,0.96));
+    border: 1px solid rgba(160,180,240,0.18);
+    border-radius: 18px;
+    box-shadow: 0 18px 60px rgba(0,0,0,0.35);
+    overflow: hidden;
+  }
+  header {
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(160,180,240,0.14);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+  }
+  h1 {
+    font-size: 18px;
+    margin: 0;
+    letter-spacing: 0.2px;
+  }
+  .headerRight {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .step {
+    color: var(--accent);
+    font-weight: 650;
+    font-size: 13px;
+    white-space: nowrap;
+  }
+  .modeToggle {
+    display: inline-grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 2px;
+    padding: 3px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(160,180,240,0.18);
+  }
+  .modeToggle button {
+    padding: 7px 10px;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 12px;
+    white-space: nowrap;
+  }
+  .modeToggle button.active {
+    background: #26376d;
+    color: var(--text);
+    box-shadow: 0 0 0 1px rgba(160,180,240,0.18) inset;
+  }
+  canvas {
+    display: block;
+    width: 100%;
+    height: calc(100vh - 118px);
+    background:
+      linear-gradient(rgba(255,255,255,0.025) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.025) 1px, transparent 1px);
+    background-size: 28px 28px;
+  }
+  .side {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .content {
+    padding: 16px;
+  }
+  h2 {
+    font-size: 18px;
+    margin: 0 0 8px 0;
+  }
+  p {
+    color: var(--muted);
+    line-height: 1.45;
+    font-size: 14px;
+    margin: 8px 0;
+  }
+  .formula {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.1);
+    padding: 10px;
+    border-radius: 12px;
+    color: #fff;
+    margin: 10px 0;
+    white-space: pre-wrap;
+    font-size: 13px;
+  }
+  .formula.rich {
+    display: grid;
+    gap: 8px;
+    overflow-x: auto;
+    white-space: nowrap;
+    font-family: "Cambria Math", "STIX Two Math", ui-serif, Georgia, serif;
+    font-size: 15px;
+    line-height: 1.35;
+  }
+  .eq {
+    display: grid;
+    grid-template-columns: max-content 16px max-content;
+    align-items: center;
+    gap: 6px;
+  }
+  .lhs {
+    color: var(--accent);
+    font-weight: 800;
+    text-align: right;
+  }
+  .op { color: var(--muted); }
+  .fn { color: var(--softmax); }
+  .var { color: #fff; font-style: italic; }
+  .sub {
+    font-size: 0.72em;
+    vertical-align: -0.3em;
+    color: var(--muted);
+  }
+  .frac {
+    display: inline-grid;
+    grid-template-rows: auto 1px auto;
+    align-items: center;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.15;
+  }
+  .frac .bar {
+    background: rgba(255,255,255,0.7);
+    min-width: 100%;
+    height: 1px;
+    margin: 3px 0;
+  }
+  .math-note {
+    color: var(--muted);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    white-space: normal;
+  }
+  .math-note strong { color: var(--text); }
+  .math-list {
+    display: grid;
+    gap: 5px;
+    color: var(--text);
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+  }
+  .math-list span::before {
+    content: "";
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-right: 8px;
+    border-radius: 50%;
+    background: var(--accent);
+    vertical-align: 1px;
+  }
+  .controls {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+    padding: 12px 16px;
+    border-top: 1px solid rgba(160,180,240,0.14);
+  }
+  button {
+    background: #1c2a55;
+    color: var(--text);
+    border: 1px solid rgba(160,180,240,0.25);
+    border-radius: 12px;
+    padding: 10px 12px;
+    cursor: pointer;
+    font-weight: 650;
+  }
+  button:hover { background: #26376d; }
+  button:disabled {
+    cursor: not-allowed;
+    opacity: 0.42;
+  }
+  button:disabled:hover { background: #1c2a55; }
+  .sliders {
+    display: grid;
+    gap: 12px;
+  }
+  label {
+    display: grid;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 13px;
+  }
+  input[type=range] { width: 100%; }
+  .metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  .metric {
+    background: rgba(255,255,255,0.055);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 10px;
+  }
+  .metric .name { color: var(--muted); font-size: 12px; }
+  .metric .val { font-size: 19px; font-weight: 800; margin-top: 4px; }
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .pill {
+    font-size: 12px;
+    color: #dce6ff;
+    border: 1px solid rgba(255,255,255,0.11);
+    padding: 4px 7px;
+    border-radius: 999px;
+    background: rgba(255,255,255,0.05);
+  }
+  .dot {
+    display:inline-block; width:10px; height:10px; border-radius:3px; margin-right:5px; vertical-align:-1px;
+  }
+  .notation {
+    display: grid;
+    gap: 6px;
+    margin-top: 10px;
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .notation b { color: var(--text); }
+  @media (max-width: 980px) {
+    .wrap { grid-template-columns: 1fr; }
+    header { align-items: flex-start; flex-direction: column; }
+    .headerRight { width: 100%; justify-content: space-between; }
+    canvas { height: 58vh; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="card">
+    <header>
+      <h1>FlashAttention: exact attention by changing IO order</h1>
+      <div class="headerRight">
+        <div class="modeToggle" role="group" aria-label="Visualization mode">
+          <button id="modeSteps" class="active" type="button">Concept steps</button>
+          <button id="modeTraffic" type="button">GPU memory traffic</button>
+        </div>
+        <div class="step" id="stepLabel"></div>
+      </div>
+    </header>
+    <canvas id="viz"></canvas>
+    <div class="controls">
+      <button id="back">← Back</button>
+      <button id="next">Next →</button>
+      <button id="play">Play</button>
+      <button id="reset">Reset</button>
+    </div>
+  </div>
+
+  <div class="side">
+    <div class="card content">
+      <h2 id="title"></h2>
+      <p id="desc"></p>
+      <div class="formula" id="formula"></div>
+      <div class="notation" id="notation">
+        <div><b>S</b> is the score/logit matrix: every query-token dot every key-token, before softmax.</div>
+        <div><b>P</b> is the attention-probability matrix: row-wise softmax of S, used to weight V.</div>
+      </div>
+      <div class="legend">
+        <span class="pill"><span class="dot" style="background:var(--q)"></span>Q</span>
+        <span class="pill"><span class="dot" style="background:var(--k)"></span>K</span>
+        <span class="pill"><span class="dot" style="background:var(--v)"></span>V</span>
+        <span class="pill"><span class="dot" style="background:var(--score)"></span>S scores</span>
+        <span class="pill"><span class="dot" style="background:var(--softmax)"></span>P weights</span>
+        <span class="pill"><span class="dot" style="background:var(--sram)"></span>SRAM</span>
+        <span class="pill"><span class="dot" style="background:var(--hbm)"></span>HBM</span>
+      </div>
+    </div>
+
+    <div class="card content">
+      <h2>Parameters</h2>
+      <div class="sliders">
+        <label>N sequence length: <b id="nVal"></b><input id="n" type="range" min="512" max="32768" step="512" value="8192"></label>
+        <label>d head dim: <b id="dVal"></b><input id="d" type="range" min="32" max="256" step="32" value="128"></label>
+        <label>B tile size: <b id="bVal"></b><input id="b" type="range" min="32" max="256" step="32" value="128"></label>
+        <label>speed: <b id="sVal"></b><input id="speed" type="range" min="0.25" max="3" step="0.25" value="1"></label>
+      </div>
+    </div>
+
+    <div class="card content">
+      <h2>Live memory model, fp16, 1 head</h2>
+      <div class="metrics">
+        <div class="metric"><div class="name">Q/K/V/O</div><div class="val" id="qkvMem"></div></div>
+        <div class="metric"><div class="name">Full attention N×N</div><div class="val" id="attnMem"></div></div>
+        <div class="metric"><div class="name">One tile scores B×B</div><div class="val" id="tileMem"></div></div>
+        <div class="metric"><div class="name">Approx saved</div><div class="val" id="saved"></div></div>
+      </div>
+      <p>FlashAttention is not mainly “fewer FLOPs.” It is fewer HBM reads/writes by never materializing S or P.</p>
+    </div>
+  </div>
+</div>
+
+<script>
+const canvas = document.getElementById('viz');
+const ctx = canvas.getContext('2d');
+let W, H, t = 0, playing = false, step = 0, mode = 'steps';
+const $ = id => document.getElementById(id);
+
+const stepNotation = `
+  <div><b>S</b> is the score/logit matrix: every query-token dot every key-token, before softmax.</div>
+  <div><b>P</b> is the attention-probability matrix: row-wise softmax of S, used to weight V.</div>
+`;
+
+const trafficView = {
+  title: "GPU memory traffic: standard attention vs FlashAttention",
+  desc: "Yes: both standard attention and FlashAttention still read Q/K/V from HBM. That shared input traffic is not the main difference. The optimization target is the extra standard-attention traffic for the full S and P matrices: write S, read S, write P, then read P again. FlashAttention computes tile scores on chip and never materializes full S or P in HBM.",
+  formulaHtml: `
+    <div class="math-note"><strong>Where to look:</strong> the bright red-outlined blocks are the optimization target. Q/K/V reads are shared; S/P HBM round trips are removed.</div>
+    <div class="eq">
+      <span class="lhs">standard</span><span class="op">:</span>
+      <span><span class="var">Q,K</span> → <span class="var">S</span> → <span class="var">P</span> → <span class="var">O</span></span>
+    </div>
+    <div class="eq">
+      <span class="lhs">optimized away</span><span class="op">:</span>
+      <span>write/read <span class="var">S</span> and <span class="var">P</span></span>
+    </div>
+    <div class="eq">
+      <span class="lhs">flash</span><span class="op">:</span>
+      <span><span class="var">Q,K,V</span> tiles → SRAM → online softmax → <span class="var">O</span></span>
+    </div>
+    <div class="eq">
+      <span class="lhs">HBM traffic</span><span class="op">:</span>
+      <span>stream inputs, write final output</span>
+    </div>
+    <div class="math-note"><strong>Key comparison:</strong> Q/K/V reads appear in both lanes. The large red S/P region appears only in standard attention and is what FlashAttention removes.</div>`
+};
+
+const steps = [
+  {
+    title: "1. Standard attention materializes the expensive middle",
+    desc: "For one head, standard attention forms S, the query-key score matrix, applies row-wise softmax to get P, the attention-weight matrix, then computes O = PV. The issue is that S and P are N×N.",
+    formula: "S = QKᵀ / √d\nP = softmax(S) row-wise\nO = P V",
+    formulaHtml: `
+      <div class="eq">
+        <span class="lhs">S</span><span class="op">=</span>
+        <span class="frac">
+          <span><span class="var">Q</span><span class="var">K</span><sup>⊤</sup></span>
+          <span class="bar"></span>
+          <span>√<span class="var">d</span></span>
+        </span>
+      </div>
+      <div class="eq">
+        <span class="lhs">P</span><span class="op">=</span>
+        <span><span class="fn">softmax</span><span class="sub">row</span>(<span class="var">S</span>)</span>
+      </div>
+      <div class="eq">
+        <span class="lhs">O</span><span class="op">=</span>
+        <span><span class="var">P</span><span class="var">V</span></span>
+      </div>`
+  },
+  {
+    title: "2. Quadratic memory dominates long context",
+    desc: "Q, K, V, and O are O(Nd). The attention matrix is O(N²). For long context, writing and rereading S/P through HBM becomes the bottleneck.",
+    formula: "Q,K,V,O: 4·N·d elements\nS or P: N² elements\nFor N ≫ d, N² wins.",
+    formulaHtml: `
+      <div class="eq">
+        <span class="lhs">Q,K,V,O</span><span class="op">:</span>
+        <span>4 · <span class="var">N</span> · <span class="var">d</span> elements</span>
+      </div>
+      <div class="eq">
+        <span class="lhs">S or P</span><span class="op">:</span>
+        <span><span class="var">N</span><sup>2</sup> elements</span>
+      </div>
+      <div class="math-note">For <strong>N ≫ d</strong>, the quadratic attention matrix dominates memory traffic.</div>`
+  },
+  {
+    title: "3. GPU reality: SRAM is fast but small",
+    desc: "HBM is large and slow relative to on-chip SRAM/shared memory/registers. FlashAttention is an IO-aware algorithm: reorder computation to keep hot tiles on chip.",
+    formula: "Goal: minimize HBM traffic, not change attention math.",
+    formulaHtml: `
+      <div class="math-note"><strong>Goal:</strong> minimize HBM traffic while preserving the exact attention computation.</div>
+      <div class="eq">
+        <span class="lhs">math</span><span class="op">=</span>
+        <span>same <span class="var">QK</span><sup>⊤</sup> → <span class="fn">softmax</span> → <span class="var">PV</span></span>
+      </div>`
+  },
+  {
+    title: "4. FlashAttention streams K/V tiles against Q tiles",
+    desc: "Load a block of Q and a block of K,V into SRAM, compute partial scores, immediately fold them into the output accumulator, then discard the tile.",
+    formula: "For Qᵢ and Kⱼ,Vⱼ tiles:\nSᵢⱼ = QᵢKⱼᵀ / √d\nUpdate row-wise softmax state and Oᵢ",
+    formulaHtml: `
+      <div class="math-note">For tiles <strong>Qᵢ</strong> and <strong>Kⱼ,Vⱼ</strong>:</div>
+      <div class="eq">
+        <span class="lhs">S<span class="sub">ij</span></span><span class="op">=</span>
+        <span class="frac">
+          <span><span class="var">Q</span><span class="sub">i</span><span class="var">K</span><span class="sub">j</span><sup>⊤</sup></span>
+          <span class="bar"></span>
+          <span>√<span class="var">d</span></span>
+        </span>
+      </div>
+      <div class="math-note">Update row-wise softmax state and <strong>Oᵢ</strong>, then discard the score tile.</div>`
+  },
+  {
+    title: "5. Online softmax makes tiling exact",
+    desc: "The trick: softmax can be updated block by block using a running row max m, normalization ℓ, and output accumulator O. The prime mark means the updated value after folding in the current tile. No full row of S is needed.",
+    formula: "m' = max(m, max(S_tile))\nℓ' = exp(m-m')ℓ + Σ exp(S_tile-m')\nO' = [exp(m-m')ℓ O + exp(S_tile-m')V_tile] / ℓ'",
+    formulaHtml: `
+      <div class="eq">
+        <span class="lhs">m′</span><span class="op">=</span>
+        <span><span class="fn">max</span>(<span class="var">m</span>, <span class="fn">max</span>(<span class="var">S</span><span class="sub">tile</span>))</span>
+      </div>
+      <div class="eq">
+        <span class="lhs">ℓ′</span><span class="op">=</span>
+        <span><span class="fn">exp</span>(<span class="var">m</span> − <span class="var">m′</span>)<span class="var">ℓ</span> + ∑ <span class="fn">exp</span>(<span class="var">S</span><span class="sub">tile</span> − <span class="var">m′</span>)</span>
+      </div>
+      <div class="eq">
+        <span class="lhs">O′</span><span class="op">=</span>
+        <span class="frac">
+          <span><span class="fn">exp</span>(<span class="var">m</span> − <span class="var">m′</span>)<span class="var">ℓ</span><span class="var">O</span> + <span class="fn">exp</span>(<span class="var">S</span><span class="sub">tile</span> − <span class="var">m′</span>)<span class="var">V</span><span class="sub">tile</span></span>
+          <span class="bar"></span>
+          <span><span class="var">ℓ′</span></span>
+        </span>
+      </div>
+      <div class="math-note"><strong>m′</strong> is the new row max after seeing this tile. <strong>ℓ′</strong> is the new softmax denominator/normalization sum. <strong>O′</strong> is the updated output accumulator after folding in this tile.</div>`
+  },
+  {
+    title: "6. Causal attention and KV cache",
+    desc: "During decoding, Q is tiny but K/V cache is long. FlashAttention-style kernels stream cached K/V blocks, avoid materializing the score vector/matrix, and reduce bandwidth pressure.",
+    formula: "decode: q_t attends to K_cache,V_cache\ntraining/prefill: blocks of Q attend to blocks of K,V",
+    formulaHtml: `
+      <div class="eq">
+        <span class="lhs">decode</span><span class="op">:</span>
+        <span><span class="var">q</span><span class="sub">t</span> attends to <span class="var">K</span><span class="sub">cache</span>, <span class="var">V</span><span class="sub">cache</span></span>
+      </div>
+      <div class="eq">
+        <span class="lhs">prefill</span><span class="op">:</span>
+        <span>blocks of <span class="var">Q</span> attend to blocks of <span class="var">K,V</span></span>
+      </div>`
+  },
+  {
+    title: "7. Why this was a big deal",
+    desc: "It gives exact attention, not approximation, while moving far less data through HBM. That directly enables longer context, larger batch sizes, and faster training/prefill/decoding kernels.",
+    formula: "Same output as standard attention.\nDifferent schedule.\nLess HBM traffic.\nBetter GPU utilization.",
+    formulaHtml: `
+      <div class="math-list">
+        <span>same output as standard attention</span>
+        <span>different computation schedule</span>
+        <span>less HBM traffic</span>
+        <span>better GPU utilization</span>
+      </div>`
+  }
+];
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  W = canvas.width = Math.floor(r.width * devicePixelRatio);
+  H = canvas.height = Math.floor(r.height * devicePixelRatio);
+  ctx.setTransform(devicePixelRatio,0,0,devicePixelRatio,0,0);
+  W = r.width; H = r.height;
+}
+addEventListener('resize', resize); resize();
+
+function color(name){ return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+function roundRect(x,y,w,h,r,fill,stroke,alpha=1) {
+  ctx.save(); ctx.globalAlpha = alpha;
+  ctx.beginPath();
+  ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+  ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r); ctx.closePath();
+  ctx.fillStyle = fill; ctx.fill();
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = 1.2; ctx.stroke(); }
+  ctx.restore();
+}
+function text(s,x,y,size=13,fill="#e7ecff",align="left",weight="500") {
+  ctx.save(); ctx.fillStyle=fill; ctx.font=`${weight} ${size}px Inter, sans-serif`; ctx.textAlign=align; ctx.fillText(s,x,y); ctx.restore();
+}
+function arrow(x1,y1,x2,y2,c="#fff",a=1) {
+  ctx.save(); ctx.globalAlpha=a; ctx.strokeStyle=c; ctx.fillStyle=c; ctx.lineWidth=2;
+  ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+  const ang = Math.atan2(y2-y1,x2-x1);
+  ctx.beginPath();
+  ctx.moveTo(x2,y2);
+  ctx.lineTo(x2-8*Math.cos(ang-0.45), y2-8*Math.sin(ang-0.45));
+  ctx.lineTo(x2-8*Math.cos(ang+0.45), y2-8*Math.sin(ang+0.45));
+  ctx.closePath(); ctx.fill(); ctx.restore();
+}
+function matrix(x,y,w,h,label,c,rows=6,cols=6,hi=null) {
+  roundRect(x,y,w,h,10,"rgba(255,255,255,0.045)",c,1);
+  text(label,x+w/2,y-8,13,c,"center","800");
+  const cw=w/cols, rh=h/rows;
+  for(let i=0;i<rows;i++) for(let j=0;j<cols;j++) {
+    let a = 0.12 + 0.1*((i+j)%3);
+    if(hi && i>=hi.r0 && i<hi.r1 && j>=hi.c0 && j<hi.c1) a = 0.86;
+    ctx.fillStyle = c; ctx.globalAlpha = a;
+    ctx.fillRect(x+j*cw+1,y+i*rh+1,cw-2,rh-2);
+    ctx.globalAlpha = 1;
+  }
+}
+function memoryBar(x,y,w,h,label,frac,c) {
+  roundRect(x,y,w,h,8,"rgba(255,255,255,0.05)","rgba(255,255,255,0.12)");
+  roundRect(x,y,w*Math.min(1,frac),h,8,c,null,0.75);
+  text(label,x+10,y+h/2+4,12,"#fff","left","750");
+}
+function stageBox(x,y,w,h,label,c,alpha=0.1) {
+  roundRect(x,y,w,h,10,`rgba(${c.rgb},${alpha})`,c.hex,1);
+  text(label,x+w/2,y+h/2-3,w < 82 ? 10 : 13,"#fff","center","800");
+  if (c.loc) {
+    roundRect(x+w/2-32,y+h-18,64,13,6,c.locBg || "rgba(255,255,255,0.12)",null,0.95);
+    text(c.loc,x+w/2,y+h-8,w < 82 ? 8 : 9,c.locColor || "#fff","center","900");
+  }
+}
+function drawTrafficLane(y,h,title,subtitle,accent,stages,trafficSegments) {
+  const compact = W < 760;
+  const x0 = compact ? 22 : 44;
+  const x1 = W - x0;
+  const laneW = x1 - x0;
+  roundRect(x0,y,laneW,h,18,"rgba(255,255,255,0.035)",accent,0.9);
+  text(title,x0+18,y+28,compact ? 15 : 18,accent,"left","900");
+  text(subtitle,x0+18,y+50,compact ? 11 : 13,color('--muted'),"left","700");
+
+  const topY = y + (compact ? 68 : 76);
+  const boxH = compact ? 42 : 50;
+  const gap = compact ? 8 : 14;
+  const boxW = (laneW - 36 - gap * (stages.length - 1)) / stages.length;
+  const startX = x0 + 18;
+  stages.forEach((st, i) => {
+    const x = startX + i * (boxW + gap);
+    stageBox(x,topY,boxW,boxH,st.label,st.color,st.alpha ?? 0.12);
+    if (i < stages.length - 1) arrow(x+boxW+2, topY+boxH/2, x+boxW+gap-2, topY+boxH/2, accent, 0.75);
+  });
+
+  const trafficY = y + h - (compact ? 34 : 42);
+  text("SLOW HBM",startX,trafficY+4,compact ? 10 : 12,color('--danger'),"left","900");
+  const barX = startX + (compact ? 78 : 98);
+  const barW = laneW - (compact ? 112 : 140);
+  roundRect(barX,trafficY-13,barW,26,10,"rgba(119,129,153,0.13)","rgba(119,129,153,0.28)");
+  ctx.save();
+  ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = color('--danger');
+  ctx.lineWidth = 1;
+  for (let x = barX + 8; x < barX + barW; x += 18) {
+    ctx.beginPath();
+    ctx.moveTo(x, trafficY - 12);
+    ctx.lineTo(x - 11, trafficY + 12);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  const heavySegments = trafficSegments.filter(item => item.heavy);
+  if (heavySegments.length) {
+    const hs = Math.min(...heavySegments.map(item => item.start));
+    const he = Math.max(...heavySegments.map(item => item.start + item.width));
+    const hx = barX + barW * hs;
+    const hw = barW * (he - hs);
+    roundRect(hx-5,trafficY-17,hw+10,34,12,"rgba(255,107,107,0.16)",color('--danger'),0.98);
+    text("REMOVED BY FLASHATTENTION",hx+hw/2,trafficY-23,compact ? 9 : 11,color('--danger'),"center","900");
+  }
+
+  trafficSegments.forEach(item => {
+    const sx = barX + barW * item.start;
+    const sw = Math.max(4, barW * item.width);
+    const alpha = item.heavy ? 0.98 : 0.34;
+    if (item.heavy) {
+      ctx.save();
+      ctx.shadowColor = color('--danger');
+      ctx.shadowBlur = 14;
+    }
+    roundRect(sx,trafficY-11,sw,22,8,item.color,null,alpha);
+    if (item.heavy) {
+      ctx.restore();
+      roundRect(sx-2,trafficY-13,sw+4,26,9,"rgba(255,255,255,0)",color('--danger'),1);
+      roundRect(sx+2,trafficY-9,sw-4,18,7,"rgba(255,255,255,0.18)",null,0.45);
+    }
+    if (!compact || item.width > 0.12) {
+      text(item.label,sx+sw/2,trafficY+4,compact ? 9 : 10,item.textColor || "#07101f","center","900");
+    }
+  });
+  if (trafficSegments.some(item => item.heavy)) {
+    text("S/P HBM traffic dominates",barX+barW-3,trafficY+27,compact ? 9 : 10,color('--danger'),"right","900");
+  } else {
+    text("same Q/K/V input reads, no S/P HBM",barX+barW-3,trafficY-19,compact ? 9 : 10,color('--ok'),"right","900");
+  }
+}
+function drawTraffic() {
+  const compact = W < 760;
+  const h = Math.max(138, (H - 150) / 2);
+  const top = compact ? 40 : 52;
+  const stdStages = [
+    {label: compact ? "Q/K" : "read Q,K", color: {hex: color('--q'), rgb: "74,163,255", loc:"HBM read", locBg:"rgba(119,129,153,0.28)"}},
+    {label: compact ? "S" : "write S", color: {hex: color('--score'), rgb: "255,176,74", loc:"HBM write", locBg:"rgba(119,129,153,0.28)"}, alpha: 0.18},
+    {label: compact ? "P" : "write P", color: {hex: color('--softmax'), rgb: "255,228,92", loc:"HBM write", locBg:"rgba(119,129,153,0.28)"}, alpha: 0.16},
+    {label: compact ? "O" : "write O", color: {hex: color('--out'), rgb: "255,111,177", loc:"HBM write", locBg:"rgba(119,129,153,0.28)"}, alpha: 0.14}
+  ];
+  const flashStages = [
+    {label: compact ? "tiles" : "stream Q,K,V tiles", color: {hex: color('--v'), rgb: "176,132,255", loc:"HBM read", locBg:"rgba(119,129,153,0.28)"}},
+    {label: "tile scores", color: {hex: color('--sram'), rgb: "83,230,224", loc:"SRAM", locColor:"#062026", locBg:"rgba(83,230,224,0.68)"}, alpha: 0.16},
+    {label: compact ? "m,ℓ,O" : "update m, ℓ, O", color: {hex: color('--ok'), rgb: "120,240,166", loc:"registers", locColor:"#062015", locBg:"rgba(120,240,166,0.62)"}, alpha: 0.13},
+    {label: compact ? "O" : "write final O", color: {hex: color('--out'), rgb: "255,111,177", loc:"HBM write", locBg:"rgba(119,129,153,0.28)"}, alpha: 0.14}
+  ];
+
+  text("GPU memory traffic, not CPU ↔ GPU transfer", W/2, compact ? 24 : 30, compact ? 15 : 18, "#fff", "center", "900");
+  if (compact) {
+    text("Both read Q/K/V. The red S/P region is what FlashAttention removes.", W/2, 44, 11, color('--muted'), "center", "700");
+  } else {
+    text("Both lanes read Q/K/V from HBM; the large red region is standard attention's extra S/P HBM traffic.", W/2, 54, 13, color('--muted'), "center", "700");
+  }
+
+  drawTrafficLane(
+    top, h,
+    "Standard attention",
+    compact ? "top: S and P round-trip through HBM" : "Top lane: Q/K/V are on GPU, but S and P are written to and read from HBM",
+    color('--danger'),
+    stdStages,
+    [
+      {label:"shared Q/K/V", start:0.00, width:0.14, color:color('--hbm'), textColor:"#d8def0"},
+      {label:"write S", start:0.16, width:0.20, color:color('--score'), textColor:"#111827", heavy:true},
+      {label:"read S", start:0.38, width:0.16, color:color('--score'), textColor:"#111827", heavy:true},
+      {label:"write P", start:0.56, width:0.20, color:color('--softmax'), textColor:"#111827", heavy:true},
+      {label:"read P", start:0.78, width:0.13, color:color('--softmax'), textColor:"#111827", heavy:true},
+      {label:"write O", start:0.95, width:0.05, color:color('--out'), textColor:"#fff"}
+    ]
+  );
+
+  drawTrafficLane(
+    top + h + 18, h,
+    "FlashAttention",
+    compact ? "bottom: tiles stay on chip" : "Bottom lane: tiles stream from HBM, score tiles stay on chip, only final O is written",
+    color('--ok'),
+    flashStages,
+    [
+      {label:"shared Q/K/V tile reads", start:0.00, width:0.32, color:color('--hbm'), textColor:"#d8def0"},
+      {label:"write O", start:0.86, width:0.10, color:color('--out'), textColor:"#fff"}
+    ]
+  );
+
+  text("Focus on the red S/P region: FlashAttention removes those N×N HBM write/read round trips, not the shared Q/K/V reads.", W/2, H-44, compact ? 11 : 13, "#fff", "center", "800");
+}
+
+function draw() {
+  ctx.clearRect(0,0,W,H);
+  const p = (Math.sin(t*0.04)+1)/2;
+  const cx = W/2, top = 60;
+  const s = step;
+
+  if (mode === 'traffic') {
+    drawTraffic();
+    requestAnimationFrame(draw);
+    return;
+  }
+
+  // common memory hierarchy
+  roundRect(24,H-120,W-48,82,18,"rgba(119,129,153,0.12)","rgba(119,129,153,0.35)");
+  text("HBM / global memory: large, slow, expensive traffic", 44, H-88, 14, color('--hbm'), "left", "800");
+  memoryBar(44,H-70,W-88,22,"writes/reads of S and P dominate standard attention", s < 3 ? 0.85 : 0.22, s < 3 ? color('--danger') : color('--ok'));
+
+  if (s <= 1) {
+    matrix(45,90,95,150,"Q",color('--q'),7,4);
+    matrix(180,90,95,150,"Kᵀ",color('--k'),4,7);
+    matrix(355,70,220,220,"S = QKᵀ",color('--score'),8,8);
+    matrix(650,90,100,150,"V",color('--v'),7,4);
+    matrix(820,90,100,150,"O",color('--out'),7,4);
+    arrow(145,165,175,165,color('--q')); arrow(280,165,350,165,color('--score'));
+    text("scale + row softmax",465,330,14,color('--softmax'),"center","800");
+    arrow(580,180,645,180,color('--softmax')); arrow(755,165,815,165,color('--out'));
+    if(s===1) {
+      const grow = 70 + p*100;
+      roundRect(390,80,220+grow,220+grow,18,"rgba(255,176,74,0.08)",color('--danger'),0.85);
+      text("N×N blows up",500+grow/2,65,18,color('--danger'),"center","900");
+      text("This matrix is often written to HBM, then read back for softmax/dropout/PV.", W/2, H-155, 15, "#fff", "center", "700");
+    }
+  }
+
+  if (s === 2) {
+    matrix(65,130,140,180,"Q/K/V in HBM",color('--hbm'),8,5);
+    roundRect(cx-130,80,260,180,20,"rgba(83,230,224,0.08)",color('--sram'),1);
+    text("SRAM / shared memory",cx,115,17,color('--sram'),"center","900");
+    text("fast",cx,155,38,color('--sram'),"center","900");
+    text("small",cx,195,22,"#fff","center","800");
+    matrix(W-210,130,140,180,"O to HBM",color('--hbm'),8,5);
+    arrow(210,210,cx-130,170,color('--sram')); arrow(cx+130,170,W-210,210,color('--sram'));
+    text("FlashAttention asks: can we compute exact attention while keeping S/P on-chip only?", W/2, 345,15,"#fff","center","800");
+  }
+
+  if (s === 3 || s === 4) {
+    matrix(60,70,145,210,"Q blocks",color('--q'),8,5,{r0:2,r1:4,c0:0,c1:5});
+    matrix(285,70,210,145,"K blocks",color('--k'),5,8,{r0:0,r1:5,c0:3,c1:5});
+    matrix(285,260,210,145,"V blocks",color('--v'),5,8,{r0:0,r1:5,c0:3,c1:5});
+    roundRect(570,80,250,180,18,"rgba(83,230,224,0.08)",color('--sram'));
+    text("on-chip SRAM tile",695,110,16,color('--sram'),"center","900");
+    matrix(600,135,70,80,"Qᵢ",color('--q'),4,3);
+    matrix(710,135,70,80,"Kⱼ,Vⱼ",color('--k'),4,3);
+    arrow(210,175,600,170,color('--q'),0.8);
+    arrow(500,145,710,165,color('--k'),0.8);
+    arrow(500,335,742,215,color('--v'),0.8);
+    matrix(880,92,150,150,"Sᵢⱼ",color('--score'),5,5);
+    arrow(820,170,875,170,color('--score'));
+    if(s===4) {
+      roundRect(860,280,190,130,16,"rgba(255,111,177,0.08)",color('--out'));
+      text("per-row state",955,310,16,color('--out'),"center","900");
+      text("mᵢ  running max",885,345,13,"#fff");
+      text("ℓᵢ  running sum",885,370,13,"#fff");
+      text("Oᵢ  accumulator",885,395,13,"#fff");
+      arrow(955,245,955,280,color('--out'));
+    }
+  }
+
+  if (s === 5) {
+    roundRect(60,90,240,260,20,"rgba(176,132,255,0.08)",color('--v'));
+    text("KV cache in HBM",180,126,18,color('--v'),"center","900");
+    for(let i=0;i<9;i++) {
+      const yy=155+i*18;
+      roundRect(90,yy,180,10,4,color('--v'),null,0.18+i*0.045);
+    }
+    matrix(420,140,80,80,"q_t",color('--q'),3,3);
+    roundRect(600,90,270,260,20,"rgba(83,230,224,0.08)",color('--sram'));
+    text("stream cache tiles",735,126,18,color('--sram'),"center","900");
+    matrix(640,165,85,90,"K block",color('--k'),4,4);
+    matrix(760,165,85,90,"V block",color('--v'),4,4);
+    arrow(305,220,635,210,color('--v')); arrow(505,180,635,180,color('--q'));
+    matrix(960,140,90,80,"o_t",color('--out'),3,3);
+    arrow(870,210,955,180,color('--out'));
+    text("Decode: one new query still scans the whole K/V cache.", W/2, 392,15,"#fff","center","800");
+    text("Streaming blocks avoids writing the intermediate score vector to HBM.", W/2, 418,15,"#fff","center","800");
+  }
+
+  if (s === 6) {
+    const left = 115, mid = W/2-140, right = W-365;
+    roundRect(left,100,270,240,20,"rgba(255,107,107,0.08)",color('--danger'));
+    text("Standard attention",left+135,135,18,color('--danger'),"center","900");
+    text("materializes S/P",left+135,180,20,"#fff","center","800");
+    text("O(N²) memory",left+135,220,26,color('--danger'),"center","900");
+    text("extra HBM traffic",left+135,265,18,"#fff","center","700");
+
+    roundRect(right,100,270,240,20,"rgba(120,240,166,0.08)",color('--ok'));
+    text("FlashAttention",right+135,135,18,color('--ok'),"center","900");
+    text("streams tiles",right+135,180,20,"#fff","center","800");
+    text("O(Nd) output state",right+135,220,25,color('--ok'),"center","900");
+    text("exact same math",right+135,265,18,"#fff","center","700");
+
+    arrow(left+280,220,right-10,220,color('--accent'));
+    text("change schedule, not semantics",W/2,205,16,color('--accent'),"center","900");
+  }
+
+  t += playing ? Number($('speed').value) : 0.35;
+  requestAnimationFrame(draw);
+}
+
+function fmt(bytes) {
+  const u = ["B","KB","MB","GB","TB"]; let i=0, x=bytes;
+  while(x>1024 && i<u.length-1){x/=1024;i++}
+  return `${x.toFixed(x<10?2:1)} ${u[i]}`;
+}
+function setMode(nextMode) {
+  mode = nextMode;
+  if (mode === 'traffic') {
+    playing = false;
+    $('play').textContent = 'Play';
+  }
+  updateUI();
+}
+function updateUI() {
+  const st = mode === 'traffic' ? trafficView : steps[step];
+  $('stepLabel').textContent = mode === 'traffic' ? 'GPU memory traffic' : `Step ${step+1}/${steps.length}`;
+  $('title').textContent = st.title;
+  $('desc').textContent = st.desc;
+  $('formula').classList.toggle('rich', Boolean(st.formulaHtml));
+  if (st.formulaHtml) $('formula').innerHTML = st.formulaHtml;
+  else $('formula').textContent = st.formula;
+  $('notation').innerHTML = mode === 'traffic'
+    ? `<div><b>Shared cost:</b> both methods read Q/K/V from HBM. FlashAttention does not eliminate those input reads; it streams them in smaller tiles.</div>
+       <div><b>Optimized cost:</b> standard attention writes and rereads full S and P in HBM. The large red highlighted region is the traffic FlashAttention removes.</div>
+       <div><b>SRAM/register badges:</b> these are on-chip. In the bottom lane, FlashAttention computes Sᵢⱼ in SRAM, folds it into m, ℓ, and O in registers, then discards it.</div>
+       <div><b>Hatched bars:</b> these show slow HBM traffic only. On-chip SRAM/register work is intentionally absent from that bar.</div>`
+    : stepNotation;
+  $('modeSteps').classList.toggle('active', mode === 'steps');
+  $('modeTraffic').classList.toggle('active', mode === 'traffic');
+  $('back').disabled = mode === 'traffic';
+  $('next').disabled = mode === 'traffic';
+  $('play').disabled = mode === 'traffic';
+  $('speed').disabled = mode === 'traffic';
+  const N=+$('n').value, d=+$('d').value, B=+$('b').value;
+  $('nVal').textContent=N.toLocaleString();
+  $('dVal').textContent=d;
+  $('bVal').textContent=B;
+  $('sVal').textContent=$('speed').value+"×";
+  const fp16=2;
+  const qkvo = 4*N*d*fp16;
+  const attn = N*N*fp16;
+  const tile = B*B*fp16;
+  $('qkvMem').textContent=fmt(qkvo);
+  $('attnMem').textContent=fmt(attn);
+  $('tileMem').textContent=fmt(tile);
+  $('saved').textContent=(attn/tile).toFixed(0)+"× tile";
+}
+['n','d','b','speed'].forEach(id=>$(id).addEventListener('input',updateUI));
+$('modeSteps').onclick=()=>setMode('steps');
+$('modeTraffic').onclick=()=>setMode('traffic');
+$('next').onclick=()=>{if(mode==='steps'){step=Math.min(steps.length-1,step+1);updateUI();}}
+$('back').onclick=()=>{if(mode==='steps'){step=Math.max(0,step-1);updateUI();}}
+$('reset').onclick=()=>{if(mode==='steps') step=0; playing=false; $('play').textContent='Play'; t=0; updateUI();}
+$('play').onclick=()=>{playing=!playing;$('play').textContent=playing?'Pause':'Play';}
+addEventListener('keydown', e => {
+  if(e.key === 'ArrowRight' && mode === 'steps') $('next').click();
+  if(e.key === 'ArrowLeft' && mode === 'steps') $('back').click();
+  if(e.key === ' ') $('play').click();
+});
+updateUI(); draw();
+</script>
+</body>
+</html>

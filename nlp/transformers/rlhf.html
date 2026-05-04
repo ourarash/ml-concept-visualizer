@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Understanding RL in LLMs (RLHF & RLAIF)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Tailwind slate-900 */
+            color: #f8fafc; /* Tailwind slate-50 */
+            overflow: hidden; /* Prevent scrolling, canvas takes full space */
+            display: flex;
+            min-height: 100vh;
+        }
+
+        #sidebar {
+            width: clamp(16rem, 22vw, 20rem);
+            min-width: 15rem;
+        }
+
+        #main-content {
+            min-width: 0;
+        }
+
+        #ui-layer {
+            pointer-events: none; /* Let clicks pass through to canvas when not on UI elements */
+            padding: 1.5rem 1.5rem 2rem;
+        }
+
+        #ui-layer > div, #ui-layer button {
+            pointer-events: auto; /* Re-enable clicks for actual UI elements */
+        }
+
+        #interactive-overlay {
+            inset: 0;
+        }
+
+        #info-panel {
+            width: min(100%, 56rem);
+            margin-inline: auto;
+        }
+
+        .step-btn {
+            transition: all 0.2s ease;
+        }
+        .step-btn.active {
+            background-color: #3b82f6; /* blue-500 */
+            border-color: #60a5fa; /* blue-400 */
+            color: white;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+        .step-btn:not(.active):hover {
+            background-color: #1e293b; /* slate-800 */
+            border-color: #475569; /* slate-600 */
+        }
+
+        /* Custom scrollbar for sidebar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569;
+        }
+
+        @media (max-width: 1100px) {
+            body {
+                flex-direction: column;
+            }
+
+            #sidebar {
+                width: 100%;
+                min-width: 0;
+                max-height: 38vh;
+            }
+
+            #step-container {
+                display: grid;
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            }
+
+            #ui-layer {
+                padding: 1rem 1rem 1.25rem;
+            }
+        }
+
+        @media (max-width: 720px) {
+            #step-container {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            #info-panel {
+                border-radius: 1rem;
+            }
+        }
+    </style>
+</head>
+<body class="flex h-screen w-screen">
+
+    <!-- Sidebar Navigation -->
+    <div id="sidebar" class="bg-slate-900 border-r border-slate-800 flex flex-col z-20 shadow-2xl">
+        <div class="p-6 border-b border-slate-800">
+            <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-indigo-400">Aligning LLMs</h1>
+            <p class="text-sm text-slate-400 mt-2">Interactive visualization of RLHF & RLAIF</p>
+        </div>
+
+        <div class="flex-1 overflow-y-auto p-4 space-y-3" id="step-container">
+            <!-- Steps injected by JS -->
+        </div>
+
+        <div id="sidebar-controls" class="p-4 border-t border-slate-800 empty:hidden"></div>
+
+        <div class="p-4 border-t border-slate-800 text-xs text-slate-500 text-center">
+            Click interactive elements on the canvas to progress.
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="main-content" class="flex-1 relative bg-slate-950">
+        <!-- Canvas for Animations and Graph -->
+        <canvas id="sim-canvas" class="absolute inset-0 w-full h-full"></canvas>
+
+        <!-- Dynamic Explanatory Text Box -->
+        <div id="ui-layer" class="absolute inset-0 flex flex-col justify-end z-10">
+
+            <!-- Interactive Overlays (like human rating buttons) injected here -->
+            <div id="interactive-overlay" class="absolute inset-0 flex items-center justify-center pointer-events-none"></div>
+
+            <div class="max-w-3xl mx-auto bg-slate-800/90 backdrop-blur-md border border-slate-700 rounded-2xl p-6 shadow-2xl transform transition-transform duration-300 translate-y-0" id="info-panel">
+                <h2 id="info-title" class="text-xl font-semibold text-blue-300 mb-3 flex items-center gap-2">
+                    <span id="step-indicator" class="bg-blue-500/20 text-blue-400 py-1 px-2 rounded text-sm">Step 1</span>
+                    Title
+                </h2>
+                <p id="info-desc" class="text-slate-300 leading-relaxed text-sm md:text-base">
+                    Description goes here.
+                </p>
+                <div class="mt-4 flex justify-between items-center">
+                    <div id="action-hint" class="text-indigo-400 text-sm font-medium animate-pulse hidden">
+                        Action required above &uarr;
+                    </div>
+                    <button id="primary-action-btn" class="hidden px-6 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-lg text-white font-medium shadow-lg shadow-blue-900/50 transition-all transform hover:scale-105 active:scale-95">
+                        Start Action
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * --- APPLICATION STATE & CONFIG ---
+         */
+        const canvas = document.getElementById('sim-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // Logical coordinates for responsive drawing
+        const LOGICAL_WIDTH = 1900;
+        const LOGICAL_HEIGHT = 1080;
+        const layout = {
+            stageScale: 1,
+            stageOffsetX: 0,
+            stageOffsetY: 0
+        };
+
+        // Theme colors
+        const colors = {
+            bg: '#020617', // slate-950
+            nodeBg: '#1e293b', // slate-800
+            nodeBorder: '#334155', // slate-700
+            text: '#f8fafc',
+            textMuted: '#94a3b8',
+            accentBlue: '#3b82f6',
+            accentGreen: '#10b981',
+            accentRed: '#ef4444',
+            accentPurple: '#8b5cf6',
+            accentOrange: '#f59e0b',
+            path: '#475569',
+            particle: '#60a5fa'
+        };
+
+        const STATE = {
+            currentStepId: 'sft',
+            animating: true,
+            mouseX: 0,
+            mouseY: 0,
+            nodes: [],
+            connections: [],
+            particles: [],
+            customDrawQueue: [],
+
+            // Simulation specific states
+            sftGeneratedCount: 0,
+            humanRatingsDone: 0,
+            rewardModelTrained: false,
+            rlScore: 0,
+            rlChartData: [],
+            rlaifEvaluations: 0,
+            ppoStepIndex: 0,
+
+            overlayUI: null
+        };
+
+        const STEPS = [
+            {
+                id: 'sft',
+                title: '1. Supervised Fine-Tuning (SFT)',
+                shortTitle: 'SFT Model',
+                desc: 'We start with a base Language Model trained on vast amounts of text. Then, we fine-tune it on a dataset of high-quality instructions and responses (SFT). However, it might still generate responses that are technically correct but unhelpful, overly verbose, or misaligned with human preferences.<br><br><b>Click the action button</b> to see the SFT model generate diverse responses.',
+                actionBtn: 'Generate Responses',
+                setup: setupStepSFT,
+                onAction: actionStepSFT
+            },
+            {
+                id: 'human_feedback',
+                title: '2. The Bottleneck: Human Feedback',
+                shortTitle: 'Human Feedback',
+                desc: 'To teach the model what we <i>prefer</i>, we need human raters. The SFT model generates multiple responses for a single prompt. Humans then rank these responses (e.g., Response A is better than Response B).<br><br><b>Try it yourself:</b> Act as the human rater and click the response you prefer below. Notice how slow and unscalable this process is.',
+                setup: setupStepHumanFeedback
+            },
+            {
+                id: 'reward_model',
+                title: '3. Training a Proxy: The Reward Model',
+                shortTitle: 'Reward Model',
+                desc: 'Since human feedback is expensive and slow, we use the preference data gathered in the previous step to train a separate AI called a <b>Reward Model (RM)</b>. <br><br>The RM learns to predict human preferences. It takes a text response as input and outputs a scalar reward score. This acts as our scalable, automated "proxy judge".',
+                actionBtn: 'Train Reward Model',
+                setup: setupStepRewardModel,
+                onAction: actionStepRewardModel
+            },
+            {
+                id: 'ppo',
+                title: '4. The RL Loop (PPO)',
+                shortTitle: 'RL Optimization',
+                desc: 'Now for the actual Reinforcement Learning (often using Proximal Policy Optimization - PPO).<br>1. The SFT model generates a response.<br>2. The <b>Reward Model</b> scores it.<br>3. The score is used to update the model\'s policy, increasing the probability of generating high-scoring text in the future.<br><br><b>Use the Next and Back buttons above</b> to manually step through the training loop phases.',
+                setup: setupStepPPO
+            },
+            {
+                id: 'rlaif',
+                title: '5. Scaling up: RLAIF',
+                shortTitle: 'RLAIF (AI Feedback)',
+                desc: '<b>Reinforcement Learning from AI Feedback (RLAIF)</b> replaces the slow human rater with an off-the-shelf, highly capable LLM guided by a <b>Constitution</b> (a set of ethical principles and rules).<br><br>This allows us to generate preference data at massive scale, faster and often more consistently than humans, before training the Reward Model.',
+                actionBtn: 'Generate AI Feedback',
+                setup: setupStepRLAIF,
+                onAction: actionStepRLAIF
+            }
+        ];
+
+        /**
+         * --- CORE ENGINE: DRAWING & ANIMATION ---
+         */
+
+        function resizeCanvas() {
+            canvas.width = canvas.parentElement.clientWidth;
+            canvas.height = canvas.parentElement.clientHeight;
+            const infoPanelRect = document.getElementById('info-panel').getBoundingClientRect();
+            const horizontalPadding = canvas.width < 900 ? 18 : 32;
+            const topPadding = canvas.height < 700 ? 20 : 36;
+            const bottomPadding = infoPanelRect.height + (canvas.height < 700 ? 18 : 32);
+            const safeWidth = Math.max(canvas.width - (horizontalPadding * 2), 240);
+            const safeHeight = Math.max(canvas.height - topPadding - bottomPadding, 220);
+            layout.stageScale = Math.min(safeWidth / LOGICAL_WIDTH, safeHeight / LOGICAL_HEIGHT);
+            layout.stageOffsetX = (canvas.width - (LOGICAL_WIDTH * layout.stageScale)) / 2;
+            layout.stageOffsetY = topPadding + Math.max((safeHeight - (LOGICAL_HEIGHT * layout.stageScale)) / 2, 0);
+        }
+
+        window.addEventListener('resize', () => {
+            resizeCanvas();
+            positionOverlayElements();
+        });
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            STATE.mouseX = (e.clientX - rect.left - layout.stageOffsetX) / layout.stageScale;
+            STATE.mouseY = (e.clientY - rect.top - layout.stageOffsetY) / layout.stageScale;
+        });
+
+        function logicalToScreen(x, y) {
+            return {
+                x: layout.stageOffsetX + (x * layout.stageScale),
+                y: layout.stageOffsetY + (y * layout.stageScale)
+            };
+        }
+
+        function positionOverlayElement(element) {
+            const logicX = Number(element.dataset.logicX);
+            const logicY = Number(element.dataset.logicY);
+            if (Number.isNaN(logicX) || Number.isNaN(logicY)) return;
+            const point = logicalToScreen(logicX, logicY);
+            element.style.left = `${point.x}px`;
+            element.style.top = `${point.y}px`;
+        }
+
+        function positionOverlayElements() {
+            document.querySelectorAll('#interactive-overlay [data-logic-x][data-logic-y]').forEach(positionOverlayElement);
+        }
+
+        function createWrappedLines(ctx, text, maxWidth) {
+            const lines = [];
+            const paragraphs = String(text).split('\n');
+
+            paragraphs.forEach((paragraph, paragraphIndex) => {
+                const words = paragraph.trim().split(/\s+/).filter(Boolean);
+                if (!words.length) {
+                    if (paragraphIndex < paragraphs.length - 1 || paragraph === '') lines.push('');
+                    return;
+                }
+
+                let line = '';
+                words.forEach((word) => {
+                    const candidate = line ? `${line} ${word}` : word;
+                    if (line && ctx.measureText(candidate).width > maxWidth) {
+                        lines.push(line);
+                        line = word;
+                    } else {
+                        line = candidate;
+                    }
+                });
+
+                if (line) lines.push(line);
+            });
+
+            return lines;
+        }
+
+        function fitTextBlock(ctx, text, maxWidth, maxHeight, options = {}) {
+            const maxFontSize = options.maxFontSize || 24;
+            const minFontSize = options.minFontSize || 12;
+            const fontWeight = options.fontWeight || '400';
+            const lineHeightRatio = options.lineHeightRatio || 1.25;
+
+            for (let fontSize = maxFontSize; fontSize >= minFontSize; fontSize -= 1) {
+                ctx.font = `${fontWeight} ${fontSize}px Inter`;
+                const lines = createWrappedLines(ctx, text, maxWidth);
+                const lineHeight = fontSize * lineHeightRatio;
+                if ((lines.length * lineHeight) <= maxHeight) {
+                    return { fontSize, lineHeight, lines, fontWeight };
+                }
+            }
+
+            ctx.font = `${fontWeight} ${minFontSize}px Inter`;
+            return {
+                fontSize: minFontSize,
+                lineHeight: minFontSize * lineHeightRatio,
+                lines: createWrappedLines(ctx, text, maxWidth),
+                fontWeight
+            };
+        }
+
+        class Node {
+            constructor(id, x, y, width, height, label, type, options = {}) {
+                this.id = id;
+                this.cx = x;
+                this.cy = y;
+                this.w = width;
+                this.h = height;
+                this.label = label;
+                this.type = type;
+
+                this.color = options.color || colors.nodeBg;
+                this.borderColor = options.borderColor || colors.nodeBorder;
+                this.icon = options.icon || null;
+
+                this.scale = options.scale !== undefined ? options.scale : 0;
+                this.targetScale = options.targetScale !== undefined ? options.targetScale : 1;
+                this.pulseAmount = 0;
+
+                this.content = options.content || null;
+                this.score = options.score || null;
+            }
+
+            update() {
+                this.scale += (this.targetScale - this.scale) * 0.1;
+                if (this.pulseAmount > 0) this.pulseAmount -= 0.05;
+                if (this.pulseAmount < 0) this.pulseAmount = 0;
+            }
+
+            draw(ctx) {
+                if (this.scale < 0.01) return;
+
+                ctx.save();
+                ctx.translate(this.cx, this.cy);
+                const currentScale = this.scale + (Math.sin(Date.now() / 100) * this.pulseAmount * 0.1);
+                ctx.scale(currentScale, currentScale);
+
+                const x = -this.w / 2;
+                const y = -this.h / 2;
+
+                ctx.shadowColor = 'rgba(0,0,0,0.5)';
+                ctx.shadowBlur = 15;
+                ctx.shadowOffsetY = 5;
+
+                ctx.fillStyle = this.color;
+                ctx.strokeStyle = this.pulseAmount > 0 ? colors.accentBlue : this.borderColor;
+                ctx.lineWidth = this.pulseAmount > 0 ? 3 : 2;
+
+                const r = 12;
+                ctx.beginPath();
+                ctx.moveTo(x + r, y);
+                ctx.lineTo(x + this.w - r, y);
+                ctx.quadraticCurveTo(x + this.w, y, x + this.w, y + r);
+                ctx.lineTo(x + this.w, y + this.h - r);
+                ctx.quadraticCurveTo(x + this.w, y + this.h, x + this.w - r, y + this.h);
+                ctx.lineTo(x + r, y + this.h);
+                ctx.quadraticCurveTo(x, y + this.h, x, y + this.h - r);
+                ctx.lineTo(x, y + r);
+                ctx.quadraticCurveTo(x, y, x + r, y);
+                ctx.closePath();
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.shadowColor = 'transparent';
+
+                const hasIcon = this.type === 'model' || this.type === 'reward_model' || this.type === 'human' || this.type === 'doc' || this.type === 'data';
+                const horizontalPadding = 28;
+                const topPadding = 22;
+                const bottomPadding = 22;
+                let currentY = y + topPadding;
+
+                if (hasIcon) {
+                    const iconSize = Math.max(26, Math.min(42, Math.min(this.w, this.h) * 0.18));
+                    const iconY = currentY + (iconSize * 0.7);
+                    if (this.type === 'model' || this.type === 'reward_model') {
+                        drawNeuralNetIcon(ctx, 0, iconY, iconSize, this.type === 'reward_model' ? colors.accentPurple : colors.accentBlue);
+                    } else if (this.type === 'human') {
+                        drawHumanIcon(ctx, 0, iconY, iconSize * 0.78);
+                    } else if (this.type === 'doc') {
+                        drawDocIcon(ctx, 0, iconY, iconSize * 0.82);
+                    } else if (this.type === 'data') {
+                        drawDataIcon(ctx, 0, iconY, iconSize);
+                    }
+                    currentY += (iconSize * 1.5) + 10;
+                }
+
+                const scoreReserve = this.score !== null ? 56 : 0;
+                const labelWidth = this.w - (horizontalPadding * 2);
+                const labelMaxHeight = this.content ? Math.min(84, this.h * 0.3) : Math.max(this.h - (currentY - y) - bottomPadding - scoreReserve, 40);
+                const labelBlock = fitTextBlock(ctx, this.label, labelWidth, labelMaxHeight, {
+                    maxFontSize: Math.min(30, this.w / 9),
+                    minFontSize: 16,
+                    fontWeight: '700',
+                    lineHeightRatio: 1.14
+                });
+
+                if (!this.content && this.score === null && !hasIcon) {
+                    const labelAreaHeight = this.h - topPadding - bottomPadding;
+                    currentY = y + topPadding + Math.max((labelAreaHeight - (labelBlock.lines.length * labelBlock.lineHeight)) / 2, 0);
+                }
+
+                ctx.fillStyle = colors.text;
+                ctx.font = `${labelBlock.fontWeight} ${labelBlock.fontSize}px Inter`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'top';
+                labelBlock.lines.forEach((line, i) => {
+                    ctx.fillText(line, 0, currentY + (i * labelBlock.lineHeight));
+                });
+
+                currentY += (labelBlock.lines.length * labelBlock.lineHeight);
+
+                if (this.content) {
+                    currentY += 14;
+                    const contentBlock = fitTextBlock(ctx, this.content, this.w - ((horizontalPadding + 4) * 2), Math.max(this.h - (currentY - y) - bottomPadding - scoreReserve, 28), {
+                        maxFontSize: Math.min(22, this.w / 16),
+                        minFontSize: 13,
+                        fontWeight: '400',
+                        lineHeightRatio: 1.28
+                    });
+                    ctx.fillStyle = '#cbd5e1';
+                    ctx.font = `${contentBlock.fontWeight} ${contentBlock.fontSize}px Inter`;
+                    contentBlock.lines.forEach((line, i) => {
+                        ctx.fillText(line, 0, currentY + (i * contentBlock.lineHeight));
+                    });
+                }
+
+                if (this.score !== null) {
+                    ctx.fillStyle = this.score > 0 ? colors.accentGreen : (this.score < 0 ? colors.accentRed : colors.nodeBorder);
+                    ctx.beginPath();
+                    ctx.roundRect(-40, this.h/2 - 20, 80, 40, 20);
+                    ctx.fill();
+                    ctx.fillStyle = 'white';
+                    ctx.font = 'bold 18px Inter';
+                    ctx.fillText((this.score > 0 ? '+' : '') + this.score.toFixed(1), 0, this.h/2);
+                }
+
+                ctx.restore();
+            }
+
+            pulse() {
+                this.pulseAmount = 1;
+            }
+        }
+
+        class Connection {
+            constructor(startNodeId, endNodeId, options = {}) {
+                this.startId = startNodeId;
+                this.endId = endNodeId;
+                this.color = options.color || colors.path;
+                this.dashed = options.dashed || false;
+                this.animated = options.animated || false;
+                this.label = options.label || '';
+                this.offsetY = options.offsetY || 0;
+                this.curvature = options.curvature !== undefined ? options.curvature : 0.5;
+            }
+
+            draw(ctx, nodesMap) {
+                const start = nodesMap[this.startId];
+                const end = nodesMap[this.endId];
+                if (!start || !end) return;
+
+                let sx = start.cx, sy = start.cy, ex = end.cx, ey = end.cy;
+
+                if (Math.abs(sx - ex) > Math.abs(sy - ey)) {
+                    sx += (ex > sx ? start.w/2 : -start.w/2);
+                    ex += (sx > ex ? end.w/2 : -end.w/2);
+                    sy += this.offsetY;
+                    ey += this.offsetY;
+                } else {
+                    sy += (ey > sy ? start.h/2 : -start.h/2);
+                    ey += (sy > ey ? end.h/2 : -end.h/2);
+                    sx += this.offsetY;
+                    ex += this.offsetY;
+                }
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(sx, sy);
+
+                let cp1x, cp1y, cp2x, cp2y;
+                if (Math.abs(sx - ex) > Math.abs(sy - ey)) {
+                    const dist = Math.abs(ex - sx) * this.curvature;
+                    cp1x = sx + (ex > sx ? dist : -dist);
+                    cp1y = sy;
+                    cp2x = ex - (ex > sx ? dist : -dist);
+                    cp2y = ey;
+                } else {
+                    const dist = Math.abs(ey - sy) * this.curvature;
+                    cp1x = sx;
+                    cp1y = sy + (ey > sy ? dist : -dist);
+                    cp2x = ex;
+                    cp2y = ey - (ey > sy ? dist : -dist);
+                }
+
+                ctx.bezierCurveTo(cp1x, cp1y, cp2x, cp2y, ex, ey);
+
+                ctx.strokeStyle = this.color;
+                ctx.lineWidth = 3;
+                if (this.dashed) ctx.setLineDash([8, 8]);
+                ctx.stroke();
+
+                const t = 1;
+                const dx = 3*(1-t)*(1-t)*(cp1x-sx) + 6*(1-t)*t*(cp2x-cp1x) + 3*t*t*(ex-cp2x);
+                const dy = 3*(1-t)*(1-t)*(cp1y-sy) + 6*(1-t)*t*(cp2y-cp1y) + 3*t*t*(ey-cp2y);
+                const angle = Math.atan2(dy, dx);
+
+                ctx.translate(ex, ey);
+                ctx.rotate(angle);
+                ctx.beginPath();
+                ctx.moveTo(0, 0);
+                ctx.lineTo(-18, -9);
+                ctx.lineTo(-18, 9);
+                ctx.closePath();
+                ctx.fillStyle = this.color;
+                ctx.fill();
+                ctx.rotate(-angle);
+                ctx.translate(-ex, -ey);
+
+                if (this.label) {
+                    const tx = 0.5;
+                    const mx = Math.pow(1-tx, 3)*sx + 3*Math.pow(1-tx,2)*tx*cp1x + 3*(1-tx)*Math.pow(tx,2)*cp2x + Math.pow(tx,3)*ex;
+                    const my = Math.pow(1-tx, 3)*sy + 3*Math.pow(1-tx,2)*tx*cp1y + 3*(1-tx)*Math.pow(tx,2)*cp2y + Math.pow(tx,3)*ey;
+
+                    ctx.font = '700 20px Inter';
+                    const metrics = ctx.measureText(this.label);
+                    const padX = 20;
+                    const padY = 14;
+
+                    ctx.fillStyle = colors.nodeBg;
+                    ctx.beginPath();
+                    ctx.roundRect(mx - metrics.width/2 - padX/2, my - padY, metrics.width + padX, padY * 2, 8);
+                    ctx.fill();
+
+                    ctx.strokeStyle = this.color;
+                    ctx.lineWidth = 2;
+                    if(this.dashed) ctx.setLineDash([]);
+                    ctx.stroke();
+
+                    ctx.fillStyle = colors.text;
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(this.label, mx, my);
+                }
+
+                ctx.restore();
+                this.pathData = {sx, sy, cp1x, cp1y, cp2x, cp2y, ex, ey};
+            }
+        }
+
+        class Particle {
+            constructor(connectionId, options = {}) {
+                this.connectionId = connectionId;
+                this.progress = 0;
+                this.speed = options.speed || 0.02;
+                this.color = options.color || colors.particle;
+                this.size = options.size || 8;
+                this.active = true;
+                this.onComplete = options.onComplete || null;
+            }
+
+            update() {
+                this.progress += this.speed;
+                if (this.progress >= 1) {
+                    this.active = false;
+                    if (this.onComplete) this.onComplete();
+                }
+            }
+
+            draw(ctx, connections) {
+                const conn = connections.find(c => c.startId + '-' + c.endId === this.connectionId || c.startId + '->' + c.endId === this.connectionId);
+                const actualConn = conn || connections.find(c => c === this.connectionId);
+
+                if (!actualConn || !actualConn.pathData) return;
+
+                const pd = actualConn.pathData;
+                const t = this.progress;
+
+                const x = Math.pow(1-t, 3)*pd.sx + 3*Math.pow(1-t,2)*t*pd.cp1x + 3*(1-t)*Math.pow(t,2)*pd.cp2x + Math.pow(t,3)*pd.ex;
+                const y = Math.pow(1-t, 3)*pd.sy + 3*Math.pow(1-t,2)*t*pd.cp1y + 3*(1-t)*Math.pow(t,2)*pd.cp2y + Math.pow(t,3)*pd.ey;
+
+                ctx.beginPath();
+                ctx.arc(x, y, this.size, 0, Math.PI * 2);
+                ctx.fillStyle = this.color;
+                ctx.shadowColor = this.color;
+                ctx.shadowBlur = 10;
+                ctx.fill();
+                ctx.shadowColor = 'transparent';
+            }
+        }
+
+        function drawNeuralNetIcon(ctx, x, y, size, color) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.fillStyle = color;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1.5;
+
+            const radius = size * 0.12;
+            const gap = size * 0.4;
+            const layers = [
+                {x: -gap, y: [-gap/2, gap/2]},
+                {x: 0, y: [-gap, 0, gap]},
+                {x: gap, y: [-gap/2, gap/2]}
+            ];
+
+            ctx.globalAlpha = 0.5;
+            for (let i = 0; i < layers.length - 1; i++) {
+                layers[i].y.forEach(y1 => {
+                    layers[i+1].y.forEach(y2 => {
+                        ctx.beginPath();
+                        ctx.moveTo(layers[i].x, y1);
+                        ctx.lineTo(layers[i+1].x, y2);
+                        ctx.stroke();
+                    });
+                });
+            }
+            ctx.globalAlpha = 1;
+
+            layers.forEach(layer => {
+                layer.y.forEach(ny => {
+                    ctx.beginPath();
+                    ctx.arc(layer.x, ny, radius, 0, Math.PI*2);
+                    ctx.fill();
+                });
+            });
+            ctx.restore();
+        }
+
+        function drawHumanIcon(ctx, x, y, size) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.fillStyle = colors.accentOrange;
+            ctx.beginPath();
+            ctx.arc(0, -size*0.3, size*0.25, 0, Math.PI*2);
+            ctx.fill();
+            ctx.beginPath();
+            ctx.moveTo(-size*0.4, size*0.4);
+            ctx.quadraticCurveTo(0, -size*0.1, size*0.4, size*0.4);
+            ctx.lineTo(size*0.4, size*0.5);
+            ctx.lineTo(-size*0.4, size*0.5);
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawDocIcon(ctx, x, y, size) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.strokeStyle = colors.textMuted;
+            ctx.lineWidth = 2;
+            ctx.fillStyle = colors.nodeBg;
+            const w = size * 0.6, h = size * 0.8;
+            ctx.beginPath();
+            ctx.rect(-w/2, -h/2, w, h);
+            ctx.fill();
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(-w/2 + 5, -h/2 + 5); ctx.lineTo(w/2 - 5, -h/2 + 5);
+            ctx.moveTo(-w/2 + 5, -h/2 + 12); ctx.lineTo(w/2 - 5, -h/2 + 12);
+            ctx.moveTo(-w/2 + 5, -h/2 + 19); ctx.lineTo(0, -h/2 + 19);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawDataIcon(ctx, x, y, size) {
+            ctx.save();
+            ctx.translate(x, y);
+            ctx.strokeStyle = colors.accentGreen;
+            ctx.lineWidth = 2;
+            const w = size * 0.7, h = size * 0.2;
+            for(let i=-1; i<=1; i++) {
+                ctx.beginPath();
+                ctx.ellipse(0, i*(h*1.5), w/2, h/2, 0, 0, Math.PI*2);
+                if (i !== -1) {
+                    ctx.moveTo(-w/2, (i-1)*(h*1.5));
+                    ctx.lineTo(-w/2, i*(h*1.5));
+                    ctx.moveTo(w/2, (i-1)*(h*1.5));
+                    ctx.lineTo(w/2, i*(h*1.5));
+                }
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        function spawnParticles(connId, count, color, speed, onComplete) {
+            let spawned = 0;
+            const interval = setInterval(() => {
+                const conn = STATE.connections.find(c => c.startId + '->' + c.endId === connId);
+                if(conn) {
+                     STATE.particles.push(new Particle(conn, {color: color, speed: speed, onComplete: (spawned === count -1 ? onComplete : null)}));
+                }
+                spawned++;
+                if (spawned >= count) clearInterval(interval);
+            }, 150);
+        }
+
+        function clearScene() {
+            STATE.nodes = [];
+            STATE.connections = [];
+            STATE.particles = [];
+            STATE.customDrawQueue = [];
+            const overlay = document.getElementById('interactive-overlay');
+            overlay.innerHTML = '';
+            overlay.classList.add('pointer-events-none');
+            const sidebarControls = document.getElementById('sidebar-controls');
+            if(sidebarControls) sidebarControls.innerHTML = '';
+        }
+
+        function addNode(id, x, y, w, h, label, type, options) {
+            const n = new Node(id, x, y, w, h, label, type, options);
+            STATE.nodes.push(n);
+            return n;
+        }
+
+        function addConn(s, e, options={}) {
+            const c = new Connection(s, e, options);
+            c.id = s + '->' + e;
+            STATE.connections.push(c);
+            return c;
+        }
+
+        function getNode(id) { return STATE.nodes.find(n => n.id === id); }
+
+        function setupStepSFT() {
+            clearScene();
+            addNode('prompt', 270, 430, 320, 150, 'Prompt Dataset\n"Write a poem..."', 'data', {color: colors.nodeBg});
+            addNode('model', 760, 430, 360, 220, 'Initial LM\n(SFT Model)', 'model', {color: '#1e3a8a', borderColor: colors.accentBlue});
+            addConn('prompt', 'model', {animated: true, label: 'Sample Dataset'});
+            STATE.sftGeneratedCount = 0;
+            updateUIActionBtn(true);
+        }
+
+        function actionStepSFT() {
+            if (STATE.sftGeneratedCount > 0) return;
+            STATE.sftGeneratedCount++;
+            updateUIActionBtn(false);
+            document.getElementById('info-desc').innerHTML = 'Notice the variance in quality of the generated responses. The model can generate multiple variations, but it doesn\'t know which one humans actually prefer yet.<br><br><b>Select Step 2</b> on the left to teach it.';
+            const model = getNode('model');
+            model.pulse();
+            spawnParticles('prompt->model', 3, colors.text, 0.03, () => {
+                model.pulse();
+                setTimeout(() => {
+                    addNode('out1', 1480, 210, 480, 170, 'Response 1', 'text', {content: "Roses are red, violets are blue, this poem is short."});
+                    addNode('out2', 1480, 460, 480, 170, 'Response 2', 'text', {content: "Behold the crimson rose, bathed in morning dew, a symbol of love that forever stays true..."});
+                    addNode('out3', 1480, 710, 480, 170, 'Response 3', 'text', {content: "I am an AI, I cannot write poetry."});
+                    addConn('model', 'out1', {label: 'Generates'});
+                    addConn('model', 'out2', {label: 'Generates'});
+                    addConn('model', 'out3', {label: 'Generates'});
+                    spawnParticles('model->out1', 1, colors.accentBlue, 0.05);
+                    spawnParticles('model->out2', 1, colors.accentBlue, 0.05);
+                    spawnParticles('model->out3', 1, colors.accentBlue, 0.05, () => {
+                        showHint("Notice the variance in quality.");
+                    });
+                }, 500);
+            });
+        }
+
+        function setupStepHumanFeedback() {
+            clearScene();
+            addNode('prompt', 360, 170, 420, 150, 'Prompt:\n"Explain quantum computing"', 'text');
+            addNode('out_a', 390, 420, 540, 220, 'Response A', 'text', {content: "Quantum computing uses qubits which can be 0 and 1 simultaneously thanks to superposition...", borderColor: '#475569'});
+            addNode('out_b', 390, 730, 540, 220, 'Response B', 'text', {content: "It's like a super fast regular computer. It uses magic quantum stuff to solve passwords.", borderColor: '#475569'});
+            addConn('prompt', 'out_a', {dashed: true, curvature: 0});
+            addConn('prompt', 'out_b', {dashed: true, curvature: 0});
+            addNode('human', 1080, 575, 240, 180, 'Human Rater', 'human', {color: '#451a03', borderColor: colors.accentOrange});
+            addConn('out_a', 'human', {curvature: 0.2});
+            addConn('out_b', 'human', {curvature: 0.2});
+            addNode('dataset', 1570, 575, 320, 180, 'Preference Dataset\n(A > B)', 'data', {color: '#064e3b', borderColor: colors.accentGreen, scale: 0, targetScale: 0});
+            const overlay = document.getElementById('interactive-overlay');
+            overlay.classList.remove('pointer-events-none');
+            const createBtn = (label, logicX, logicY) => {
+                const btn = document.createElement('button');
+                btn.className = 'absolute px-5 py-3 bg-gradient-to-r from-slate-700 to-slate-600 hover:from-slate-600 hover:to-slate-500 rounded-lg text-white font-bold shadow-lg transition-transform hover:scale-105 pointer-events-auto border border-slate-500 z-50 text-lg whitespace-nowrap';
+                btn.style.transform = 'translate(-50%, -50%)';
+                btn.dataset.logicX = logicX;
+                btn.dataset.logicY = logicY;
+                btn.innerText = label;
+                positionOverlayElement(btn);
+                return btn;
+            };
+            const btnA = createBtn('Select A (Better) →', 760, 420);
+            const btnB = createBtn('Select B (Better) →', 760, 730);
+            const handleSelection = (selectedNodeId, otherNodeId) => {
+                overlay.innerHTML = ''; overlay.classList.add('pointer-events-none');
+                getNode('human').pulse(); getNode(selectedNodeId).borderColor = colors.accentGreen; getNode(otherNodeId).borderColor = colors.accentRed;
+                const dataset = getNode('dataset');
+                dataset.label = selectedNodeId === 'out_a'
+                    ? 'Preference Dataset\n(A > B)'
+                    : 'Preference Dataset\n(B > A)';
+                dataset.targetScale = 1;
+                addConn('human', 'dataset', {color: colors.accentGreen, label: 'Record Selection'});
+                setTimeout(() => { spawnParticles('human->dataset', 3, colors.accentGreen, 0.03, () => { getNode('dataset').pulse(); showHint("Data point saved. Now do this 100,000 more times..."); }); }, 500);
+            };
+            btnA.onclick = () => handleSelection('out_a', 'out_b');
+            btnB.onclick = () => handleSelection('out_b', 'out_a');
+            overlay.appendChild(btnA); overlay.appendChild(btnB);
+            updateUIActionBtn(false);
+        }
+
+        function setupStepRewardModel() {
+            clearScene();
+            addNode('dataset', 420, 430, 340, 180, 'Preference Dataset\n(Human Ranked)', 'data', {color: '#064e3b', borderColor: colors.accentGreen});
+            addNode('rm', 980, 430, 360, 240, 'Reward Model\n(Training)', 'reward_model', {color: '#4c1d95', borderColor: colors.accentPurple});
+            addConn('dataset', 'rm', {label: 'Train on Input Pairs'});
+            STATE.rewardModelTrained = false; updateUIActionBtn(true);
+        }
+
+        function actionStepRewardModel() {
+            if (STATE.rewardModelTrained) return;
+            STATE.rewardModelTrained = true; updateUIActionBtn(false);
+            spawnParticles('dataset->rm', 15, colors.accentGreen, 0.02);
+            let trainPulse = setInterval(() => { getNode('rm').pulse(); }, 400);
+            setTimeout(() => {
+                clearInterval(trainPulse); getNode('rm').label = 'Reward Model\n(Proxy Judge)';
+                addNode('new_text', 980, 150, 460, 170, 'Generated Response\n"Helpful and polite text..."', 'text');
+                addConn('new_text', 'rm', {dashed: true, label: 'Evaluate New Text'});
+                setTimeout(() => {
+                    spawnParticles('new_text->rm', 1, colors.text, 0.04, () => {
+                        getNode('rm').pulse();
+                        addNode('score_out', 1490, 430, 220, 120, 'Score', 'data', {score: 2.4});
+                        addConn('rm', 'score_out', {color: colors.accentPurple, label: 'Output Score'});
+                        spawnParticles('rm->score_out', 1, colors.accentPurple, 0.05, () => { showHint("The RM can now instantly score any text."); });
+                    });
+                }, 500);
+            }, 3000);
+        }
+
+        function setupStepPPO() {
+            clearScene();
+            const predefinedScores = [-2.0, -1.2, -0.4, 0.9, 1.8, 2.6, 2.9];
+            const MAX_PPO_STEPS = predefinedScores.length * 5;
+            STATE.ppoStepIndex = 0;
+
+            addNode('prompt', 230, 540, 260, 140, 'Prompt', 'text');
+            const policy = addNode('policy', 650, 300, 360, 230, 'LLM Policy\n(Being Optimized)', 'model', {color: '#1e3a8a', borderColor: colors.accentRed});
+            const responseNode = addNode('response', 1320, 300, 520, 260, 'Response', 'text', {content: "Waiting for generation..."});
+            const rmNode = addNode('rm', 1320, 800, 360, 230, 'Reward Model\n(Frozen)', 'reward_model', {color: '#4c1d95', borderColor: colors.accentPurple});
+            const ppoNode = addNode('ppo', 650, 800, 360, 210, 'PPO Optimizer\n(Calculates Loss)', 'process', {color: '#1e293b', borderColor: colors.accentOrange});
+
+            addConn('prompt', 'policy', {label: '1. Input Prompt'});
+            addConn('policy', 'response', {label: '2. Generate Text'});
+            addConn('response', 'rm', {label: '3. Evaluate Text'});
+            addConn('rm', 'ppo', {label: '4. Reward Signal', color: colors.accentPurple});
+            addConn('ppo', 'policy', {label: '5. Update Weights', color: colors.accentOrange, dashed: true});
+
+            STATE.customDrawQueue.push((ctx) => {
+                ctx.save();
+                ctx.translate(30, 30);
+                ctx.fillStyle = colors.nodeBg; ctx.strokeStyle = colors.nodeBorder;
+                ctx.beginPath(); ctx.roundRect(0, 0, 360, 220, 12); ctx.fill(); ctx.stroke();
+                ctx.fillStyle = colors.text; ctx.font = '600 18px Inter'; ctx.fillText('Average Reward', 20, 30);
+                ctx.strokeStyle = colors.path; ctx.beginPath(); ctx.moveTo(44, 184); ctx.lineTo(324, 184); ctx.stroke(); ctx.beginPath(); ctx.moveTo(44, 184); ctx.lineTo(44, 54); ctx.stroke();
+                if (STATE.rlChartData.length > 1) {
+                    ctx.strokeStyle = colors.accentGreen; ctx.lineWidth = 4; ctx.beginPath();
+                    const stepX = 280 / (predefinedScores.length - 1);
+                    STATE.rlChartData.forEach((val, i) => {
+                        const x = 44 + (i * stepX);
+                        const y = 184 - (((val + 3) / 6) * 130);
+                        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+                    });
+                    ctx.stroke();
+                }
+                ctx.fillStyle = STATE.rlScore > 0 ? colors.accentGreen : colors.accentRed;
+                ctx.font = '700 36px Inter'; ctx.fillText(STATE.rlScore.toFixed(2), 256, 38);
+                ctx.restore();
+            });
+
+            const sidebarControls = document.getElementById('sidebar-controls');
+            const controlsContainer = document.createElement('div');
+            controlsContainer.className = 'flex flex-col gap-3 w-full';
+
+            const stepLabel = document.createElement('div');
+            stepLabel.className = 'flex flex-col items-center justify-center bg-slate-800 p-3 rounded-lg border border-slate-700 shadow-inner';
+
+            const buttonsRow = document.createElement('div');
+            buttonsRow.className = 'flex gap-2 w-full';
+            const btnBack = document.createElement('button');
+            btnBack.className = 'flex-1 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all text-sm';
+            btnBack.innerText = '← Back';
+            const btnNext = document.createElement('button');
+            btnNext.className = 'flex-1 py-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg text-white font-bold transition-all shadow-lg shadow-blue-500/30 text-sm hover:-translate-y-0.5';
+            btnNext.innerText = 'Next →';
+
+            const descLabel = document.createElement('div');
+            descLabel.className = 'mt-2 text-xs text-slate-400 bg-slate-950 p-4 rounded-lg border border-slate-800 leading-relaxed italic';
+
+            buttonsRow.appendChild(btnBack); buttonsRow.appendChild(btnNext);
+            controlsContainer.appendChild(stepLabel); controlsContainer.appendChild(buttonsRow);
+            controlsContainer.appendChild(descLabel);
+            sidebarControls.appendChild(controlsContainer);
+
+            updateUIActionBtn(false);
+
+            const updatePPOVisuals = (oldIdx, newIdx) => {
+                const iter = Math.floor(newIdx / 5);
+                const phase = newIdx % 5;
+                const safeIter = Math.min(iter, predefinedScores.length - 1);
+
+                STATE.rlChartData = [];
+                for(let i = 0; i <= safeIter; i++) {
+                    if (i < safeIter || phase >= 4 || iter >= predefinedScores.length) { STATE.rlChartData.push(predefinedScores[i]); }
+                }
+                STATE.rlScore = STATE.rlChartData.length > 0 ? STATE.rlChartData[STATE.rlChartData.length-1] : predefinedScores[0];
+
+                let activeScoreForText = predefinedScores[0];
+                if (iter >= predefinedScores.length) activeScoreForText = predefinedScores[predefinedScores.length - 1];
+                else if (phase >= 2) activeScoreForText = predefinedScores[iter];
+                else if (iter > 0) activeScoreForText = predefinedScores[iter - 1];
+
+                if (newIdx === 0) responseNode.content = "Waiting for generation...";
+                else if (activeScoreForText < -1) responseNode.content = "Unhelpful, rude response.";
+                else if (activeScoreForText < 1) responseNode.content = "Okay response, a bit generic.";
+                else responseNode.content = "Highly helpful, detailed, and polite.";
+
+                if (iter >= predefinedScores.length) rmNode.score = predefinedScores[predefinedScores.length - 1];
+                else if (phase >= 3) rmNode.score = predefinedScores[iter];
+                else if (iter > 0) rmNode.score = predefinedScores[iter - 1];
+                else rmNode.score = null;
+
+                if (STATE.rlScore > 0) { policy.borderColor = colors.accentGreen; policy.color = '#064e3b'; } else { policy.borderColor = colors.accentRed; policy.color = '#1e3a8a'; }
+
+                const explanations = [
+                    "<b>Loop Ready:</b> The model is prepared for the next prompt optimization cycle.",
+                    "<b>1. Sampling:</b> A prompt is sampled and fed into the model policy.",
+                    "<b>2. Inference:</b> The model generates a response based on its current weights.",
+                    "<b>3. Scoring:</b> The generated text is passed to the Reward Model judge.",
+                    "<b>4. Evaluated:</b> The judge outputs a scalar reward. Higher is better.",
+                    "<b>5. Learning:</b> PPO updates the weights to prefer high-reward paths."
+                ];
+                descLabel.innerHTML = explanations[phase === 0 && newIdx > 0 ? 5 : phase];
+
+                if (newIdx > oldIdx) {
+                    if (phase === 1) { spawnParticles('prompt->policy', 1, colors.text, 0.08); policy.pulse(); }
+                    if (phase === 2) { spawnParticles('policy->response', 1, colors.accentBlue, 0.08); responseNode.pulse(); }
+                    if (phase === 3) { spawnParticles('response->rm', 1, colors.text, 0.08); rmNode.pulse(); }
+                    if (phase === 4) { spawnParticles('rm->ppo', 1, colors.accentPurple, 0.08); ppoNode.pulse(); }
+                    if (phase === 0 && newIdx > 0) { spawnParticles('ppo->policy', 2, colors.accentOrange, 0.06); policy.pulse(); }
+                } else if (newIdx < oldIdx) {
+                    if (phase === 0) policy.pulse(); if (phase === 1) responseNode.pulse(); if (phase === 2) rmNode.pulse(); if (phase === 3) ppoNode.pulse(); if (phase === 4) policy.pulse();
+                }
+            };
+
+            const updateUI = () => {
+                btnBack.disabled = STATE.ppoStepIndex === 0;
+                btnNext.disabled = STATE.ppoStepIndex === MAX_PPO_STEPS;
+                const visualIter = Math.min(Math.floor(STATE.ppoStepIndex / 5) + 1, predefinedScores.length);
+                stepLabel.innerHTML = `<span class="text-xs text-slate-400 font-bold uppercase tracking-wider">Iteration</span><span class="text-2xl font-bold text-blue-300">${visualIter} / ${predefinedScores.length}</span>`;
+            };
+
+            btnBack.onclick = () => { if (STATE.ppoStepIndex > 0) { const oldIdx = STATE.ppoStepIndex; STATE.ppoStepIndex--; updatePPOVisuals(oldIdx, STATE.ppoStepIndex); updateUI(); } };
+            btnNext.onclick = () => { if (STATE.ppoStepIndex < MAX_PPO_STEPS) { const oldIdx = STATE.ppoStepIndex; STATE.ppoStepIndex++; updatePPOVisuals(oldIdx, STATE.ppoStepIndex); updateUI(); } };
+            updatePPOVisuals(0, 0); updateUI();
+        }
+
+        function setupStepRLAIF() {
+            clearScene(); STATE.rlaifEvaluations = 0;
+            addNode('prompts', 300, 520, 320, 160, 'SFT Responses\n(Unranked)', 'data');
+            addNode('constitution', 930, 180, 480, 220, 'Constitution\n(Ethical Rules)', 'doc', {color: '#fef3c7', borderColor: '#d97706'});
+            getNode('constitution').content = "1. Be helpful and informative.\n2. Do not be toxic or harmful.\n3. Respect human values.";
+            getNode('constitution').color = '#451a03';
+            addNode('ai_judge', 930, 520, 360, 220, 'Off-the-shelf LLM\n(AI Judge)', 'model', {color: '#0f766e', borderColor: '#14b8a6'});
+            addNode('dataset', 1550, 520, 360, 180, 'Preference Dataset\n(AI Ranked)', 'data', {color: '#064e3b', borderColor: colors.accentGreen});
+            addConn('prompts', 'ai_judge', {label: 'Evaluate Text'}); addConn('constitution', 'ai_judge', {dashed: true, label: 'Guidelines', color: colors.accentOrange}); addConn('ai_judge', 'dataset', {label: 'Output Pairs (A>B)'});
+            updateUIActionBtn(true);
+        }
+
+        function actionStepRLAIF() {
+            if (STATE.rlaifEvaluations > 0) return;
+            STATE.rlaifEvaluations = 1; updateUIActionBtn(false);
+            const judge = getNode('ai_judge'); const dataset = getNode('dataset');
+            spawnParticles('constitution->ai_judge', 3, colors.accentOrange, 0.03, () => {
+                judge.pulse(); let count = 0;
+                const blast = setInterval(() => {
+                    spawnParticles('prompts->ai_judge', 1, colors.text, 0.1);
+                    setTimeout(() => { judge.pulse(); spawnParticles('ai_judge->dataset', 1, colors.accentGreen, 0.1, () => { dataset.pulse(); dataset.label = `Preference Dataset\n(${Math.floor(Math.random()*1000 + count*100)} rows)`; }); }, 100);
+                    count++; if (count > 20) { clearInterval(blast); setTimeout(()=> { dataset.label = 'Preference Dataset\n(1,000,000+ rows)'; showHint("RLAIF scales almost infinitely compared to human labeling."); }, 1000); }
+                }, 150);
+            });
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height); ctx.save(); ctx.translate(layout.stageOffsetX, layout.stageOffsetY); ctx.scale(layout.stageScale, layout.stageScale);
+            ctx.strokeStyle = 'rgba(51, 65, 85, 0.4)'; ctx.lineWidth = 1; const gridSize = 100;
+            ctx.beginPath(); for (let x = 0; x <= LOGICAL_WIDTH; x += gridSize) { ctx.moveTo(x, 0); ctx.lineTo(x, LOGICAL_HEIGHT); } for (let y = 0; y <= LOGICAL_HEIGHT; y += gridSize) { ctx.moveTo(0, y); ctx.lineTo(LOGICAL_WIDTH, y); } ctx.stroke();
+            STATE.connections.forEach(c => c.draw(ctx, STATE.nodes.reduce((acc, n) => ({...acc, [n.id]: n}), {})));
+            for (let i = STATE.particles.length - 1; i >= 0; i--) { const p = STATE.particles[i]; p.update(); p.draw(ctx, STATE.connections); if (!p.active) STATE.particles.splice(i, 1); }
+            STATE.nodes.forEach(n => { n.update(); n.draw(ctx); }); STATE.customDrawQueue.forEach(fn => fn(ctx));
+            ctx.restore(); if (STATE.animating) { requestAnimationFrame(render); }
+        }
+
+        function initSidebar() {
+            const container = document.getElementById('step-container'); container.innerHTML = '';
+            STEPS.forEach((step, index) => {
+                const btn = document.createElement('button'); btn.className = `step-btn w-full text-left p-3 rounded-lg border border-slate-700 flex items-center gap-3`;
+                btn.innerHTML = `<div class="w-8 h-8 rounded-full bg-slate-800 border border-slate-600 flex items-center justify-center font-bold text-sm shrink-0">${index + 1}</div><div class="font-medium text-sm">${step.shortTitle}</div>`;
+                btn.onclick = () => loadStep(step.id); container.appendChild(btn);
+            });
+        }
+
+        function loadStep(stepId) {
+            STATE.currentStepId = stepId; const step = STEPS.find(s => s.id === stepId); const index = STEPS.indexOf(step);
+            document.querySelectorAll('.step-btn').forEach((btn, i) => { btn.classList.toggle('active', i === index); });
+            document.getElementById('step-indicator').innerText = `Step ${index + 1}`; document.getElementById('info-title').childNodes[2].textContent = ' ' + step.title;
+            document.getElementById('info-desc').innerHTML = step.desc; const hint = document.getElementById('action-hint'); hint.classList.add('hidden');
+            const actionBtn = document.getElementById('primary-action-btn');
+            if (step.actionBtn) { actionBtn.innerText = step.actionBtn; const newBtn = actionBtn.cloneNode(true); actionBtn.parentNode.replaceChild(newBtn, actionBtn); newBtn.addEventListener('click', step.onAction); } else { actionBtn.classList.add('hidden'); }
+            resizeCanvas();
+            if (step.setup) step.setup();
+            positionOverlayElements();
+        }
+
+        function updateUIActionBtn(show) {
+            const btn = document.getElementById('primary-action-btn');
+            if(show && STEPS.find(s=>s.id === STATE.currentStepId).actionBtn) { btn.classList.remove('hidden'); btn.classList.add('animate-bounce'); setTimeout(()=>btn.classList.remove('animate-bounce'), 1000); } else { btn.classList.add('hidden'); }
+        }
+
+        function showHint(text) { const hint = document.getElementById('action-hint'); hint.innerText = text; hint.classList.remove('hidden'); }
+
+        function init() {
+            initSidebar();
+            resizeCanvas();
+            if ('ResizeObserver' in window) {
+                new ResizeObserver(() => {
+                    resizeCanvas();
+                    positionOverlayElements();
+                }).observe(document.getElementById('info-panel'));
+            }
+            loadStep('sft');
+            requestAnimationFrame(render);
+        }
+        window.onload = init;
+    </script>
+</body>
+</html>

@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashAttention Simulation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        canvas {
+            max-width: 100%;
+            height: auto;
+            image-rendering: -webkit-optimize-contrast;
+        }
+        .scrollbar-thin::-webkit-scrollbar {
+            width: 6px;
+        }
+        .scrollbar-thin::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+        .scrollbar-thin::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900 overflow-hidden">
+
+<div class="flex flex-col md:flex-row min-h-screen">
+    <!-- Control Panel -->
+    <div class="w-full md:w-[24rem] p-6 bg-white border-r border-gray-200 shadow-sm flex flex-col gap-6 z-10 overflow-y-auto max-h-screen shrink-0 scrollbar-thin">
+        <div>
+            <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-green-600 to-blue-600">
+                FlashAttention
+            </h1>
+            <p class="text-sm text-gray-500 mt-1 font-medium">Block-wise Attention in SRAM</p>
+        </div>
+
+        <div class="flex gap-2">
+            <button id="btn-back" class="flex-1 py-2 px-4 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 text-gray-700 rounded transition font-medium">Back</button>
+            <button id="btn-next" class="flex-1 py-2 px-4 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white rounded transition shadow-sm font-medium">Next</button>
+        </div>
+        <button id="btn-reset" class="py-2 px-4 border border-gray-300 hover:bg-gray-50 text-gray-600 rounded transition text-sm">Reset Animation</button>
+
+        <div class="bg-blue-50 p-4 rounded-lg border border-blue-100 shadow-inner">
+            <div class="flex justify-between items-center mb-2">
+                <h3 id="step-counter" class="font-bold text-blue-900 text-sm">Step 0 / 23</h3>
+                <span id="phase-badge" class="text-[10px] font-mono bg-blue-200 text-blue-800 px-2 py-1 rounded-full uppercase tracking-wider">Phase: init</span>
+            </div>
+            <p id="step-description" class="text-sm text-blue-800 leading-relaxed min-h-[80px]">
+                Start: All matrices (Q, K, V) reside in High-Bandwidth Memory (HBM). Fast SRAM is empty.
+            </p>
+        </div>
+
+        <div class="flex flex-col gap-3 text-sm text-gray-700">
+            <div class="flex items-center gap-2">
+                <div class="w-4 h-4 bg-green-100 border-2 border-green-500 rounded-sm"></div>
+                <span><strong>HBM:</strong> Slow, large main memory.</span>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="w-4 h-4 bg-orange-100 border-2 border-orange-500 rounded-sm"></div>
+                <span><strong>SRAM:</strong> Fast, small on-chip memory.</span>
+            </div>
+            <div class="mt-2 p-3 bg-yellow-50 border border-yellow-200 rounded text-yellow-800 text-[11px] leading-snug">
+                <strong>Key Takeaway:</strong> By iterating via nested loops, FlashAttention keeps all O(N²) intermediate operations inside SRAM, drastically reducing HBM read/writes.
+            </div>
+        </div>
+
+        <div class="border-t border-gray-200 pt-4 pb-2">
+            <h4 class="font-bold text-gray-800 mb-3 text-sm">Why these loops specifically?</h4>
+            <ul class="text-xs text-gray-600 space-y-3 list-disc pl-4 mb-4">
+                <li><strong>Outer Loop (K, V blocks):</strong> Grab a chunk of Keys and Values and hold it in the fast SRAM.</li>
+                <li><strong>Inner Loop (Q blocks):</strong> While holding that K/V chunk, sweep <em>every single Query</em> past it.</li>
+            </ul>
+            <p class="text-[11px] text-gray-700 bg-gray-100 p-3 rounded-md border border-gray-200 leading-relaxed">
+                Intermediate scores are born, used, and discarded entirely within SRAM, avoiding the O(N²) memory bottleneck of HBM.
+            </p>
+        </div>
+    </div>
+
+    <!-- Visualization Area -->
+    <div class="flex-1 flex items-center justify-center p-4 bg-white overflow-auto relative">
+        <div class="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+            <canvas id="canvas" width="850" height="680"></canvas>
+        </div>
+    </div>
+</div>
+
+<script>
+    const CANVAS_W = 850;
+    const CANVAS_H = 680;
+    const canvas = document.getElementById('canvas');
+    const ctx = canvas.getContext('2d');
+    const stepCounter = document.getElementById('step-counter');
+    const phaseBadge = document.getElementById('phase-badge');
+    const stepDescription = document.getElementById('step-description');
+    const btnBack = document.getElementById('btn-back');
+    const btnNext = document.getElementById('btn-next');
+    const btnReset = document.getElementById('btn-reset');
+
+    const L = {
+        Q_x: 60, Q_w: 50, Q_h: 100, Q_y0: 180, Q_y1: 290,
+        K_y: 40, K_h: 50, K_w: 100, K_x0: 220, K_x1: 330,
+        V_x: 680, V_w: 50, V_h: 100, V_y0: 180, V_y1: 290,
+        O_y: 570, O_h: 50, O_w: 100, O_x0: 220, O_x1: 330,
+        SRAM_Q_x: 140,
+        SRAM_K_y: 120,
+        SRAM_V_x: 600,
+        SRAM_O_y: 480,
+        SRAM_ACC_x: 275,
+        Attn_x0: 220, Attn_x1: 330,
+        Attn_y0: 180, Attn_y1: 290
+    };
+
+    const states = [
+        { id: 0, j: null, i: null, phase: "init", text: "Start: All matrices (Q, K, V) reside in High-Bandwidth Memory (HBM). Fast SRAM is empty." },
+        { id: 1, j: 0, i: null, phase: "load_kv", text: "Outer Loop (Red): Load block K0 and V0 from HBM into fast SRAM." },
+        { id: 2, j: 0, i: 0, phase: "load_q", text: "Inner Loop (Blue): Load row block Q0 into SRAM." },
+        { id: 3, j: 0, i: 0, phase: "compute_qk", text: "Compute: Multiply Q0 × K0^T to form a small partial block of the attention matrix inside SRAM." },
+        { id: 4, j: 0, i: 0, phase: "load_o", text: "Memory: Initialize a new Accumulator (Acc) buffer for O0 in SRAM." },
+        { id: 5, j: 0, i: 0, phase: "accumulate", text: "Compute: Apply softmax, multiply by V0. Accumulate result." },
+        { id: 6, j: 0, i: 0, phase: "output", text: "Output: Write the partial attention result back to HBM (O0)." },
+        { id: 7, j: 0, i: 1, phase: "load_q", text: "Inner Loop: Stream the next row block Q1 into SRAM." },
+        { id: 8, j: 0, i: 1, phase: "compute_qk", text: "Compute: Multiply Q1 × K0^T in SRAM." },
+        { id: 9, j: 0, i: 1, phase: "load_o", text: "Memory: Initialize a new Accumulator (Acc) buffer for O1 in SRAM." },
+        { id: 10, j: 0, i: 1, phase: "accumulate", text: "Compute: Softmax, multiply by V0, and accumulate." },
+        { id: 11, j: 0, i: 1, phase: "output", text: "Output: Write partial result back to HBM (O1)." },
+        { id: 12, j: 1, i: null, phase: "load_kv", text: "Outer Loop (Red): Load next block K1 and V1 from HBM into SRAM." },
+        { id: 13, j: 1, i: 0, phase: "load_q", text: "Inner Loop: Load Q0 into SRAM again." },
+        { id: 14, j: 1, i: 0, phase: "compute_qk", text: "Compute: Multiply Q0 × K1^T." },
+        { id: 15, j: 1, i: 0, phase: "load_o", text: "Memory: READ partial O0 from HBM back into the SRAM Accumulator." },
+        { id: 16, j: 1, i: 0, phase: "accumulate", text: "Compute: Softmax, multiply by V1, accumulate with the previous Acc." },
+        { id: 17, j: 1, i: 0, phase: "output", text: "Output: Write the updated, final O0 block back to HBM." },
+        { id: 18, j: 1, i: 1, phase: "load_q", text: "Inner Loop: Load Q1 into SRAM." },
+        { id: 19, j: 1, i: 1, phase: "compute_qk", text: "Compute: Multiply Q1 × K1^T." },
+        { id: 20, j: 1, i: 1, phase: "load_o", text: "Memory: READ partial O1 from HBM back into the SRAM Accumulator." },
+        { id: 21, j: 1, i: 1, phase: "accumulate", text: "Compute: Softmax, multiply by V1, accumulate with the previous Acc." },
+        { id: 22, j: 1, i: 1, phase: "output", text: "Output: Write the updated, final O1 block back to HBM." },
+        { id: 23, j: null, i: null, phase: "done", text: "Finish: The full attention output is computed without ever allocating the massive N×N matrix in HBM!" }
+    ];
+
+    let currentStep = 0;
+    let animStep = 0;
+    let animationId = null;
+
+    function deriveScene(stateIndex) {
+        const state = states[stateIndex];
+        const j = state.j === null ? 0 : state.j;
+        const i = state.i === null ? 0 : state.i;
+        const isJ0 = j === 0;
+        const isI0 = i === 0;
+
+        let els = {
+            q0: { x: L.Q_x, y: L.Q_y0, w: L.Q_w, h: L.Q_h, op: 1, text: "Q0", color: "#dcfce7", border: "#22c55e" },
+            q1: { x: L.Q_x, y: L.Q_y1, w: L.Q_w, h: L.Q_h, op: 1, text: "Q1", color: "#dcfce7", border: "#22c55e" },
+            k0: { x: L.K_x0, y: L.K_y, w: L.K_w, h: L.K_h, op: 1, text: "K0^T", color: "#dcfce7", border: "#22c55e" },
+            k1: { x: L.K_x1, y: L.K_y, w: L.K_w, h: L.K_h, op: 1, text: "K1^T", color: "#dcfce7", border: "#22c55e" },
+            v0: { x: L.V_x, y: L.V_y0, w: L.V_w, h: L.V_h, op: 1, text: "V0", color: "#dcfce7", border: "#22c55e" },
+            v1: { x: L.V_x, y: L.V_y1, w: L.V_w, h: L.V_h, op: 1, text: "V1", color: "#dcfce7", border: "#22c55e" },
+            o0: { x: L.O_x0, y: L.O_y, w: L.O_w, h: L.O_h, op: 1, text: "O0", color: "#dcfce7", border: "#22c55e" },
+            o1: { x: L.O_x1, y: L.O_y, w: L.O_w, h: L.O_h, op: 1, text: "O1", color: "#dcfce7", border: "#22c55e" },
+
+            sram_k: { x: isJ0 ? L.K_x0 : L.K_x1, y: L.K_y, w: L.K_w, h: L.K_h, op: 0, text: `K${j}^T`, color: "#ffedd5", border: "#f97316" },
+            sram_v: { x: L.V_x, y: isJ0 ? L.V_y0 : L.V_y1, w: L.V_w, h: L.V_h, op: 0, text: `V${j}`, color: "#ffedd5", border: "#f97316" },
+            sram_q: { x: L.Q_x, y: isI0 ? L.Q_y0 : L.Q_y1, w: L.Q_w, h: L.Q_h, op: 0, text: `Q${i}`, color: "#ffedd5", border: "#f97316" },
+            sram_attn: { x: isJ0 ? L.Attn_x0 : L.Attn_x1, y: isI0 ? L.Attn_y0 : L.Attn_y1, w: L.K_w, h: L.Q_h, op: 0, text: "QK^T", color: "#f3e8ff", border: "#a855f7" },
+            sram_o: { x: L.SRAM_ACC_x, y: L.SRAM_O_y, w: L.O_w, h: L.O_h, op: 0, text: "Acc", color: "#ffedd5", border: "#f97316" },
+        };
+
+        const phase = state.phase;
+
+        if (state.j !== null) {
+            els.sram_k.y = L.SRAM_K_y; els.sram_k.op = 1;
+            els.sram_v.x = L.SRAM_V_x; els.sram_v.op = 1;
+            if (isJ0) { els.k0.op = 0.2; els.v0.op = 0.2; }
+            else { els.k1.op = 0.2; els.v1.op = 0.2; }
+        }
+
+        if (state.i !== null && phase !== 'load_kv') {
+            els.sram_q.x = L.SRAM_Q_x; els.sram_q.op = 1;
+            if (isI0) { els.q0.op = 0.2; }
+            else { els.q1.op = 0.2; }
+        }
+
+        if (phase === 'compute_qk') {
+            els.sram_attn.op = 1;
+            els.sram_attn.text = `Q${i}K${j}^T`;
+            if (state.j > 0) {
+                els.sram_o.x = isI0 ? L.O_x0 : L.O_x1;
+                els.sram_o.y = L.O_y;
+                els.sram_o.op = 0.3;
+                els.sram_o.text = "Read HBM";
+                els.sram_o.border = "#3b82f6";
+            }
+        }
+
+        if (phase === 'load_o') {
+            els.sram_attn.op = 1;
+            els.sram_attn.text = `Q${i}K${j}^T`;
+            els.sram_o.x = L.SRAM_ACC_x;
+            els.sram_o.y = L.SRAM_O_y;
+            els.sram_o.op = 1;
+            els.sram_o.text = state.j === 0 ? "Init Acc" : "Load Acc";
+            els.sram_o.border = state.j === 0 ? "#f97316" : "#3b82f6";
+            if (state.j > 0) els.sram_o.color = "#dbeafe";
+        }
+
+        if (phase === 'accumulate') {
+            els.sram_attn.op = 1;
+            els.sram_attn.text = `sm(Q${i}K${j}^T)V${j}`;
+            els.sram_o.x = L.SRAM_ACC_x;
+            els.sram_o.y = L.SRAM_O_y;
+            els.sram_o.op = 1;
+            els.sram_attn.color = "#fed7aa";
+            els.sram_o.text = "Acc += new";
+            if (state.j > 0) els.sram_o.color = "#ffedd5";
+        }
+
+        if (phase === 'output') {
+            els.sram_o.x = isI0 ? L.O_x0 : L.O_x1;
+            els.sram_o.y = L.O_y;
+            els.sram_o.op = 1;
+            els.sram_o.text = "Save Acc";
+            els.sram_o.border = "#22c55e";
+        }
+
+        if (stateIndex >= 6) els.o0.text = "O0 (Partial)";
+        if (stateIndex >= 11) els.o1.text = "O1 (Partial)";
+        if (stateIndex >= 17) els.o0.text = "O0 (Final)";
+        if (stateIndex >= 22) els.o1.text = "O1 (Final)";
+
+        return els;
+    }
+
+    function drawMathText(x, y, text) {
+        ctx.save();
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+
+        const tokens = text.match(/sm|\(|\)|Q\d|K\d|V\d|O\d|Acc|\^T|\+=|new|[A-Za-z\d]+/g) || [text];
+        let currentX = 0;
+        const parts = [];
+
+        tokens.forEach(token => {
+            let font = "bold 13px sans-serif";
+            let offsetY = 0;
+            let color = "#111827";
+
+            if (token === "sm") { font = "italic 13px serif"; color = "#4b5563"; }
+            else if (token === "^T") { token = "T"; font = "bold 10px sans-serif"; offsetY = -6; }
+            else if (token.match(/[QKV]\d/)) { font = "bold 14px serif"; }
+
+            ctx.font = font;
+            const width = ctx.measureText(token).width;
+            parts.push({ text: token, font, color, width, offsetY });
+            currentX += width;
+        });
+
+        let startX = x - currentX / 2;
+        parts.forEach(p => {
+            ctx.font = p.font;
+            ctx.fillStyle = p.color;
+            ctx.fillText(p.text, startX + p.width / 2, y + p.offsetY);
+            startX += p.width;
+        });
+        ctx.restore();
+    }
+
+    function drawRoundRect(item) {
+        const { x, y, w, h, op, text, color, border } = item;
+        ctx.save();
+        ctx.globalAlpha = op;
+        ctx.fillStyle = color;
+        ctx.strokeStyle = border;
+        ctx.lineWidth = 2;
+
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(x, y, w, h, 6);
+        } else {
+            ctx.rect(x, y, w, h);
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        if (text.includes('^T') || text.includes('sm') || text.match(/[QKV]\d/)) {
+            drawMathText(x + w / 2, y + h / 2, text);
+        } else {
+            ctx.fillStyle = "#111827";
+            ctx.font = "bold 13px sans-serif";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            ctx.fillText(text, x + w / 2, y + h / 2);
+        }
+        ctx.restore();
+    }
+
+    function drawArrow(x1, y1, x2, y2, color, text, rotate = false, lineWidth = 2) {
+        ctx.save();
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+
+        const angle = Math.atan2(y2 - y1, x2 - x1);
+        ctx.beginPath();
+        ctx.moveTo(x2, y2);
+        ctx.lineTo(x2 - 10 * Math.cos(angle - Math.PI / 6), y2 - 10 * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(x2 - 10 * Math.cos(angle + Math.PI / 6), y2 - 10 * Math.sin(angle + Math.PI / 6));
+        ctx.fill();
+
+        ctx.font = 'bold 12px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        if (rotate) {
+            ctx.translate((x1+x2)/2, (y1+y2)/2);
+            ctx.rotate(angle);
+            ctx.fillText(text, 0, -8);
+        } else {
+            ctx.fillText(text, (x1+x2)/2, Math.min(y1, y2) - 8);
+        }
+        ctx.restore();
+    }
+
+    function drawStaticBackground(phase) {
+        ctx.save();
+        ctx.setLineDash([6, 6]);
+        ctx.strokeStyle = '#f97316';
+        ctx.lineWidth = 2;
+        ctx.fillStyle = '#fff7ed';
+        ctx.beginPath();
+        if (ctx.roundRect) ctx.roundRect(120, 105, 530, 440, 10); else ctx.rect(120, 105, 530, 440);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = '#ea580c';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Fast SRAM', 135, 125);
+        ctx.restore();
+
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = '#9ca3af';
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(L.Attn_x0, L.Attn_y0, 220, 220);
+        ctx.beginPath();
+        ctx.moveTo(L.Attn_x0, L.Attn_y0 + 110); ctx.lineTo(L.Attn_x0 + 220, L.Attn_y0 + 110);
+        ctx.moveTo(L.Attn_x0 + 110, L.Attn_y0); ctx.lineTo(L.Attn_x0 + 110, L.Attn_y0 + 220);
+        ctx.stroke();
+        ctx.fillStyle = '#6b7280';
+        ctx.font = 'italic 12px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.fillText('Virtual NxN Attention Matrix', L.Attn_x0, L.Attn_y0 + 235);
+        ctx.restore();
+
+        const isOuter = phase === 'load_kv' || phase === 'init';
+        const isInner = phase === 'load_q' || phase === 'compute_qk' || phase === 'load_o' || phase === 'accumulate' || phase === 'output';
+        const outerColor = isOuter ? '#ef4444' : '#fca5a5';
+        const innerColor = isInner ? '#3b82f6' : '#93c5fd';
+        const outerWidth = isOuter ? 3 : 1;
+        const innerWidth = isInner ? 3 : 1;
+
+        drawArrow(L.K_x0, 20, L.K_x1 + L.K_w, 20, outerColor, 'Outer Loop (K, V)', false, outerWidth);
+        drawArrow(L.V_x + L.V_w + 15, L.V_y0, L.V_x + L.V_w + 15, L.V_y1 + L.V_h, outerColor, 'Outer Loop', true, outerWidth);
+        drawArrow(25, L.Q_y0, 25, L.Q_y1 + L.Q_h, innerColor, 'Inner Loop (Q)', true, innerWidth);
+        drawArrow(L.O_x0, L.O_y + L.O_h + 20, L.O_x1 + L.O_w, L.O_y + L.O_h + 20, innerColor, 'Inner Loop', false, innerWidth);
+
+        ctx.save();
+        ctx.setLineDash([4, 4]);
+        ctx.strokeStyle = '#d1d5db';
+        ctx.fillStyle = '#9ca3af';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(L.Q_x, L.Q_y1 + L.Q_h + 10, L.Q_w, 60); ctx.fillText("...", L.Q_x + L.Q_w/2, L.Q_y1 + L.Q_h + 40);
+        ctx.strokeRect(L.K_x1 + L.K_w + 10, L.K_y, 60, L.K_h); ctx.fillText("...", L.K_x1 + L.K_w + 40, L.K_y + L.K_h/2);
+        ctx.strokeRect(L.V_x, L.V_y1 + L.V_h + 10, L.V_w, 60); ctx.fillText("...", L.V_x + L.V_w/2, L.V_y1 + L.V_h + 40);
+        ctx.strokeRect(L.O_x1 + L.O_w + 10, L.O_y, 60, L.O_h); ctx.fillText("...", L.O_x1 + L.O_w + 40, L.O_y + L.O_h/2);
+        ctx.restore();
+
+        ctx.fillStyle = "#374151";
+        ctx.font = "bold 12px sans-serif";
+        ctx.fillText("Q: Nxd", L.Q_x, L.Q_y0 - 10);
+        ctx.fillText("K^T: dxN", L.K_x0 - 50, L.K_y + 25);
+        ctx.fillText("V: Nxd", L.V_x, L.V_y0 - 10);
+        ctx.fillText("Output: Nxd", L.O_x0 - 70, L.O_y + 25);
+    }
+
+    function renderFrame(progress) {
+        ctx.clearRect(0, 0, CANVAS_W, CANVAS_H);
+        drawStaticBackground(states[currentStep].phase);
+
+        const scene1 = deriveScene(animStep);
+        const scene2 = deriveScene(currentStep);
+
+        Object.keys(scene1).forEach(key => {
+            const e1 = scene1[key];
+            const e2 = scene2[key];
+            const x = e1.x + (e2.x - e1.x) * progress;
+            const y = e1.y + (e2.y - e1.y) * progress;
+            const w = e1.w + (e2.w - e1.w) * progress;
+            const h = e1.h + (e2.h - e1.h) * progress;
+            const op = e1.op + (e2.op - e1.op) * progress;
+            const text = e2.op >= e1.op ? e2.text : e1.text;
+            const color = e2.op >= e1.op ? e2.color : e1.color;
+            const border = e2.op >= e1.op ? e2.border : e1.border;
+
+            if (op > 0.01) drawRoundRect({ x, y, w, h, op, text, color, border });
+        });
+    }
+
+    function startAnimation() {
+        if (animationId) cancelAnimationFrame(animationId);
+        let startTime = null;
+        const duration = 500;
+
+        function animate(time) {
+            if (!startTime) startTime = time;
+            let p = (time - startTime) / duration;
+            if (p >= 1) {
+                renderFrame(1);
+                animStep = currentStep;
+                updateUI();
+            } else {
+                const eased = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+                renderFrame(eased);
+                animationId = requestAnimationFrame(animate);
+            }
+        }
+        animationId = requestAnimationFrame(animate);
+    }
+
+    function updateUI() {
+        const state = states[currentStep];
+        stepCounter.innerText = `Step ${currentStep} / ${states.length - 1}`;
+        phaseBadge.innerText = `Phase: ${state.phase}`;
+        stepDescription.innerText = state.text;
+        btnBack.disabled = currentStep === 0;
+        btnNext.disabled = currentStep === states.length - 1;
+    }
+
+    btnNext.addEventListener('click', () => {
+        if (currentStep < states.length - 1) {
+            currentStep++;
+            startAnimation();
+        }
+    });
+
+    btnBack.addEventListener('click', () => {
+        if (currentStep > 0) {
+            currentStep--;
+            startAnimation();
+        }
+    });
+
+    btnReset.addEventListener('click', () => {
+        currentStep = 0;
+        startAnimation();
+    });
+
+    // Initial render
+    renderFrame(1);
+    updateUI();
+
+</script>
+
+</body>
+</html>

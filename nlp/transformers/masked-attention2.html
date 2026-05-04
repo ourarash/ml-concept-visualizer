@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Interactive Attention Matrix Visualization</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- KaTeX for Math Rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
+    <!-- KaTeX Auto-render Extension -->
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js"></script>
+
+    <style>
+        .highlight-active {
+            background-color: #bfdbfe !important; /* blue-200 */
+            box-shadow: 0 0 0 2px #60a5fa; /* ring-blue-400 */
+            font-weight: bold;
+        }
+        .matrix-cell { transition: all 0.2s ease; }
+    </style>
+</head>
+<body class="bg-slate-50 min-h-screen p-8 font-sans text-slate-800">
+
+<div class="max-w-6xl mx-auto space-y-12">
+
+    <!-- Header -->
+    <div class="text-center space-y-4">
+        <h1 class="text-3xl font-extrabold text-slate-900">Interactive Attention Matrix Multiplication</h1>
+        <p class="text-slate-600 max-w-3xl mx-auto">
+            Hover over the <strong>Scores</strong> matrix to see the exact dot-product calculation. The layout now follows the standard matrix multiplication equation: <span id="header-math">$Q \times K^T = \text{Scores}$</span>.
+        </p>
+    </div>
+
+    <!-- Stage 1: Matrix Multiplication Layout -->
+    <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 overflow-x-auto">
+        <div class="flex items-center justify-center space-x-6 min-w-max pb-4">
+
+            <!-- Queries (Q) -->
+            <div id="q-container"></div>
+
+            <!-- Multiply Sign -->
+            <div class="text-2xl font-bold text-gray-400 mt-8">$\times$</div>
+
+            <!-- Keys Transposed (K^T) -->
+            <div id="kt-container"></div>
+
+            <!-- Equals Sign -->
+            <div class="text-2xl font-bold text-gray-400 mt-8">$=$</div>
+
+            <!-- Raw Scores -->
+            <div id="scores-container"></div>
+
+        </div>
+
+        <!-- Interactive Math Explainer -->
+        <div class="mt-8 p-6 bg-slate-50 rounded-lg border border-slate-100 min-h-[120px] flex items-center justify-center">
+            <div id="math-explainer" class="text-lg">
+                <p class="text-slate-400 italic text-sm">Hover over the Scores matrix to see the mathematical breakdown.</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Stage 2 & 3: Masking and Softmax -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+
+        <!-- Masked Scores -->
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+            <div class="mb-4 text-center">
+                <h2 class="text-lg font-bold text-slate-800">Apply Attention Mask</h2>
+                <p class="text-xs text-slate-500 max-w-[250px] mx-auto mt-1">
+                    Future tokens (where $j > i$) are set to $-\infty$ so they zero out during Softmax.
+                </p>
+            </div>
+            <div id="mask-container"></div>
+        </div>
+
+        <!-- Softmax -->
+        <div class="bg-white p-8 rounded-2xl shadow-sm border border-slate-200 flex flex-col items-center">
+            <div class="mb-4 text-center">
+                <h2 class="text-lg font-bold text-slate-800">Softmax (Along Rows)</h2>
+                <p class="text-xs text-slate-500 max-w-[250px] mx-auto mt-1">
+                    Converts scores into probability weights that sum to $1.0$ across each row.
+                </p>
+            </div>
+            <div id="softmax-container"></div>
+        </div>
+
+    </div>
+
+</div>
+
+<script>
+    // --- Utility Functions ---
+    const dotProduct = (arr1, arr2) => arr1.reduce((sum, val, i) => sum + val * arr2[i], 0);
+    const softmax = (arr) => {
+        const max = Math.max(...arr);
+        const exps = arr.map(x => Math.exp(x - max));
+        const sum = exps.reduce((a, b) => a + b, 0);
+        return exps.map(x => x / sum);
+    };
+
+    // --- Data Setup ---
+    const words = ['robot', 'must', 'obey', 'orders'];
+    const Q = [
+        [0.8, 0.2, 0.5],
+        [0.3, 0.9, 0.1],
+        [0.2, 0.4, 0.8],
+        [0.5, 0.1, 0.9],
+    ];
+    const K = [
+        [0.7, 0.3, 0.4],
+        [0.1, 0.8, 0.2],
+        [0.5, 0.6, 0.1],
+        [0.2, 0.5, 0.7],
+    ];
+    const K_T = K[0].map((_, colIndex) => K.map(row => row[colIndex]));
+    const Scores = Q.map(qRow => words.map((_, colIndex) => dotProduct(qRow, K_T.map(row => row[colIndex]))));
+    const MaskedScores = Scores.map((row, i) => row.map((val, j) => (j > i ? -Infinity : val)));
+    const AttentionWeights = MaskedScores.map(row => softmax(row));
+
+    // --- DOM Builders ---
+    function buildMatrix(data, rowLabels, colLabels, title, colorClass, prefix) {
+        let html = `
+        <div class="flex flex-col items-center gap-2">
+            <h3 class="font-bold text-gray-700 text-sm tracking-widest uppercase">${title}</h3>
+            <div class="flex">`;
+
+        // Row Labels
+        if (rowLabels) {
+            html += `<div class="flex flex-col justify-center gap-1 mr-2 mt-6">`;
+            rowLabels.forEach((lbl, i) => {
+                html += `<div id="${prefix}-rowlabel-${i}" class="h-8 flex items-center justify-end text-xs font-mono text-gray-500 pr-2">${lbl}</div>`;
+            });
+            html += `</div>`;
+        }
+
+        html += `<div class="flex flex-col">`;
+
+        // Column Labels
+        if (colLabels) {
+            html += `<div class="flex gap-1 mb-2 ml-1">`;
+            colLabels.forEach((lbl, j) => {
+                html += `<div id="${prefix}-collabel-${j}" class="w-12 flex items-center justify-center text-xs font-mono text-gray-500">${lbl}</div>`;
+            });
+            html += `</div>`;
+        }
+
+        // Grid Cells
+        html += `<div class="p-1 bg-white rounded-lg shadow-sm border ${colorClass}">
+                    <div class="flex flex-col gap-1">`;
+
+        data.forEach((row, r) => {
+            html += `<div class="flex gap-1">`;
+            row.forEach((val, c) => {
+                const isInf = val === -Infinity;
+                const isSoftmaxZero = prefix === 'softmax' && val === 0;
+                const isSoftmaxNonZero = prefix === 'softmax' && val > 0;
+
+                const displayVal = isInf ? '-∞' : val.toFixed(2);
+
+                let bgBase = '';
+                if (isInf) {
+                    bgBase = 'bg-gray-100 text-gray-300';
+                } else if (isSoftmaxZero) {
+                    bgBase = 'bg-gray-50 text-gray-300';
+                } else if (isSoftmaxNonZero) {
+                    bgBase = 'bg-green-100 text-green-800 font-bold';
+                } else {
+                    bgBase = 'bg-opacity-20 text-gray-800 ' + colorClass.replace('border-', 'bg-').replace('-300', '-50');
+                }
+
+                const cursor = (isInf || isSoftmaxZero) ? 'cursor-default' : 'cursor-pointer hover:bg-blue-300';
+
+                html += `<div id="${prefix}-r${r}-c${c}"
+                              data-r="${r}" data-c="${c}" data-prefix="${prefix}" data-inf="${isInf}" data-zero="${isSoftmaxZero}"
+                              class="matrix-cell w-12 h-8 flex items-center justify-center text-xs font-mono rounded ${bgBase} ${cursor}">
+                            ${displayVal}
+                         </div>`;
+            });
+            html += `</div>`;
+        });
+
+        html += `</div></div></div></div></div>`;
+        return html;
+    }
+
+    // --- Interaction Logic ---
+    function resetHighlights() {
+        document.querySelectorAll('.highlight-active').forEach(el => el.classList.remove('highlight-active'));
+        document.querySelectorAll('.font-bold.text-blue-600').forEach(el => {
+            el.classList.remove('font-bold', 'text-blue-600');
+            el.classList.add('text-gray-500');
+        });
+    }
+
+    function highlightLabels(prefix, r, c) {
+        const rowLabel = document.getElementById(`${prefix}-rowlabel-${r}`);
+        const colLabel = document.getElementById(`${prefix}-collabel-${c}`);
+        if (rowLabel) {
+            rowLabel.classList.remove('text-gray-500');
+            rowLabel.classList.add('font-bold', 'text-blue-600');
+        }
+        if (colLabel) {
+            colLabel.classList.remove('text-gray-500');
+            colLabel.classList.add('font-bold', 'text-blue-600');
+        }
+    }
+
+    function handleHover(e) {
+        const cell = e.target.closest('.matrix-cell');
+        if (!cell) return resetHighlights();
+
+        const isInf = cell.dataset.inf === "true";
+        const isZero = cell.dataset.zero === "true";
+
+        if (isInf || isZero) {
+            resetHighlights();
+            const msg = isZero ? "Probability is 0 because the token was masked." : "Masked out to prevent attending to future tokens.";
+            document.getElementById('math-explainer').innerHTML = `<p class="text-slate-400 italic text-sm">${msg}</p>`;
+            return;
+        }
+
+        const r = parseInt(cell.dataset.r);
+        const c = parseInt(cell.dataset.c);
+        const prefix = cell.dataset.prefix;
+
+        resetHighlights();
+
+        if (prefix === 'scores') {
+            // Highlight Q row
+            for (let j = 0; j < Q[0].length; j++) document.getElementById(`q-r${r}-c${j}`).classList.add('highlight-active');
+            highlightLabels('q', r, null);
+
+            // Highlight KT col
+            for (let i = 0; i < K_T.length; i++) document.getElementById(`kt-r${i}-c${c}`).classList.add('highlight-active');
+            highlightLabels('kt', null, c);
+
+            // Highlight Score cell
+            cell.classList.add('highlight-active');
+            highlightLabels('scores', r, c);
+
+            updateExplainer(r, c);
+        } else if (prefix === 'mask' || prefix === 'softmax') {
+            cell.classList.add('highlight-active');
+            highlightLabels(prefix, r, c);
+            document.getElementById('math-explainer').innerHTML = `<p class="text-slate-400 italic text-sm">Hover over the top equation for mathematical breakdowns.</p>`;
+        }
+    }
+
+    function updateExplainer(r, c) {
+        const qRow = Q[r].map(v => v.toFixed(1));
+        const kCol = K_T.map(row => row[c]).map(v => v.toFixed(1));
+        const score = Scores[r][c].toFixed(2);
+        const word1 = words[r];
+        const word2 = words[c];
+
+        // LaTeX String formatting (Using safe double-backslashes for newlines to prevent parsing errors)
+        const texString = `
+            \\begin{aligned}
+            \\text{Score}_{\\text{${word1}},\\text{${word2}}} &= \\mathbf{q}_{\\text{${word1}}} \\cdot \\mathbf{k}_{\\text{${word2}}} \\\\
+            &= \\begin{bmatrix} ${qRow.join(' & ')} \\end{bmatrix} \\cdot \\begin{bmatrix} ${kCol[0]} \\\\ ${kCol[1]} \\\\ ${kCol[2]} \\end{bmatrix} \\\\
+            &= (${qRow[0]} \\times ${kCol[0]}) + (${qRow[1]} \\times ${kCol[1]}) + (${qRow[2]} \\times ${kCol[2]}) \\\\
+            &= \\mathbf{${score}}
+            \\end{aligned}
+        `;
+
+        const explainerDiv = document.getElementById('math-explainer');
+        katex.render(texString, explainerDiv, { displayMode: true, throwOnError: false });
+    }
+
+    // --- Initialization ---
+    document.addEventListener("DOMContentLoaded", () => {
+        // Render Matrices
+        document.getElementById('q-container').innerHTML = buildMatrix(Q, words, null, "Queries (Q)", "border-purple-300", "q");
+        document.getElementById('kt-container').innerHTML = buildMatrix(K_T, null, words, "Keys Transposed (K^T)", "border-orange-300", "kt");
+        document.getElementById('scores-container').innerHTML = buildMatrix(Scores, words, words, "Scores (Q × K^T)", "border-blue-300", "scores");
+        document.getElementById('mask-container').innerHTML = buildMatrix(MaskedScores, words, words, "Masked Scores", "border-slate-300", "mask");
+        document.getElementById('softmax-container').innerHTML = buildMatrix(AttentionWeights, words, words, "Final Weights", "border-green-300", "softmax");
+
+        // Parse inline mathematics ($...$) across the entire document
+        renderMathInElement(document.body, {
+            delimiters: [
+                {left: "$$", right: "$$", display: true},
+                {left: "$", right: "$", display: false}
+            ],
+            throwOnError: false
+        });
+
+        // Add Listeners
+        const containers = ['scores-container', 'mask-container', 'softmax-container'];
+        containers.forEach(id => {
+            const el = document.getElementById(id);
+            el.addEventListener('mouseover', handleHover);
+            el.addEventListener('mouseleave', () => {
+                resetHighlights();
+                document.getElementById('math-explainer').innerHTML = `<p class="text-slate-400 italic text-sm">Hover over the Scores matrix to see the mathematical breakdown.</p>`;
+            });
+        });
+    });
+</script>
+</body>
+</html>

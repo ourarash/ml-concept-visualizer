@@ -1,0 +1,772 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sampling Distribution: Temp, Top-K, Top-P, Rep Penalty</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f1f5f9;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 1200px;
+            margin: 0 auto;
+            border-radius: 1rem;
+            background-color: #ffffff;
+            cursor: pointer;
+        }
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px; width: 18px;
+            border-radius: 50%;
+            background: currentColor;
+            cursor: pointer;
+            margin-top: -7px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: transform 0.1s;
+        }
+        input[type=range]::-webkit-slider-thumb:hover {
+            transform: scale(1.15);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+        input[type=range]:disabled::-webkit-slider-thumb {
+            background: #94a3b8; cursor: not-allowed; box-shadow: none;
+        }
+        .token-badge {
+            animation: popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; filter: blur(4px); }
+            100% { transform: scale(1); opacity: 1; filter: blur(0px); }
+        }
+        .custom-toggle {
+            position: relative;
+            display: inline-flex;
+            align-items: center;
+            cursor: pointer;
+        }
+        .custom-toggle input {
+            sr-only: true;
+            width: 0;
+            height: 0;
+            opacity: 0;
+        }
+        .toggle-bg {
+            width: 36px;
+            height: 20px;
+            background-color: #cbd5e1;
+            border-radius: 9999px;
+            transition: background-color 0.2s;
+            position: relative;
+        }
+        .toggle-dot {
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 16px;
+            height: 16px;
+            background-color: white;
+            border-radius: 50%;
+            transition: transform 0.2s;
+            box-shadow: 0 1px 2px rgba(0,0,0,0.2);
+        }
+        input:checked + .toggle-bg {
+            background-color: currentColor;
+        }
+        input:checked + .toggle-bg .toggle-dot {
+            transform: translateX(16px);
+        }
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col lg:flex-row bg-slate-50">
+
+    <!-- Left Sidebar -->
+    <aside class="w-full lg:w-80 xl:w-[400px] bg-white border-r border-slate-200 p-5 lg:p-6 lg:h-screen lg:overflow-y-auto flex flex-col gap-6 shrink-0 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+
+        <!-- Header -->
+        <header>
+            <h1 class="text-3xl xl:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">Sampling Dist.</h1>
+            <p class="text-slate-500 mt-2 text-sm">Visualize Top-K, Top-P, Temperature, and Repetition Penalty.</p>
+        </header>
+
+        <!-- Settings Panel -->
+        <div class="flex flex-col gap-4">
+
+            <!-- Temperature -->
+            <div class="bg-indigo-50/50 p-4 rounded-xl border border-indigo-100/80 flex flex-col gap-3">
+                <div class="flex justify-between items-center w-full">
+                    <label class="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <span>🌡️</span> Temperature
+                    </label>
+                    <span id="temp-display" class="text-indigo-600 font-bold bg-indigo-100 px-2 py-0.5 rounded text-sm">1.0</span>
+                </div>
+                <input type="range" id="temp-slider" min="0.1" max="3.0" step="0.1" value="1.0" class="w-full text-indigo-500">
+                <p class="text-xs text-slate-500 italic leading-snug">Scales the raw logits before softmax. Low = Spiky/Confident, High = Flat/Random.</p>
+            </div>
+
+            <!-- Repetition Penalty (NEW) -->
+            <div class="bg-emerald-50/30 p-4 rounded-xl border border-emerald-100/80 flex flex-col gap-3 transition-colors">
+                <div class="flex justify-between items-center w-full">
+                    <label class="text-sm font-bold text-slate-700 flex items-center gap-2">
+                        <span>♻️</span> Repetition Penalty
+                    </label>
+                    <span id="rep-display" class="text-emerald-600 font-bold bg-emerald-100 px-2 py-0.5 rounded text-sm">0.0</span>
+                </div>
+                <input type="range" id="rep-slider" min="0.0" max="5.0" step="0.1" value="0.0" class="w-full text-emerald-500">
+                <p class="text-xs text-slate-500 italic leading-snug">Subtracts from the logit of words already in the Generated Sequence.</p>
+            </div>
+
+            <!-- Top-K -->
+            <div id="topk-panel" class="bg-blue-50/30 p-4 rounded-xl border border-blue-100/50 flex flex-col gap-3 transition-colors">
+                <div class="flex justify-between items-center w-full">
+                    <label class="custom-toggle text-blue-600">
+                        <input type="checkbox" id="topk-toggle">
+                        <div class="toggle-bg"><div class="toggle-dot"></div></div>
+                        <span class="ml-2 text-sm font-bold text-slate-700 select-none">Top-K Cutoff</span>
+                    </label>
+                    <span id="topk-display" class="text-blue-600 font-bold bg-blue-100 px-2 py-0.5 rounded text-sm opacity-50">Off</span>
+                </div>
+                <div class="opacity-50 pointer-events-none transition-opacity duration-200 flex flex-col gap-2" id="topk-controls">
+                    <input type="range" id="topk-slider" min="1" max="30" step="1" value="10" class="w-full text-blue-500">
+                    <p class="text-xs text-slate-500 italic leading-snug">Hard-caps the vocabulary to the top K most likely words.</p>
+                </div>
+            </div>
+
+            <!-- Top-P (Nucleus) -->
+            <div id="topp-panel" class="bg-purple-50/30 p-4 rounded-xl border border-purple-100/50 flex flex-col gap-3 transition-colors">
+                <div class="flex justify-between items-center w-full">
+                    <label class="custom-toggle text-purple-600">
+                        <input type="checkbox" id="topp-toggle">
+                        <div class="toggle-bg"><div class="toggle-dot"></div></div>
+                        <span class="ml-2 text-sm font-bold text-slate-700 select-none">Top-P (Nucleus)</span>
+                    </label>
+                    <span id="topp-display" class="text-purple-600 font-bold bg-purple-100 px-2 py-0.5 rounded text-sm opacity-50">Off</span>
+                </div>
+                <div class="opacity-50 pointer-events-none transition-opacity duration-200 flex flex-col gap-2" id="topp-controls">
+                    <input type="range" id="topp-slider" min="0.1" max="1.0" step="0.05" value="0.9" class="w-full text-purple-500">
+                    <p class="text-xs text-slate-500 italic leading-snug">Accumulates probabilities from left to right. Cuts off the tail once the sum hits P.</p>
+                </div>
+            </div>
+
+        </div>
+
+        <!-- Action Area -->
+        <div class="mt-auto pt-4">
+            <button id="btn-sample" class="w-full py-3.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold transition-all active:scale-95 shadow-md flex items-center justify-center gap-2 text-base disabled:opacity-50 disabled:cursor-not-allowed">
+                <span>🎲</span> Roll Dice & Sample Next
+            </button>
+            <button id="btn-clear" class="w-full py-2 mt-2 text-slate-500 hover:text-slate-700 text-sm font-medium transition-colors">
+                Clear Sequence
+            </button>
+        </div>
+
+    </aside>
+
+    <!-- Main Workspace Area -->
+    <main class="flex-grow p-4 md:p-6 lg:p-8 flex flex-col lg:h-screen lg:overflow-y-auto w-full relative">
+
+        <div class="max-w-5xl mx-auto w-full flex flex-col h-full gap-6">
+
+            <!-- Live Sequence Banner -->
+            <div class="bg-white p-4 md:p-5 rounded-2xl shadow-sm border border-slate-200 flex flex-col gap-3 shrink-0">
+                <div class="text-slate-400 text-xs font-bold uppercase tracking-widest flex justify-between items-center">
+                    <span>Generated Sequence</span>
+                    <span class="text-indigo-500 normal-case tracking-normal bg-indigo-50 px-2 py-0.5 rounded-full" id="vocab-status">30 / 30 Tokens Active</span>
+                </div>
+                <div id="sequence-output" class="flex flex-wrap gap-2 min-h-[40px] w-full items-center p-2 bg-slate-50 rounded-xl border border-slate-100">
+                    <span class="px-3 py-1.5 rounded-lg border bg-slate-800 text-slate-100 border-slate-700 font-mono shadow-sm">The</span>
+                </div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div class="relative w-full bg-white rounded-2xl overflow-hidden flex-shrink-0 border border-slate-200 shadow-sm flex flex-col min-h-[400px] flex-grow">
+                <canvas id="distCanvas"></canvas>
+
+                <!-- Legend overlay -->
+                <div class="absolute top-16 right-5 bg-white/95 backdrop-blur-md p-4 rounded-xl border border-slate-200/60 shadow-lg text-xs space-y-2.5 pointer-events-none">
+                    <div class="font-bold text-slate-700 mb-1 border-b border-slate-100 pb-1">Legend</div>
+                    <div class="flex items-center gap-2.5"><span class="w-3.5 h-3.5 rounded bg-indigo-500 shadow-sm inline-block"></span> <span class="text-slate-600">Base Probability</span></div>
+                    <div class="flex items-center gap-2.5"><span class="w-3.5 h-3.5 border-2 border-emerald-400 border-dashed rounded inline-block"></span> <span class="text-slate-600">Re-normalized Boost</span></div>
+                    <div class="flex items-center gap-2.5"><span class="w-3.5 h-1 rounded bg-rose-500 shadow-sm inline-block"></span> <span class="text-slate-600">Cumulative Sum (CDF)</span></div>
+                    <div class="flex items-center gap-2.5 mt-1 pt-1 border-t border-slate-100 text-slate-400">
+                        <svg class="w-3.5 h-3.5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path stroke-linecap="round" stroke-linejoin="round" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path></svg>
+                        <span>Logit Penalized (Repetition)</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deep Dive Section -->
+            <details class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm group shrink-0 mt-2">
+                <summary class="font-bold text-slate-800 px-6 py-5 cursor-pointer flex justify-between items-center bg-slate-50 hover:bg-slate-100 transition-colors">
+                    <span class="flex items-center gap-3 text-base md:text-lg">
+                        <span class="bg-sky-100 text-sky-600 p-2 rounded-lg">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" /></svg>
+                        </span>
+                        Deep Dive: Filters & Repetition Penalties
+                    </span>
+                    <span class="text-slate-400 transform group-open:rotate-180 transition-transform duration-300">▼</span>
+                </summary>
+
+                <div class="p-6 md:p-8 grid grid-cols-1 lg:grid-cols-2 gap-8 border-t border-slate-100 bg-white">
+                    <div class="space-y-3 text-sm text-slate-600">
+                        <h4 class="font-bold text-slate-800 mb-1 flex items-center gap-2"><span class="text-emerald-500 text-lg">♻️</span> Repetition Penalty</h4>
+                        <p>To stop models from looping (e.g., "the cat the cat the cat"), this penalty artificially lowers the logits of words that have already appeared in the sequence.</p>
+                        <p class="text-xs text-slate-400 italic">Watch the bar for "The" drop dramatically when you increase the Repetition Penalty slider!</p>
+                    </div>
+                    <div class="space-y-3 text-sm text-slate-600">
+                        <h4 class="font-bold text-slate-800 mb-1 flex items-center gap-2"><span class="text-emerald-500 text-lg">📈</span> Re-Normalization</h4>
+                        <p>If Top-K or Top-P chops off 20% of the distribution's probability mass, the remaining words no longer sum to 100%. The system must <strong>re-normalize</strong> the survivors, scaling them all up proportionally.</p>
+                        <p class="text-xs text-slate-400 italic">Notice the dashed green boxes in the Canvas! This shows exactly how much the kept words grew after the others were pruned.</p>
+                    </div>
+                    <div class="space-y-3 text-sm text-slate-600">
+                        <h4 class="font-bold text-slate-800 mb-1 flex items-center gap-2"><span class="text-blue-500 text-lg">✂️</span> Top-K Sampling</h4>
+                        <p>Sorts the vocabulary by probability and <strong>hard-caps</strong> the selection to the top $K$ words. All words from rank $K+1$ onwards are given exactly 0% chance.</p>
+                        <p class="text-xs text-slate-400 italic">Pro: Prevents catastrophic weird words. Con: Might arbitrarily cut off good words at the boundary.</p>
+                    </div>
+                    <div class="space-y-3 text-sm text-slate-600">
+                        <h4 class="font-bold text-slate-800 mb-1 flex items-center gap-2"><span class="text-purple-500 text-lg">⚛️</span> Top-P (Nucleus)</h4>
+                        <p>Creates a dynamic cutoff. It accumulates probability from left to right until the sum hits $P$ (e.g., 90%). It only keeps the "nucleus" of confident mass.</p>
+                        <p class="text-xs text-slate-400 italic">Pro: Automatically adapts. If the model is highly confident, it might only keep 2 words. If uncertain, it might keep 100.</p>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('distCanvas');
+        const ctx = canvas.getContext('2d');
+        const WIDTH = 1200;
+        const HEIGHT = 600;
+
+        // --- Mock Data ---
+        const rawVocab = [
+            { word: "cat", logit: 6.5 }, { word: "dog", logit: 5.8 }, { word: "quick", logit: 5.0 },
+            { word: "man", logit: 4.8 }, { word: "woman", logit: 4.5 }, { word: "first", logit: 4.1 },
+            { word: "car", logit: 3.8 }, { word: "best", logit: 3.5 }, { word: "old", logit: 3.2 },
+            { word: "new", logit: 2.9 }, { word: "big", logit: 2.7 }, { word: "small", logit: 2.5 },
+            { word: "sun", logit: 2.2 }, { word: "moon", logit: 1.9 }, { word: "house", logit: 1.7 },
+            { word: "tree", logit: 1.5 }, { word: "book", logit: 1.3 }, { word: "story", logit: 1.1 },
+            { word: "boy", logit: 0.9 }, { word: "girl", logit: 0.7 }, { word: "water", logit: 0.5 },
+            { word: "fire", logit: 0.3 }, { word: "wind", logit: 0.1 }, { word: "earth", logit: -0.1 },
+            { word: "king", logit: -0.3 }, { word: "queen", logit: -0.5 }, { word: "sword", logit: -0.7 },
+            { word: "shield", logit: -0.9 }, { word: "magic", logit: -1.2 }, { word: "dragon", logit: -1.5 }
+        ];
+
+        // --- State ---
+        let state = {
+            temp: 1.0,
+            repPenalty: 0.0,
+            useTopK: false,
+            topK: 10,
+            useTopP: false,
+            topP: 0.9,
+            activeCount: 30,
+            sampledWordIndex: -1,
+            hoverIdx: -1,
+
+            // Dice Roll Animation State
+            isRolling: false,
+            rollR: -1,
+            targetR: -1,
+            shuffleTimer: null,
+
+            tokens: rawVocab.map(v => ({
+                word: v.word,
+                logit: v.logit,
+                currentLogit: v.logit,
+                isPenalized: false,
+                rawProb: 0, normProb: 0, cumSum: 0, isKept: true,
+                currRaw: 0, currNorm: 0, currCum: 0
+            }))
+        };
+
+        let generatedSequence = ["The"];
+
+        // --- Core Math ---
+        function calculateDistribution() {
+            // 1. Apply Repetition Penalty
+            state.tokens.forEach(t => {
+                t.currentLogit = t.logit;
+                t.isPenalized = false;
+                if (state.repPenalty > 0) {
+                    const isUsed = generatedSequence.some(w => w.toLowerCase() === t.word.toLowerCase());
+                    if (isUsed) {
+                        t.currentLogit -= state.repPenalty;
+                        t.isPenalized = true;
+                    }
+                }
+            });
+
+            // 2. Apply Temperature & Softmax
+            const exps = state.tokens.map(t => Math.exp(t.currentLogit / state.temp));
+            const sumExp = exps.reduce((a, b) => a + b, 0);
+
+            let cumSumRaw = 0;
+            state.tokens.forEach((t, i) => {
+                t.rawProb = exps[i] / sumExp;
+                cumSumRaw += t.rawProb;
+                t.cumSum = cumSumRaw;
+            });
+
+            // 3. Identify Kept Tokens based on filters
+            const kLimit = state.useTopK ? state.topK : state.tokens.length;
+            const pLimit = state.useTopP ? state.topP : 1.0;
+
+            let keptIndices = [];
+            let testCumSum = 0;
+
+            for (let i = 0; i < state.tokens.length; i++) {
+                if (i >= kLimit) break;
+                testCumSum += state.tokens[i].rawProb;
+                keptIndices.push(i);
+                if (state.useTopP && testCumSum >= pLimit) break;
+            }
+            if (keptIndices.length === 0) keptIndices.push(0);
+
+            // 4. Re-normalize kept tokens
+            const keptMass = keptIndices.reduce((sum, idx) => sum + state.tokens[idx].rawProb, 0);
+            state.activeCount = keptIndices.length;
+
+            state.tokens.forEach((t, i) => {
+                t.isKept = keptIndices.includes(i);
+                t.normProb = t.isKept ? (t.rawProb / keptMass) : 0;
+            });
+
+            document.getElementById('vocab-status').textContent = `${state.activeCount} / ${state.tokens.length} Tokens Active`;
+        }
+
+        // --- Canvas Rendering ---
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = WIDTH * dpr;
+            canvas.height = HEIGHT * dpr;
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (WIDTH / rect.width);
+            mouseY = (e.clientY - rect.top) * (HEIGHT / rect.height);
+
+            const padding = 60;
+            const innerW = WIDTH - padding * 2;
+            const barW = innerW / state.tokens.length;
+
+            if (mouseY > 100 && mouseY < HEIGHT - 60 && mouseX > padding && mouseX < WIDTH - padding) {
+                state.hoverIdx = Math.floor((mouseX - padding) / barW);
+            } else {
+                state.hoverIdx = -1;
+            }
+        });
+        canvas.addEventListener('mouseleave', () => { state.hoverIdx = -1; mouseX = -1; });
+
+        function drawText(text, x, y, font, color, align = 'center') {
+            ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y);
+        }
+
+        function drawPointer(r, innerW, padX, rY, rH) {
+            const ptrX = padX + r * innerW;
+            ctx.beginPath();
+            ctx.moveTo(ptrX - 8, rY - 10);
+            ctx.lineTo(ptrX + 8, rY - 10);
+            ctx.lineTo(ptrX, rY + 4);
+            ctx.fillStyle = '#ef4444';
+            ctx.fill();
+
+            ctx.beginPath();
+            ctx.moveTo(ptrX, rY + 4);
+            ctx.lineTo(ptrX, rY + rH + 6);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 2.5;
+            ctx.stroke();
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+
+            // Interpolate bar animations
+            state.tokens.forEach(t => {
+                t.currRaw += (t.rawProb - t.currRaw) * 0.15;
+                t.currNorm += (t.normProb - t.currNorm) * 0.15;
+                t.currCum += (t.cumSum - t.currCum) * 0.15;
+            });
+
+            // Interpolate Dice Roll animation
+            if (state.isRolling) {
+                state.rollR += (state.targetR - state.rollR) * 0.08;
+
+                // Finished rolling trigger
+                if (Math.abs(state.targetR - state.rollR) < 0.001) {
+                    state.rollR = state.targetR;
+                    state.isRolling = false;
+
+                    let testR = state.targetR;
+                    let chosenIdx = 0;
+                    for (let i = 0; i < state.tokens.length; i++) {
+                        if (!state.tokens[i].isKept) continue;
+                        testR -= state.tokens[i].normProb;
+                        if (testR <= 0) { chosenIdx = i; break; }
+                    }
+
+                    state.sampledWordIndex = chosenIdx;
+                    generatedSequence.push(state.tokens[chosenIdx].word);
+                    updateSequenceUI();
+                    document.getElementById('btn-sample').disabled = false;
+
+                    // Queue automatic shuffle for next step
+                    state.shuffleTimer = setTimeout(() => {
+                        state.tokens.forEach(t => { t.logit = t.logit + (Math.random() * 2 - 1); });
+                        state.tokens.sort((a,b) => b.logit - a.logit);
+                        state.sampledWordIndex = -1;
+                        state.rollR = -1;
+                        calculateDistribution();
+                    }, 1500);
+                }
+            }
+
+            const padX = 60;
+            const padY = 80;
+            const innerW = WIDTH - padX * 2;
+            const innerH = HEIGHT - padY * 2;
+            const barW = innerW / state.tokens.length;
+            const gap = barW * 0.15;
+
+            let maxY = Math.max(...state.tokens.map(t => t.currNorm), 0.1);
+            if (maxY < 0.2) maxY = 0.2;
+            if (maxY > 0.8) maxY = 1.0;
+            const scaleY = innerH / maxY;
+
+            // --- 1. Draw Roulette Wheel (Dice Roll Visualizer) ---
+            const rY = 20;
+            const rH = 20;
+            drawText('Roulette Wheel (Normalized Probabilities):', padX, 8, 'bold 12px sans-serif', '#64748b', 'left');
+
+            ctx.beginPath();
+            ctx.roundRect(padX, rY, innerW, rH, 4);
+            ctx.fillStyle = '#f1f5f9';
+            ctx.fill();
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.stroke();
+
+            let currX = padX;
+            state.tokens.forEach((t, i) => {
+                if (!t.isKept) return;
+                const segmentW = t.normProb * innerW;
+                ctx.fillStyle = i % 2 === 0 ? '#818cf8' : '#6366f1';
+                if (i === state.sampledWordIndex) ctx.fillStyle = '#f59e0b';
+                ctx.fillRect(currX, rY, segmentW, rH);
+                currX += segmentW;
+            });
+
+            if (state.isRolling || state.rollR >= 0) {
+                drawPointer(state.rollR, innerW, padX, rY, rH);
+            }
+
+            // --- 2. Draw Background Grid ---
+            ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+            ctx.beginPath();
+            [0.25, 0.5, 0.75, 1.0].forEach(tick => {
+                const y = HEIGHT - padY - (tick * maxY * scaleY);
+                if (y > padY) {
+                    ctx.moveTo(padX - 10, y); ctx.lineTo(WIDTH - padX, y);
+                    drawText((tick * maxY * 100).toFixed(0) + '%', padX - 20, y, '12px sans-serif', '#94a3b8', 'right');
+                }
+            });
+            ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(padX, HEIGHT - padY); ctx.lineTo(WIDTH - padX, HEIGHT - padY);
+            ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 2; ctx.stroke();
+
+            // --- 3. Draw Main Bars ---
+            state.tokens.forEach((t, i) => {
+                const x = padX + i * barW + gap;
+                const w = barW - gap * 2;
+                const hRaw = t.currRaw * scaleY;
+                const hNorm = t.currNorm * scaleY;
+                const yRaw = HEIGHT - padY - hRaw;
+                const yNorm = HEIGHT - padY - hNorm;
+
+                // Base Raw Prob Bar
+                ctx.fillStyle = t.isKept ? '#6366f1' : '#cbd5e1';
+                ctx.globalAlpha = t.isKept ? 0.9 : 0.4;
+                if (i === state.sampledWordIndex) ctx.fillStyle = '#f59e0b';
+
+                ctx.beginPath();
+                ctx.roundRect(x, yRaw, w, hRaw, [4, 4, 0, 0]);
+                ctx.fill();
+
+                // Re-normalized boost outline
+                if (t.isKept && hNorm > hRaw + 2) {
+                    ctx.strokeStyle = '#34d399';
+                    ctx.lineWidth = 2;
+                    ctx.setLineDash([4, 4]);
+                    ctx.beginPath();
+                    ctx.roundRect(x - 1, yNorm, w + 2, hNorm, [4, 4, 0, 0]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                ctx.globalAlpha = 1.0;
+
+                // X-Axis Labels (Words)
+                ctx.save();
+                ctx.translate(x + w/2, HEIGHT - padY + 15);
+                ctx.rotate(-Math.PI / 4);
+                drawText(t.word, 0, 0, (i === state.sampledWordIndex ? 'bold ' : '') + '14px sans-serif', t.isKept ? '#334155' : '#94a3b8', 'right');
+                ctx.restore();
+
+                // Penalized Icon
+                if (t.isPenalized) {
+                    ctx.save();
+                    ctx.translate(x + w/2, HEIGHT - padY + 45);
+                    ctx.beginPath(); ctx.moveTo(-4, -4); ctx.lineTo(0, 4); ctx.lineTo(4, -4);
+                    ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2; ctx.stroke();
+                    ctx.restore();
+                }
+            });
+
+            // --- 4. Draw Top-K Cutoff Line ---
+            if (state.useTopK) {
+                const kX = padX + state.topK * barW;
+                ctx.beginPath(); ctx.moveTo(kX, padY); ctx.lineTo(kX, HEIGHT - padY);
+                ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.stroke(); ctx.setLineDash([]);
+                ctx.fillStyle = 'rgba(239, 68, 68, 0.05)';
+                ctx.fillRect(kX, padY, WIDTH - padX - kX, innerH);
+                drawText(`Top-K (${state.topK})`, kX + 10, padY + 20, 'bold 12px sans-serif', '#3b82f6', 'left');
+            }
+
+            // --- 5. Draw Top-P Cumulative Line & Cutoff ---
+            if (state.useTopP) {
+                ctx.beginPath();
+                ctx.moveTo(padX + barW/2, HEIGHT - padY - state.tokens[0].currCum * innerH);
+
+                state.tokens.forEach((t, i) => {
+                    const x = padX + i * barW + barW/2;
+                    const y = HEIGHT - padY - t.currCum * innerH;
+                    ctx.lineTo(x, y);
+                });
+
+                ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 3; ctx.stroke();
+
+                const pY = HEIGHT - padY - state.topP * innerH;
+                ctx.beginPath(); ctx.moveTo(padX, pY); ctx.lineTo(WIDTH - padX, pY);
+                ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2; ctx.setLineDash([6, 6]); ctx.stroke(); ctx.setLineDash([]);
+                drawText(`Top-P Threshold (${(state.topP*100).toFixed(0)}%)`, WIDTH - padX - 10, pY - 12, 'bold 12px sans-serif', '#f43f5e', 'right');
+            }
+
+            // --- 5.5 Draw Connection Line from Roulette to Bar ---
+            if (!state.isRolling && state.sampledWordIndex >= 0) {
+                // Find Roulette center X
+                let rCurrX = padX;
+                let rouletteCenterX = 0;
+                state.tokens.forEach((t, i) => {
+                    if (!t.isKept) return;
+                    const segmentW = t.normProb * innerW;
+                    if (i === state.sampledWordIndex) {
+                        rouletteCenterX = rCurrX + segmentW / 2;
+                    }
+                    rCurrX += segmentW;
+                });
+
+                // Find Bar center X and Y
+                const barCenterX = padX + state.sampledWordIndex * barW + barW / 2;
+                const barTopY = HEIGHT - padY - (state.tokens[state.sampledWordIndex].currNorm * scaleY);
+
+                // Draw dashed curve
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(rouletteCenterX, rY + rH + 8);
+                ctx.bezierCurveTo(rouletteCenterX, (rY + rH + barTopY) / 2, barCenterX, (rY + rH + barTopY) / 2, barCenterX, barTopY - 5);
+
+                ctx.strokeStyle = '#f59e0b'; // Amber yellow
+                ctx.lineWidth = 2;
+                ctx.setLineDash([6, 6]);
+                ctx.stroke();
+
+                // Add a small target dot on top of the bar
+                ctx.beginPath();
+                ctx.arc(barCenterX, barTopY - 5, 4, 0, Math.PI * 2);
+                ctx.fillStyle = '#f59e0b';
+                ctx.fill();
+                ctx.restore();
+            }
+
+            // --- 6. Hover Tooltip ---
+            if (state.hoverIdx >= 0 && state.hoverIdx < state.tokens.length) {
+                const t = state.tokens[state.hoverIdx];
+                const x = padX + state.hoverIdx * barW + barW/2;
+                const y = HEIGHT - padY - (t.isKept ? t.currNorm : t.currRaw) * scaleY - 20;
+
+                const lines = [ `Word: "${t.word}"` ];
+
+                if (t.isPenalized) {
+                    lines.push(`⚠️ Repetition Penalty: -${state.repPenalty.toFixed(1)}`);
+                    lines.push(`Raw Logit: ${t.logit.toFixed(2)} -> ${t.currentLogit.toFixed(2)}`);
+                } else {
+                    lines.push(`Raw Logit: ${t.logit.toFixed(2)}`);
+                }
+
+                lines.push(`Base Prob: ${(t.rawProb * 100).toFixed(2)}%`);
+
+                if (t.isKept && Math.abs(t.normProb - t.rawProb) > 0.001) {
+                    lines.push(`Normalized: ${(t.normProb * 100).toFixed(2)}%`);
+                }
+                if (!t.isKept) lines.push(`🚫 Pruned by filters`);
+                if (state.useTopP) lines.push(`Cumul. Sum: ${(t.cumSum * 100).toFixed(1)}%`);
+
+                ctx.save(); ctx.font = "14px sans-serif";
+                let mw = lines.reduce((max, l) => Math.max(max, ctx.measureText(l).width), 0) + 24;
+                let bh = lines.length * 20 + 16;
+                let dx = Math.min(x - mw/2, WIDTH - padX - mw);
+                let dy = Math.max(y - bh - 10, padY);
+                if (dx < padX) dx = padX;
+
+                ctx.fillStyle = "rgba(15, 23, 42, 0.95)";
+                ctx.shadowColor = "rgba(0,0,0,0.3)"; ctx.shadowBlur = 10;
+                ctx.beginPath(); ctx.roundRect(dx, dy, mw, bh, 8); ctx.fill();
+
+                ctx.shadowColor = "transparent"; ctx.fillStyle = "#f8fafc"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+                lines.forEach((l, i) => {
+                    ctx.font = i === 0 ? "bold 14px sans-serif" : "14px font-mono";
+                    ctx.fillStyle = l.includes('🚫') ? '#fca5a5' : (l.includes('⚠️') ? '#fde047' : "#f8fafc");
+                    ctx.fillText(l, dx + 12, dy + 12 + i * 18);
+                });
+                ctx.restore();
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        // --- UI Interactions ---
+        const tempSlider = document.getElementById('temp-slider');
+        const tempDisp = document.getElementById('temp-display');
+        const repSlider = document.getElementById('rep-slider');
+        const repDisp = document.getElementById('rep-display');
+
+        const topkToggle = document.getElementById('topk-toggle');
+        const topkPanel = document.getElementById('topk-panel');
+        const topkControls = document.getElementById('topk-controls');
+        const topkSlider = document.getElementById('topk-slider');
+        const topkDisp = document.getElementById('topk-display');
+
+        const toppToggle = document.getElementById('topp-toggle');
+        const toppPanel = document.getElementById('topp-panel');
+        const toppControls = document.getElementById('topp-controls');
+        const toppSlider = document.getElementById('topp-slider');
+        const toppDisp = document.getElementById('topp-display');
+
+        const btnSample = document.getElementById('btn-sample');
+        const btnClear = document.getElementById('btn-clear');
+        const seqOutput = document.getElementById('sequence-output');
+
+        function triggerRecalc() {
+            if (state.shuffleTimer) {
+                clearTimeout(state.shuffleTimer);
+                state.shuffleTimer = null;
+                state.sampledWordIndex = -1;
+                state.rollR = -1;
+                state.isRolling = false;
+                btnSample.disabled = false;
+            }
+            calculateDistribution();
+        }
+
+        tempSlider.oninput = (e) => {
+            state.temp = parseFloat(e.target.value);
+            tempDisp.textContent = state.temp.toFixed(1);
+            triggerRecalc();
+        };
+
+        repSlider.oninput = (e) => {
+            state.repPenalty = parseFloat(e.target.value);
+            repDisp.textContent = state.repPenalty.toFixed(1);
+            triggerRecalc();
+        }
+
+        topkToggle.onchange = (e) => {
+            state.useTopK = e.target.checked;
+            topkPanel.className = state.useTopK ? "bg-blue-50/80 p-4 rounded-xl border border-blue-200 flex flex-col gap-3 transition-colors shadow-sm" : "bg-blue-50/30 p-4 rounded-xl border border-blue-100/50 flex flex-col gap-3 transition-colors";
+            topkControls.classList.toggle('opacity-50', !state.useTopK);
+            topkControls.classList.toggle('pointer-events-none', !state.useTopK);
+            topkDisp.className = state.useTopK ? "text-blue-700 font-bold bg-blue-100 border border-blue-200 px-2 py-0.5 rounded text-sm" : "text-blue-600 font-bold bg-blue-100 px-2 py-0.5 rounded text-sm opacity-50";
+            topkDisp.textContent = state.useTopK ? state.topK : "Off";
+            triggerRecalc();
+        };
+
+        topkSlider.oninput = (e) => {
+            state.topK = parseInt(e.target.value);
+            topkDisp.textContent = state.topK;
+            triggerRecalc();
+        };
+
+        toppToggle.onchange = (e) => {
+            state.useTopP = e.target.checked;
+            toppPanel.className = state.useTopP ? "bg-purple-50/80 p-4 rounded-xl border border-purple-200 flex flex-col gap-3 transition-colors shadow-sm" : "bg-purple-50/30 p-4 rounded-xl border border-purple-100/50 flex flex-col gap-3 transition-colors";
+            toppControls.classList.toggle('opacity-50', !state.useTopP);
+            toppControls.classList.toggle('pointer-events-none', !state.useTopP);
+            toppDisp.className = state.useTopP ? "text-purple-700 font-bold bg-purple-100 border border-purple-200 px-2 py-0.5 rounded text-sm" : "text-purple-600 font-bold bg-purple-100 px-2 py-0.5 rounded text-sm opacity-50";
+            toppDisp.textContent = state.useTopP ? state.topP.toFixed(2) : "Off";
+            triggerRecalc();
+        };
+
+        toppSlider.oninput = (e) => {
+            state.topP = parseFloat(e.target.value);
+            toppDisp.textContent = state.topP.toFixed(2);
+            triggerRecalc();
+        };
+
+        function updateSequenceUI() {
+            let html = '';
+            generatedSequence.forEach((word, idx) => {
+                const isNew = idx === generatedSequence.length - 1 && idx !== 0;
+                html += `<span class="px-3 py-1.5 rounded-lg border bg-slate-800 text-slate-100 border-slate-700 font-mono shadow-sm ${isNew ? 'token-badge' : ''}">${word}</span>`;
+            });
+            seqOutput.innerHTML = html;
+        }
+
+        btnSample.onclick = () => {
+            if (state.isRolling) return;
+
+            btnSample.disabled = true;
+            state.targetR = Math.random();
+            state.rollR = 0.0;
+            state.isRolling = true;
+            state.sampledWordIndex = -1;
+        };
+
+        btnClear.onclick = () => {
+            generatedSequence = ["The"];
+            triggerRecalc();
+            updateSequenceUI();
+        };
+
+        // Boot
+        calculateDistribution();
+        updateSequenceUI();
+        requestAnimationFrame(render);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,604 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Quantization Aware Training (QAT) Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+        canvas { background-color: #f8fafc; border-radius: 0.5rem; box-shadow: inset 0 2px 4px 0 rgba(0, 0, 0, 0.06); }
+        .glass-panel { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(10px); }
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 h-screen flex flex-col overflow-hidden">
+
+    <!-- Header -->
+    <header class="bg-white shadow-sm p-4 z-10">
+        <div class="max-w-6xl mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-indigo-600">Quantization Aware Training (QAT)</h1>
+            <div class="flex space-x-2">
+                <span class="px-3 py-1 bg-indigo-100 text-indigo-700 rounded-full text-sm font-semibold">Interactive Visualizer</span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-1 flex max-w-6xl mx-auto w-full p-4 gap-4 min-h-0">
+
+        <!-- Sidebar Controls -->
+        <aside class="w-1/3 flex flex-col gap-4">
+            <!-- Navigation -->
+            <div class="glass-panel p-5 rounded-xl shadow-md border border-slate-200">
+                <h2 class="text-lg font-bold mb-4 flex items-center justify-between">
+                    <span>Simulation Controls</span>
+                    <span id="step-counter" class="text-sm font-mono bg-slate-100 px-2 py-1 rounded">Step 1/5</span>
+                </h2>
+                <div class="flex gap-2">
+                    <button id="btn-back" class="flex-1 bg-slate-200 hover:bg-slate-300 text-slate-700 py-2 rounded font-semibold transition disabled:opacity-50 disabled:cursor-not-allowed">Back</button>
+                    <button id="btn-next" class="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white py-2 rounded font-semibold transition shadow-md shadow-indigo-200 disabled:opacity-50 disabled:cursor-not-allowed">Next</button>
+                </div>
+                <div class="flex gap-2 mt-2">
+                    <button id="btn-pause" class="flex-1 border border-slate-300 hover:bg-slate-50 text-slate-600 py-2 rounded font-semibold transition">Pause Anim</button>
+                    <button id="btn-reset" class="flex-1 border border-slate-300 hover:bg-slate-50 text-slate-600 py-2 rounded font-semibold transition">Reset</button>
+                </div>
+            </div>
+
+            <!-- Explainer Text -->
+            <div class="glass-panel p-5 rounded-xl shadow-md border border-slate-200 flex-1 overflow-y-auto fade-in" id="desc-container">
+                <h3 id="step-title" class="text-xl font-bold text-slate-800 mb-3">Loading...</h3>
+                <div id="step-desc" class="text-slate-600 space-y-3 leading-relaxed">
+                    <!-- Content injected via JS -->
+                </div>
+            </div>
+        </aside>
+
+        <!-- Canvas Area -->
+        <div class="w-2/3 glass-panel rounded-xl shadow-md border border-slate-200 p-2 flex flex-col relative">
+            <canvas id="sim-canvas" class="flex-1 w-full h-full"></canvas>
+
+            <!-- Floating Legend -->
+            <div class="absolute top-6 right-6 bg-white/95 p-3 rounded shadow-lg border border-slate-200 text-xs font-medium">
+                <div class="font-bold mb-2 text-slate-700 uppercase tracking-wider text-[10px]">Canvas Legend</div>
+                <div class="flex items-center gap-2 mb-1"><div class="w-3 h-3 bg-blue-500 rounded-sm"></div> High Precision (FP32)</div>
+                <div class="flex items-center gap-2 mb-1"><div class="w-3 h-3 bg-green-500 rounded-sm"></div> Quantized/Rounded (INT8)</div>
+                <div class="flex items-center gap-2"><div class="w-3 h-3 bg-red-500 rounded-full"></div> Error Gradients</div>
+            </div>
+        </div>
+
+    </main>
+
+    <script>
+        const canvas = document.getElementById('sim-canvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI Elements
+        const btnNext = document.getElementById('btn-next');
+        const btnBack = document.getElementById('btn-back');
+        const btnReset = document.getElementById('btn-reset');
+        const btnPause = document.getElementById('btn-pause');
+        const stepTitle = document.getElementById('step-title');
+        const stepDesc = document.getElementById('step-desc');
+        const stepCounter = document.getElementById('step-counter');
+        const descContainer = document.getElementById('desc-container');
+
+        // State
+        let currentStep = 0;
+        let animationFrameId;
+        let time = 0;
+        let isPaused = false;
+
+        // Model Data (Simulated)
+        const initialWeight = 0.81234;
+        let latentWeight = initialWeight;
+        let gradient = 0.0512;
+
+        // Canvas resizing for high DPI
+        function resizeCanvas() {
+            const rect = canvas.parentElement.getBoundingClientRect();
+            const width = rect.width - 16;
+            const height = rect.height - 16;
+
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = width * dpr;
+            canvas.height = height * dpr;
+            ctx.scale(dpr, dpr);
+            canvas.style.width = `${width}px`;
+            canvas.style.height = `${height}px`;
+        }
+        window.addEventListener('resize', resizeCanvas);
+
+        // --- Step Definitions ---
+        const steps = [
+            {
+                title: "1. The PTQ Accuracy Drop",
+                desc: `
+                    <p>In standard <b>Post-Training Quantization (PTQ)</b>, we take a fully trained model and simply chop off the decimal points to force it into INT8.</p>
+                    <p>Look at the canvas: We lose <span class="font-mono text-red-500 font-bold">0.00234</span> of precision on just this one weight. This is <b>Quantization Noise</b>.</p>
+                    <p>When millions of weights lose precision simultaneously, the network's final accuracy plummets because it was never trained to handle this noise.</p>
+                `,
+                draw: drawStep1
+            },
+            {
+                title: "2. Introducing Latent Weights",
+                desc: `
+                    <p>In QAT, we don't throw away the floating-point weights.</p>
+                    <p>Instead, we keep a high-precision FP32 copy running in the background during the entire training process. These are called <b>Latent Weights</b>.</p>
+                    <p class="bg-indigo-50 border border-indigo-100 p-2 rounded text-sm text-indigo-800">Think of Latent Weights as the "true" underlying memory of the network, while the quantized version is just a temporary lens we look through.</p>
+                `,
+                draw: drawStep2
+            },
+            {
+                title: "3. Fake Quantization (Forward Pass)",
+                desc: `
+                    <p>During the forward pass (making a prediction), we intercept the Latent Weight and pass it through a <b>Fake Quantize</b> node.</p>
+                    <ul class="list-disc pl-5 space-y-1">
+                        <li>It simulates the rounding effect of an integer (creating the staircase step function).</li>
+                        <li>It outputs a "noisy" float that matches what the hardware will see in deployment.</li>
+                    </ul>
+                    <p>The network is forced to make predictions using these noisy weights!</p>
+                `,
+                draw: drawStep3
+            },
+            {
+                title: "4. The Straight-Through Estimator",
+                desc: `
+                    <p>When the model makes an error, the gradient flows backwards to update the weights. But we hit a wall: <b>The derivative of a stair-step function is ZERO.</b></p>
+                    <p>If the gradient is blocked, the model can't learn.</p>
+                    <p><b>The Fix (STE):</b> We create a bypass lane. During backpropagation, we simply pretend the Fake Quantize node isn't there. The gradients flow <i>straight through</i> to the Latent Weight.</p>
+                `,
+                draw: drawStep4
+            },
+            {
+                title: "5. The Network Balancing Act",
+                desc: `
+                    <p>Why is a mathematically "worse" weight actually better? Let's look at <b>two weights</b> working together to create an output!</p>
+                    <p class="font-mono bg-slate-200 p-2 rounded text-center font-bold">Target Sum: 0.54 + 0.54 = 1.08</p>
+                    <ul class="list-disc pl-5 space-y-2 mt-2">
+                        <li><b>PTQ:</b> Rounds both down to <span class="font-mono">0.50</span>. The sum is <span class="font-mono text-red-500 font-bold">1.00</span> (High Error).</li>
+                        <li><b>QAT:</b> The error gradient pushes Latent Weight A up to compensate! It snaps to <span class="font-mono">0.60</span>. The sum is now <span class="font-mono text-green-600 font-bold">1.10</span> (Very Low Error).</li>
+                    </ul>
+                    <p class="text-indigo-700 font-bold mt-3 text-sm">Conclusion: QAT sacrifices individual weight accuracy to save the whole network's accuracy!</p>
+                `,
+                draw: drawStep5
+            }
+        ];
+
+        // --- Drawing Helpers ---
+
+        function round(val, dec) {
+            return Math.round(val * Math.pow(10, dec)) / Math.pow(10, dec);
+        }
+
+        function drawRoundedRect(x, y, w, h, r, fill, stroke, strokeW) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y);
+            ctx.lineTo(x + w - r, y);
+            ctx.arcTo(x + w, y, x + w, y + r, r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.arcTo(x + w, y + h, x + w - r, y + h, r);
+            ctx.lineTo(x + r, y + h);
+            ctx.arcTo(x, y + h, x, y + h - r, r);
+            ctx.lineTo(x, y + r);
+            ctx.arcTo(x, y, x + r, y, r);
+            ctx.closePath();
+            if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+            if (stroke) { ctx.lineWidth = strokeW; ctx.strokeStyle = stroke; ctx.stroke(); }
+        }
+
+        function drawNode(x, y, label, val, isFloat) {
+            drawRoundedRect(x, y, 150, 70, 8, isFloat ? '#eff6ff' : '#f0fdf4', isFloat ? '#3b82f6' : '#22c55e', 2);
+            ctx.fillStyle = '#1e293b';
+            ctx.font = 'bold 13px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x + 75, y + 25);
+            ctx.fillStyle = isFloat ? '#2563eb' : '#16a34a';
+            ctx.font = 'bold 18px monospace';
+            ctx.fillText(val, x + 75, y + 50);
+        }
+
+        function drawArrow(x1, y1, x2, y2, color, width=2, dashed=false) {
+            const headlen = 10;
+            const dx = x2 - x1;
+            const dy = y2 - y1;
+            const angle = Math.atan2(dy, dx);
+
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            if(dashed) ctx.setLineDash([6, 6]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            ctx.beginPath();
+            ctx.moveTo(x2, y2);
+            ctx.lineTo(x2 - headlen * Math.cos(angle - Math.PI / 6), y2 - headlen * Math.sin(angle - Math.PI / 6));
+            ctx.lineTo(x2 - headlen * Math.cos(angle + Math.PI / 6), y2 - headlen * Math.sin(angle + Math.PI / 6));
+            ctx.closePath();
+            ctx.fillStyle = color;
+            ctx.fill();
+        }
+
+        function drawAnimatedParticle(x1, y1, x2, y2, color, speed, offset) {
+            const t = ((time * speed + offset) % 100) / 100;
+            if(t < 0 || t > 1) return; // Keep bounds
+            const px = x1 + (x2-x1) * t;
+            const py = y1 + (y2-y1) * t;
+
+            ctx.beginPath();
+            ctx.arc(px, py, 5, 0, Math.PI*2);
+            ctx.fillStyle = color;
+            ctx.fill();
+
+            // Glow
+            ctx.shadowBlur = 8;
+            ctx.shadowColor = color;
+            ctx.fill();
+            ctx.shadowBlur = 0;
+        }
+
+        function drawStepFunctionIcon(x, y) {
+            ctx.beginPath();
+            ctx.moveTo(x - 15, y + 15);
+            ctx.lineTo(x - 5, y + 15);
+            ctx.lineTo(x - 5, y + 5);
+            ctx.lineTo(x + 5, y + 5);
+            ctx.lineTo(x + 5, y - 5);
+            ctx.lineTo(x + 15, y - 5);
+            ctx.lineTo(x + 15, y - 15);
+            ctx.strokeStyle = '#64748b';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // axes
+            ctx.beginPath();
+            ctx.moveTo(x - 20, y);
+            ctx.lineTo(x + 20, y);
+            ctx.moveTo(x, y - 20);
+            ctx.lineTo(x, y + 20);
+            ctx.strokeStyle = '#cbd5e1';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+        }
+
+        // --- Step Drawing Functions ---
+
+        function drawStep1() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+
+            // Draw original FP32
+            drawNode(w/2 - 75, h/2 - 100, "Original Weight", "0.81234", true);
+
+            // Arrow down
+            drawArrow(w/2, h/2 - 20, w/2, h/2 + 40, '#94a3b8', 3);
+            ctx.fillStyle = '#64748b'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'right';
+            ctx.fillText("Truncate to INT8 format", w/2 - 20, h/2 + 15);
+
+            // Draw INT8
+            drawNode(w/2 - 75, h/2 + 50, "Quantized Weight", "0.81000", false);
+
+            // Calculate and show noise
+            if (time > 30) {
+                const noiseOpacity = Math.min(1, (time - 30) / 30);
+                ctx.globalAlpha = noiseOpacity;
+
+                ctx.fillStyle = '#fef2f2';
+                ctx.strokeStyle = '#fca5a5';
+                drawRoundedRect(w/2 + 100, h/2 - 25, 180, 60, 8, '#fef2f2', '#fca5a5', 2);
+
+                ctx.fillStyle = '#ef4444'; ctx.textAlign = 'center';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.fillText("Quantization Noise:", w/2 + 190, h/2 - 5);
+                ctx.font = 'bold 16px monospace';
+                ctx.fillText("- 0.00234", w/2 + 190, h/2 + 15);
+
+                ctx.globalAlpha = 1.0;
+            }
+        }
+
+        function drawStep2() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+
+            // Draw Memory Box
+            ctx.fillStyle = '#f8fafc';
+            ctx.strokeStyle = '#e2e8f0';
+            drawRoundedRect(w/2 - 120, h/2 - 90, 240, 180, 12, '#f8fafc', '#e2e8f0', 2);
+            ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign = 'left';
+            ctx.fillText("FP32 Memory Allocation", w/2 - 105, h/2 - 65);
+
+            // Draw Latent Weight
+            drawNode(w/2 - 75, h/2 - 35, "Latent Weight", latentWeight.toFixed(5), true);
+
+            // Pulse effect
+            const pulse = Math.sin(time * 0.05) * 5;
+            ctx.strokeStyle = `rgba(59, 130, 246, ${0.4 + Math.sin(time*0.1)*0.4})`;
+            ctx.lineWidth = 3 + pulse;
+            drawRoundedRect(w/2 - 80, h/2 - 40, 160, 80, 10, null, ctx.strokeStyle, ctx.lineWidth);
+        }
+
+        function drawStep3() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+
+            const fakeQuantWeight = round(latentWeight, 2);
+
+            // Nodes
+            drawNode(w/2 - 280, h/2 - 35, "Latent (FP32)", latentWeight.toFixed(5), true);
+
+            // Fake Quant Box
+            drawRoundedRect(w/2 - 75, h/2 - 60, 150, 120, 8, '#ffffff', '#94a3b8', 2);
+            ctx.fillStyle = '#334155'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign='center';
+            ctx.fillText("Fake Quantize", w/2, h/2 - 35);
+
+            // Step function icon inside Fake Quant Box
+            drawStepFunctionIcon(w/2, h/2 - 5);
+
+            ctx.font = '11px sans-serif'; ctx.fillStyle = '#64748b';
+            ctx.fillText("Simulates Rounding", w/2, h/2 + 35);
+            ctx.fillText(`Math: int(${latentWeight.toFixed(2)}) / Scale`, w/2, h/2 + 50);
+
+            drawNode(w/2 + 130, h/2 - 35, "Noisy Weight", fakeQuantWeight.toFixed(5), false);
+
+            // Arrows & Particles (Forward Pass)
+            drawArrow(w/2 - 130, h/2, w/2 - 75, h/2, '#cbd5e1', 3);
+            drawArrow(w/2 + 75, h/2, w/2 + 130, h/2, '#cbd5e1', 3);
+
+            drawAnimatedParticle(w/2 - 130, h/2, w/2 - 75, h/2, '#3b82f6', 1.5, 0);
+            drawAnimatedParticle(w/2 + 75, h/2, w/2 + 130, h/2, '#22c55e', 1.5, 50);
+
+            // To Model Forward pass
+            drawArrow(w/2 + 280, h/2, w/2 + 340, h/2, '#cbd5e1', 3);
+            ctx.fillStyle = '#64748b'; ctx.font = 'italic 12px sans-serif'; ctx.textAlign='left';
+            ctx.fillText("Used for Model Prediction", w/2 + 205, h/2 - 50);
+        }
+
+        function drawStep4() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            const fakeQuantWeight = round(latentWeight, 2);
+
+            // Nodes (faded slightly for backward pass focus)
+            ctx.globalAlpha = 0.8;
+            drawNode(w/2 - 280, h/2 - 35, "Latent (FP32)", latentWeight.toFixed(5), true);
+            drawRoundedRect(w/2 - 75, h/2 - 60, 150, 120, 8, '#f8fafc', '#cbd5e1', 2);
+            ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign='center'; ctx.fillText("Fake Quantize", w/2, h/2 - 35);
+            drawStepFunctionIcon(w/2, h/2 - 5);
+            drawNode(w/2 + 130, h/2 - 35, "Noisy Weight", fakeQuantWeight.toFixed(5), false);
+
+            // Forward arrows
+            drawArrow(w/2 - 130, h/2, w/2 - 75, h/2, '#e2e8f0', 2);
+            drawArrow(w/2 + 75, h/2, w/2 + 130, h/2, '#e2e8f0', 2);
+            ctx.globalAlpha = 1.0;
+
+            // BACKWARD PASS (Gradients)
+            const gradY = h/2 + 90;
+            ctx.fillStyle = '#ef4444'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign='left';
+            ctx.fillText("Error Gradient", w/2 + 200, gradY + 25);
+
+            // The Blocked Gradient path
+            drawArrow(w/2 + 190, gradY, w/2 + 50, gradY, '#ef4444', 3);
+            drawArrow(w/2 + 50, gradY, w/2 + 50, h/2 + 60, '#ef4444', 3);
+
+            // Giant Red X (The Math Wall) - moved down to safely avoid overlapping the Fake Quant box
+            if(Math.floor(time / 20) % 2 === 0) {
+                ctx.fillStyle = '#ef4444'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign='center';
+                ctx.fillText("🚫 Grad = 0", w/2 + 50, h/2 + 80);
+            }
+
+            // STE Bypass Line
+            ctx.beginPath();
+            ctx.moveTo(w/2 + 150, gradY);
+            ctx.lineTo(w/2 - 200, gradY);
+            ctx.strokeStyle = '#ef4444';
+            ctx.lineWidth = 4;
+            ctx.stroke();
+
+            // Arrow head for STE up to Latent Weight
+            drawArrow(w/2 - 200, gradY, w/2 - 200, h/2 + 35, '#ef4444', 4);
+
+            // Animate Gradient Particles right to left on STE bypass
+            drawAnimatedParticle(w/2 + 280, gradY, w/2 - 200, gradY, '#ef4444', -2, 0);
+            drawAnimatedParticle(w/2 + 280, gradY, w/2 - 200, gradY, '#ef4444', -2, 33);
+            drawAnimatedParticle(w/2 + 280, gradY, w/2 - 200, gradY, '#ef4444', -2, 66);
+
+            // Label the STE
+            drawRoundedRect(w/2 - 120, gradY - 12, 240, 24, 12, '#ef4444', null, 0);
+            ctx.fillStyle = 'white'; ctx.font = 'bold 12px sans-serif'; ctx.textAlign='center';
+            ctx.fillText("Straight-Through Estimator (Bypass)", w/2, gradY + 4);
+        }
+
+        function drawStep5() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+
+            // Very slow, smooth sine wave animation (0 to 1) over a long period
+            const progress = (Math.sin(time * 0.015) + 1) / 2;
+
+            // Latent Weight A smoothly shifts from 0.530 to 0.565
+            const latentA = 0.530 + progress * 0.035;
+
+            // The magic threshold! If it's >= 0.55, it rounds up to 0.60
+            const isUpdated = latentA >= 0.55;
+
+            // Determine a robust vertical start point to perfectly center everything
+            const totalHeight = 385;
+            const startY = (h / 2) - (totalHeight / 2);
+
+            // Center anchors for columns
+            const leftX = w / 2 - 160;
+            const rightX = w / 2 + 160;
+
+            // Title
+            ctx.fillStyle = '#1e293b'; ctx.font = 'bold 16px sans-serif'; ctx.textAlign = 'center';
+            ctx.fillText("Ideal Network Output (FP32): 0.54 + 0.54 = 1.08", w/2, startY);
+
+            // --- PTQ COLUMN (LEFT) ---
+            ctx.fillStyle = '#64748b'; ctx.font = 'bold 16px sans-serif';
+            ctx.fillText("Standard PTQ", leftX, startY + 30);
+
+            drawNode(leftX - 75, startY + 95, "Weight A (Rounded)", "0.50", false);
+            drawNode(leftX - 75, startY + 215, "Weight B (Rounded)", "0.50", false);
+
+            ctx.fillStyle = '#1e293b'; ctx.font = 'bold 24px sans-serif';
+            ctx.fillText("+", leftX, startY + 195);
+
+            drawArrow(leftX, startY + 285, leftX, startY + 315, '#94a3b8', 3);
+
+            drawRoundedRect(leftX - 90, startY + 315, 180, 60, 8, '#fef2f2', '#ef4444', 2);
+            ctx.fillStyle = '#ef4444'; ctx.font = 'bold 16px sans-serif';
+            ctx.fillText("Output: 1.00", leftX, startY + 340);
+            ctx.fillText("Error: 0.08", leftX, startY + 360);
+
+            // --- QAT COLUMN (RIGHT) ---
+            ctx.fillStyle = '#3b82f6'; ctx.font = 'bold 16px sans-serif';
+            ctx.fillText("QAT Training", rightX, startY + 30);
+
+            // Top Context Info (Latent Value)
+            ctx.fillStyle = '#3b82f6'; ctx.font = 'italic 12px sans-serif';
+            ctx.fillText(`(Latent A: ${latentA.toFixed(3)})`, rightX, startY + 50);
+
+            // Draw Threshold Progress Bar (safely positioned)
+            ctx.fillStyle = '#e2e8f0';
+            ctx.fillRect(rightX - 50, startY + 60, 100, 4); // background bar
+            ctx.fillStyle = isUpdated ? '#22c55e' : '#3b82f6';
+            const barW = ((latentA - 0.530) / 0.035) * 100;
+            ctx.fillRect(rightX - 50, startY + 60, barW, 4); // fill bar
+
+            // 0.55 Threshold Marker
+            ctx.fillStyle = '#ef4444';
+            const markerPos = ((0.55 - 0.530) / 0.035) * 100;
+            ctx.fillRect(rightX - 50 + markerPos - 1, startY + 57, 2, 10);
+
+            // Status Text (safely positioned)
+            if (isUpdated) {
+                ctx.fillStyle = '#ef4444'; ctx.font = 'bold 12px sans-serif';
+                ctx.fillText("Crossed threshold!", rightX, startY + 85);
+            } else {
+                ctx.fillStyle = '#64748b'; ctx.font = 'italic 12px sans-serif';
+                ctx.fillText("Gradient pushing up...", rightX, startY + 85);
+            }
+
+            // QAT Nodes
+            let qatA = isUpdated ? "0.60" : "0.50";
+            if(isUpdated) {
+                ctx.shadowBlur = 12; ctx.shadowColor = '#22c55e';
+            }
+            drawNode(rightX - 75, startY + 95, "Weight A (QAT)", qatA, false);
+            ctx.shadowBlur = 0; // reset
+
+            drawNode(rightX - 75, startY + 215, "Weight B (QAT)", "0.50", false);
+
+            ctx.fillStyle = '#1e293b'; ctx.font = 'bold 24px sans-serif';
+            ctx.fillText("+", rightX, startY + 195);
+
+            drawArrow(rightX, startY + 285, rightX, startY + 315, '#94a3b8', 3);
+
+            // Output Box
+            let qatOutput = isUpdated ? "1.10" : "1.00";
+            let qatError = isUpdated ? "0.02" : "0.08";
+            let boxColor = isUpdated ? '#f0fdf4' : '#fef2f2';
+            let borderColor = isUpdated ? '#22c55e' : '#ef4444';
+            let textColor = isUpdated ? '#16a34a' : '#ef4444';
+
+            drawRoundedRect(rightX - 90, startY + 315, 180, 60, 8, boxColor, borderColor, 2);
+            ctx.fillStyle = textColor; ctx.font = 'bold 16px sans-serif';
+            ctx.fillText(`Output: ${qatOutput}`, rightX, startY + 340);
+            ctx.fillText(`Error: ${qatError}`, rightX, startY + 360);
+
+            // Win State Graphic
+            if(isUpdated) {
+                ctx.fillStyle = '#16a34a'; ctx.font = 'bold 14px sans-serif';
+                ctx.fillText("Network Error is 4x smaller!", rightX, startY + 400);
+
+                // Safe horizontal arrow that cuts perfectly between the output boxes
+                drawArrow(leftX + 110, startY + 345, rightX - 110, startY + 345, '#22c55e', 4, true);
+                ctx.fillStyle = '#22c55e'; ctx.font = 'bold 14px sans-serif';
+                ctx.fillText("OVERALL WIN", w/2, startY + 338);
+            }
+        }
+
+        // --- Render Loop ---
+        function render() {
+            const w = canvas.width / (window.devicePixelRatio || 1);
+            const h = canvas.height / (window.devicePixelRatio || 1);
+            ctx.clearRect(0, 0, w, h);
+
+            steps[currentStep].draw();
+
+            if (!isPaused) {
+                time++;
+            }
+            animationFrameId = requestAnimationFrame(render);
+        }
+
+        // --- Logic & Navigation ---
+        function updateUI() {
+            // Trigger CSS fade animation for description
+            descContainer.classList.remove('fade-in');
+            void descContainer.offsetWidth; // trigger reflow
+            descContainer.classList.add('fade-in');
+
+            stepTitle.innerHTML = steps[currentStep].title;
+            stepDesc.innerHTML = steps[currentStep].desc;
+            stepCounter.innerText = `Step ${currentStep + 1} / ${steps.length}`;
+
+            btnBack.disabled = currentStep === 0;
+            btnNext.disabled = currentStep === steps.length - 1;
+
+            // Reset simulation data if we loop back
+            if(currentStep === 0 || currentStep === 1 || currentStep === 2) {
+                latentWeight = initialWeight;
+            }
+        }
+
+        btnNext.addEventListener('click', () => {
+            if (currentStep < steps.length - 1) {
+                currentStep++;
+                time = 0;
+                updateUI();
+            }
+        });
+
+        btnBack.addEventListener('click', () => {
+            if (currentStep > 0) {
+                currentStep--;
+                time = 0;
+                updateUI();
+            }
+        });
+
+        btnReset.addEventListener('click', () => {
+            currentStep = 0;
+            latentWeight = initialWeight;
+            time = 0;
+            if (isPaused) btnPause.click(); // Unpause on reset
+            updateUI();
+        });
+
+        btnPause.addEventListener('click', () => {
+            isPaused = !isPaused;
+            btnPause.innerText = isPaused ? "Play Anim" : "Pause Anim";
+            if (isPaused) {
+                btnPause.classList.add('bg-indigo-100', 'border-indigo-300', 'text-indigo-700');
+                btnPause.classList.remove('hover:bg-slate-50', 'text-slate-600');
+            } else {
+                btnPause.classList.remove('bg-indigo-100', 'border-indigo-300', 'text-indigo-700');
+                btnPause.classList.add('hover:bg-slate-50', 'text-slate-600');
+            }
+        });
+
+        // Init
+        window.addEventListener('load', () => {
+            resizeCanvas();
+            updateUI();
+            render();
+        });
+    </script>
+</body>
+</html>

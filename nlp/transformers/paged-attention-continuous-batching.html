@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Continuous Batching & PagedAttention Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background-color: #0f172a; color: #f8fafc; font-family: 'Inter', sans-serif; }
+        canvas {
+            background-color: #1e293b;
+            border-radius: 0.5rem;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5);
+            max-width: 100%;
+            height: auto;
+        }
+        .btn { transition: all 0.2s ease; }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        /* Custom Tab Styling */
+        .tab-btn {
+            position: relative;
+            transition: all 0.3s ease;
+        }
+        .tab-btn.active {
+            color: #fff;
+            background-color: #1e293b;
+            border-color: #334155;
+            border-bottom-color: #1e293b; /* Merge with container */
+        }
+        .tab-btn.active::after {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0;
+            height: 3px;
+            background: linear-gradient(to right, #8b5cf6, #ec4899);
+            border-top-left-radius: 0.5rem;
+            border-top-right-radius: 0.5rem;
+        }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="max-w-6xl w-full flex flex-col gap-4">
+
+        <!-- Header -->
+        <div class="text-center mb-2">
+            <h1 class="text-4xl font-bold text-transparent bg-clip-text bg-gradient-to-r from-purple-400 to-pink-400 mb-2">
+                Continuous Batching & PagedAttention
+            </h1>
+            <p class="text-slate-400 text-lg">Interactive scheduling simulator for LLM inference.</p>
+        </div>
+
+        <!-- Mode Tabs -->
+        <div class="flex gap-1 border-b border-slate-700 px-4 pt-2">
+            <button id="tabStatic" class="tab-btn active px-6 py-3 rounded-t-lg border border-transparent font-bold text-slate-400 hover:text-slate-200">
+                1. Static Batching
+            </button>
+            <button id="tabContinuous" class="tab-btn px-6 py-3 rounded-t-lg border border-transparent font-bold text-slate-400 hover:text-slate-200">
+                2. Continuous Batching
+            </button>
+            <button id="tabSynergy" class="tab-btn px-6 py-3 rounded-t-lg border border-transparent font-bold text-slate-400 hover:text-slate-200 flex items-center gap-2">
+                <svg class="w-4 h-4 text-pink-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                3. PagedAttention Synergy
+            </button>
+        </div>
+
+        <!-- Main Content Area -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 items-start bg-[#0f172a] rounded-b-xl">
+
+            <!-- Canvas Container -->
+            <div class="lg:col-span-2 flex flex-col gap-4">
+                <canvas id="simCanvas" width="800" height="480" class="w-full border border-slate-700 bg-slate-800"></canvas>
+
+                <!-- Playback Controls -->
+                <div class="flex justify-between items-center bg-slate-800 p-4 rounded-xl border border-slate-700">
+                    <button id="btnBack" class="btn px-6 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg font-semibold flex items-center gap-2">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"></path></svg> Prev Event
+                    </button>
+
+                    <div class="flex flex-col items-center">
+                        <div class="text-slate-300 font-mono tracking-widest text-sm font-bold" id="stepCounter">
+                            EVENT 1 / 5
+                        </div>
+                        <!-- Progress Dots -->
+                        <div id="progressDots" class="flex gap-2 mt-2">
+                            <!-- Injected via JS -->
+                        </div>
+                    </div>
+
+                    <button id="btnNext" class="btn px-6 py-2 bg-purple-600 hover:bg-purple-500 rounded-lg font-semibold flex items-center gap-2">
+                        Next Event <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path></svg>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Text/Explanation Panel -->
+            <div class="bg-slate-800 p-6 rounded-xl border border-slate-700 h-full flex flex-col">
+                <div class="inline-block px-3 py-1 bg-slate-700 rounded-full text-xs font-bold text-slate-300 mb-4 w-max uppercase tracking-wider" id="modeLabel">
+                    Static Batching
+                </div>
+                <h2 id="stepTitle" class="text-2xl font-bold text-purple-400 mb-4 border-b border-slate-600 pb-2">Title</h2>
+                <div id="stepDesc" class="text-slate-300 space-y-4 leading-relaxed flex-grow text-[15px]">
+                    Description goes here.
+                </div>
+
+                <!-- Legend -->
+                <div class="mt-6 pt-4 border-t border-slate-700">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3">Utilization Legend</h3>
+                    <div class="grid grid-cols-2 gap-3 text-sm text-slate-300">
+                        <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-sm bg-emerald-500"></div> Active Compute</div>
+                        <div class="flex items-center gap-2"><div class="w-3 h-3 rounded-sm bg-rose-500/50 border border-rose-500"></div> Idle Bubble (Wasted)</div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        const canvas = document.getElementById('simCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // UI Elements
+        const btnBack = document.getElementById('btnBack');
+        const btnNext = document.getElementById('btnNext');
+        const stepTitle = document.getElementById('stepTitle');
+        const stepDesc = document.getElementById('stepDesc');
+        const stepCounter = document.getElementById('stepCounter');
+        const progressDots = document.getElementById('progressDots');
+        const modeLabel = document.getElementById('modeLabel');
+
+        const tabs = {
+            'static': document.getElementById('tabStatic'),
+            'continuous': document.getElementById('tabContinuous'),
+            'synergy': document.getElementById('tabSynergy')
+        };
+
+        // Colors
+        const colors = {
+            bg: '#1e293b',
+            slotBg: '#0f172a',
+            slotBorder: '#334155',
+            active: '#10b981',
+            idle: '#f43f5e',
+            reqA: '#3b82f6', reqB: '#8b5cf6', reqC: '#f59e0b', reqD: '#06b6d4',
+            reqE: '#eab308', reqF: '#ec4899', reqG: '#14b8a6', reqH: '#6366f1'
+        };
+
+        // Data Models
+        let currentMode = 'static'; // 'static', 'continuous', 'synergy'
+        let currentStepIdx = 0;
+        let visualTime = 0; // Animates towards targetTime
+        let targetTime = 0;
+        let animationId;
+
+        // Schedules for compute views
+        const reqDb = {
+            'A': {id: 'A', c: colors.reqA, dur: 2.0, type: 'Short'},
+            'B': {id: 'B', c: colors.reqB, dur: 5.0, type: 'Medium'},
+            'C': {id: 'C', c: colors.reqC, dur: 3.5, type: 'Med-Short'},
+            'D': {id: 'D', c: colors.reqD, dur: 8.0, type: 'Long'},
+            'E': {id: 'E', c: colors.reqE, dur: 4.5, type: 'Medium'},
+            'F': {id: 'F', c: colors.reqF, dur: 3.0, type: 'Short'},
+            'G': {id: 'G', c: colors.reqG, dur: 4.0, type: 'Medium'},
+            'H': {id: 'H', c: colors.reqH, dur: 3.5, type: 'Med-Short'},
+            'X': {id: 'X', c: '#9333ea', dur: 3.0, type: 'Short'},
+            'Y': {id: 'Y', c: '#14b8a6', dur: 3.0, type: 'Short'}
+        };
+
+        const schedStatic = [
+            [{id: 'A', s: 0, e: 2.0}, {id: 'E', s: 8.1, e: 12.6}],
+            [{id: 'B', s: 0, e: 5.0}, {id: 'F', s: 8.1, e: 11.1}],
+            [{id: 'C', s: 0, e: 3.5}, {id: 'G', s: 8.1, e: 12.1}],
+            [{id: 'D', s: 0, e: 8.0}, {id: 'H', s: 8.1, e: 11.6}]
+        ];
+
+        // Continuous schedules requests IMMEDIATELY after previous finishes
+        const schedContinuous = [
+            [{id: 'A', s: 0, e: 2.0}, {id: 'E', s: 2.3, e: 6.8}, {id: 'X', s: 7.1, e: 10}],
+            [{id: 'B', s: 0, e: 5.0}, {id: 'G', s: 5.3, e: 9.3}],
+            [{id: 'C', s: 0, e: 3.5}, {id: 'F', s: 3.8, e: 6.8}, {id: 'Y', s: 7.1, e: 10}],
+            [{id: 'D', s: 0, e: 8.0}, {id: 'H', s: 8.3, e: 11.8}]
+        ];
+
+        const checkpoints = {
+            'static': [
+                { time: 0.0, title: "1. The Initial Queue", desc: "<p>We have 8 user requests waiting. Notice the different lengths—some are Short (e.g., 'Hello'), others are Long (e.g., an Essay).</p><p>Click <strong>Next Event</strong> to load the first batch.</p>" },
+                { time: 0.1, title: "2. Batch Loaded", desc: "<p>Requests A, B, C, and D are loaded simultaneously. The GPU begins generating tokens for all four.</p>" },
+                { time: 2.1, title: "3. A Compute Bubble Forms", desc: "<p><strong>Request A (Short) finished early!</strong></p><p>Because this is <em>Static Batching</em>, Slot 0 cannot take a new request yet. It must wait for the longest request (Req D) to finish. A massive <strong>Idle Bubble</strong> forms.</p><p>Notice the <strong>Queue is Blocked</strong>! Nothing can progress.</p>" },
+                { time: 3.6, title: "4. Bubbles Multiply", desc: "<p>Request C finishes. Now half of our compute power (Slot 0 and Slot 2) is completely wasted, sitting idle.</p><p>The waiting queue is still completely blocked.</p>" },
+                { time: 5.1, title: "5. Worst Case Utilization", desc: "<p>Request B finishes. Only Request D (Long) is still generating. GPU utilization drops to just 25%!</p><p>Users in the queue are experiencing massive delays while the GPU sits mostly idle.</p>" },
+                { time: 8.2, title: "6. Batch Flush & Reload", desc: "<p>Finally, Request D finishes! The entire batch is flushed, and the next 4 requests (E, F, G, H) are loaded.</p><p>Static batching guarantees terrible efficiency when sequence lengths vary.</p>" }
+            ],
+            'continuous': [
+                { time: 0.0, title: "1. The Initial Queue", desc: "<p>Let's run the exact same scenario, but this time using <strong>Continuous (Iteration-Level) Batching</strong>.</p>" },
+                { time: 0.1, title: "2. Batch Loaded", desc: "<p>Just like before, Requests A, B, C, and D begin generating tokens.</p>" },
+                { time: 2.0, title: "3. Request Finishes", desc: "<p>Request A (Short) finishes and immediately moves to the Completed section, leaving Slot 0 wide open.</p>" },
+                { time: 2.15, title: "4. Highlight Next in Queue", desc: "<p>The system immediately identifies the next waiting request (Request E) to fill the empty slot.</p>" },
+                { time: 2.4, title: "5. Instant Swap", desc: "<p>Request E is instantly swapped into Slot 0 on the very next token generation cycle.</p><p>By operating at the continuous token level, we completely eliminate Compute Bubbles.</p>" },
+                { time: 3.5, title: "6. Continuous Flow", desc: "<p>Request C finishes. Click next to see Request F immediately take its place.</p>" },
+                { time: 3.9, title: "7. Sustained High Throughput", desc: "<p>Request F swaps in. The GPU remains at nearly 100% utilization.</p><p>This allows models like vLLM to serve dramatically more users per second than static engines. (Go to Tab 3 to see the Memory Synergy!)</p>" }
+            ],
+            'synergy': [
+                { time: 0.0, title: "1. The Swap Problem", desc: "<p>Continuous batching is great for Compute, but terrible for Memory. Why?</p><p>Watch the <strong>Compute Swap</strong> happening above. We are trying to swap Request A out, and load Request E in.</p><p>Let's look at how the physical GPU memory handles this.</p>" },
+                { time: 1.0, title: "2. Without PagedAttention", desc: "<p>Historically, KV cache memory was allocated <strong>contiguously</strong> (one solid block).</p><p>As requests finish at random times, memory becomes heavily fragmented into small holes (grey areas). Request E needs 5 blocks of space. Even though there is enough total free space, there is no single <em>contiguous</em> block large enough.</p><p><strong>Result:</strong> Out of Memory (OOM)! The swap fails.</p>" },
+                { time: 2.0, title: "3. With PagedAttention", desc: "<p><strong>PagedAttention</strong> solves this by dividing memory into fixed pages.</p><p>Request E's memory is broken into chunks. It uses a Block Table to map these logical chunks to random, <em>non-contiguous</em> physical memory holes.</p><p><strong>Result:</strong> The swap succeeds instantly! <em>Continuous batching requires PagedAttention to function.</em></p>" }
+            ]
+        };
+
+        // --- DRAWING UTILS ---
+        function drawRoundedRect(ctx, x, y, w, h, r, fill, stroke, lw = 2) {
+            ctx.beginPath();
+            ctx.moveTo(x + r, y); ctx.lineTo(x + w - r, y);
+            ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+            ctx.lineTo(x + w, y + h - r);
+            ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+            ctx.lineTo(x + r, y + h);
+            ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+            ctx.lineTo(x, y + r);
+            ctx.quadraticCurveTo(x, y, x + r, y);
+            ctx.closePath();
+            if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+            if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw; ctx.stroke(); }
+        }
+
+        function drawProgressBar(ctx, x, y, w, h, color, label, progressPct = 1, isHighlighted = false) {
+            if (isHighlighted) {
+                ctx.shadowBlur = 15;
+                ctx.shadowColor = '#fbbf24'; // amber-400
+                drawRoundedRect(ctx, x-2, y-2, w+4, h+4, 8, null, '#fbbf24', 3);
+                ctx.shadowBlur = 0;
+            }
+            drawRoundedRect(ctx, x, y, w, h, 6, '#0f172a', color, 2);
+            const fillW = Math.max(0, (w - 4) * progressPct);
+            if (fillW > 0) drawRoundedRect(ctx, x + 2, y + 2, fillW, h - 4, 4, color, null);
+            ctx.fillStyle = progressPct > 0.5 ? '#fff' : color;
+            ctx.font = 'bold 12px Inter'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+            ctx.fillText(label, x + w/2, y + h/2);
+        }
+
+        // --- VIEWS ---
+        function drawComputeView(ctx, vTime, scheduleData) {
+            const queueX = 30, gpuX = 200, doneX = 640;
+            const slotW = 400, slotH = 60, startY = 80;
+
+            // Headers
+            ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 14px Inter'; ctx.textAlign = 'center';
+            ctx.fillText("WAITING QUEUE", queueX + 70, 50);
+            ctx.fillText("GPU COMPUTE BATCH", gpuX + slotW/2, 50);
+            ctx.fillText("COMPLETED", doneX + 70, 50);
+
+            // Background Container
+            drawRoundedRect(ctx, gpuX - 15, 60, slotW + 30, 4 * 70 + 20, 12, '#0f172a', '#334155');
+
+            let queueOrder = ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H'];
+            let doneItems = [];
+            let activeCount = 0;
+
+            // Compute State
+            for (let i = 0; i < 4; i++) {
+                const laneY = startY + i * 70;
+                // Base slot
+                drawRoundedRect(ctx, gpuX, laneY, slotW, slotH, 8, colors.slotBg, colors.slotBorder);
+                ctx.fillStyle = '#475569'; ctx.font = '12px monospace'; ctx.textAlign = 'right';
+                ctx.fillText(`Slot ${i}`, gpuX - 25, laneY + slotH/2 + 4);
+
+                let activeReq = null;
+                const events = scheduleData[i];
+
+                events.forEach(evt => {
+                    const reqInfo = reqDb[evt.id];
+                    if (!reqInfo) return;
+
+                    // Timeline logic
+                    if (vTime >= evt.s && vTime < evt.e) activeReq = evt;
+                    if (vTime >= evt.e && !doneItems.includes(evt.id)) doneItems.push(evt.id);
+                    if (vTime >= evt.s) {
+                        const qIdx = queueOrder.indexOf(evt.id);
+                        if (qIdx > -1) queueOrder.splice(qIdx, 1);
+                    }
+                });
+
+                if (activeReq) {
+                    const reqInfo = reqDb[activeReq.id];
+                    const pct = Math.min(1, (vTime - activeReq.s) / (activeReq.e - activeReq.s));
+                    drawProgressBar(ctx, gpuX + 10, laneY + 10, slotW - 20, slotH - 20, reqInfo.c, `Req ${reqInfo.id} (${reqInfo.type})`, pct);
+                    drawRoundedRect(ctx, gpuX, laneY, slotW, slotH, 8, null, colors.active, 2);
+                    activeCount++;
+                } else if (vTime > 0.5) {
+                    // Bubble logic
+                    if (currentMode === 'static' && vTime < 8.1) {
+                        const alpha = 0.15 + Math.abs(Math.sin(Date.now()/300)) * 0.15;
+                        drawRoundedRect(ctx, gpuX, laneY, slotW, slotH, 8, `rgba(244, 63, 94, ${alpha})`, colors.idle, 3);
+                        ctx.fillStyle = colors.idle; ctx.font = 'bold 13px Inter'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+                        ctx.fillText("IDLE BUBBLE (WASTED)", gpuX + slotW/2, laneY + slotH/2);
+                    }
+                }
+            }
+
+            // Draw Queue
+            queueOrder.slice(0, 5).forEach((id, i) => {
+                const reqInfo = reqDb[id];
+                let highlight = false;
+                if (currentMode === 'continuous') {
+                    if (vTime >= 2.05 && vTime < 2.3 && i === 0 && id === 'E') highlight = true;
+                    if (vTime >= 3.6 && vTime < 3.8 && i === 0 && id === 'F') highlight = true;
+                }
+                drawProgressBar(ctx, queueX, startY + i*50, 140, 35, '#64748b', `Req ${id} (${reqInfo.type})`, 0, highlight);
+            });
+            if (queueOrder.length > 5) {
+                ctx.fillStyle = '#64748b'; ctx.fillText(`+${queueOrder.length-5} more`, queueX + 70, startY + 5*50 + 20);
+            }
+
+            // Static Blocked Overlay
+            if (currentMode === 'static' && vTime >= 2.1 && vTime < 8.1) {
+                ctx.fillStyle = 'rgba(244, 63, 94, 0.15)'; // semi-transparent red
+                drawRoundedRect(ctx, queueX - 10, startY - 10, 160, 5 * 50, 8, ctx.fillStyle, colors.idle, 2);
+
+                ctx.save();
+                ctx.translate(queueX + 70, startY + 125);
+                ctx.rotate(-Math.PI / 4);
+                ctx.fillStyle = colors.idle;
+                ctx.font = '900 28px Inter';
+                ctx.textAlign = 'center';
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = '#0f172a';
+                ctx.fillText("BLOCKED", 0, 0);
+                ctx.restore();
+            }
+
+            // Draw Done
+            doneItems.forEach((id, i) => {
+                const reqInfo = reqDb[id];
+                if (i < 5) {
+                    drawProgressBar(ctx, doneX, startY + i*50, 140, 35, reqInfo.c, `Req ${id} (${reqInfo.type})`, 1);
+                }
+            });
+
+            // Status Bar
+            const util = vTime < 0.1 ? 0 : Math.round((activeCount/4)*100);
+            ctx.fillStyle = util > 50 ? colors.active : colors.idle;
+            ctx.textAlign = 'center'; ctx.font = 'bold 16px Inter';
+            ctx.fillText(`GPU Compute Utilization: ${util}%`, gpuX + slotW/2, startY + 4 * 70 + 25);
+        }
+
+        function drawSynergyView(ctx, vTime) {
+            // Checkpoints: 0(Context), 1(Contiguous Fail), 2(Paged Success)
+
+            // --- TOP PANEL: COMPUTE CONTEXT ---
+            ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12px Inter'; ctx.textAlign = 'left';
+            ctx.fillText("COMPUTE EVENT: SWAPPING REQUESTS", 40, 40);
+
+            drawRoundedRect(ctx, 40, 55, 720, 80, 8, '#0f172a', '#334155');
+            // Slot A finishing
+            drawProgressBar(ctx, 60, 75, 200, 40, colors.reqA, "Req A (Finished)", 1);
+            // Arrow
+            ctx.beginPath(); ctx.moveTo(270, 95); ctx.lineTo(320, 95); ctx.lineTo(310, 85); ctx.moveTo(320, 95); ctx.lineTo(310, 105);
+            ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.stroke();
+            // Slot E swapping in
+            const eState = vTime < 0.5 ? 0 : (vTime >= 1.5 ? 1 : 0.1); // 0=waiting, 0.1=failed, 1=success
+            const eColor = eState === 0.1 ? colors.idle : colors.reqE;
+            const eLabel = eState === 0 ? "Req E (Waiting to Swap...)" : (eState === 0.1 ? "Req E (OOM ERROR)" : "Req E (Swapped Successfully!)");
+            drawProgressBar(ctx, 340, 75, 300, 40, eColor, eLabel, eState === 1 ? 0.3 : 0);
+
+            // --- BOTTOM PANELS: MEMORY COMPARISON ---
+            const memY = 180;
+            ctx.fillStyle = '#94a3b8'; ctx.font = 'bold 12px Inter'; ctx.textAlign = 'center';
+            ctx.fillText("PHYSICAL MEMORY GRID", 400, memY - 10);
+
+            // Define grid state (fragmented)
+            const gridRows = 5, gridCols = 10;
+            const cellSize = 30;
+            const gridW = gridCols * cellSize, gridH = gridRows * cellSize;
+            const mX = 400 - gridW/2;
+            const mY = memY + 10;
+
+            // Draw Memory Background
+            drawRoundedRect(ctx, mX - 10, mY - 10, gridW + 20, gridH + 20, 8, '#0f172a', '#334155');
+
+            // Map out fragmented space (1 = used, 0 = empty)
+            const memMap = [
+                [1, 1, 0, 0, 0, 1, 1, 1, 1, 0],
+                [1, 1, 1, 1, 0, 0, 1, 1, 0, 0],
+                [0, 1, 1, 1, 1, 1, 1, 1, 1, 1],
+                [1, 1, 1, 0, 0, 1, 1, 0, 0, 1],
+                [1, 1, 1, 1, 1, 1, 0, 0, 1, 1]
+            ];
+
+            // Target empty holes for Paged Attention (needs 5 blocks for Req E)
+            const targets = [[0,2], [0,3], [1,4], [1,8], [3,3]];
+
+            for (let r=0; r<gridRows; r++) {
+                for (let c=0; c<gridCols; c++) {
+                    const x = mX + c*cellSize;
+                    const y = mY + r*cellSize;
+                    let fill = memMap[r][c] ? '#334155' : '#1e293b';
+                    let stroke = '#1e293b';
+
+                    if (vTime >= 1.5 && targets.some(t => t[0]===r && t[1]===c)) {
+                        // Paged Attention Success: Filled with E
+                        fill = colors.reqE;
+                    }
+
+                    drawRoundedRect(ctx, x, y, cellSize-2, cellSize-2, 2, fill, stroke, 1);
+                }
+            }
+
+            // Draw overlays based on vTime
+            if (vTime >= 0.5 && vTime < 1.5) {
+                // State 1: Contiguous Failure
+                ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px Inter'; ctx.textAlign = 'center';
+                ctx.fillText("Without PagedAttention (Contiguous Memory)", 400, mY + gridH + 40);
+
+                // Show floating contiguous block trying to fit
+                const floatX = 350, floatY = mY + 60;
+                const alpha = 0.5 + Math.abs(Math.sin(Date.now()/200)) * 0.5;
+                drawRoundedRect(ctx, floatX - 10, floatY - 10, 5*cellSize + 20, cellSize + 20, 8, `rgba(244,63,94,${alpha*0.3})`, `rgba(244,63,94,${alpha})`, 3);
+                for(let i=0; i<5; i++) {
+                    drawRoundedRect(ctx, floatX + i*cellSize, floatY, cellSize-2, cellSize-2, 2, colors.idle, null);
+                }
+                ctx.fillStyle = colors.idle; ctx.font = 'bold 18px Inter'; ctx.fillText("NO CONTIGUOUS SPACE: OUT OF MEMORY", 400, mY + gridH + 70);
+
+            } else if (vTime >= 1.5) {
+                // State 2: Paged Success
+                ctx.fillStyle = '#f8fafc'; ctx.font = 'bold 16px Inter'; ctx.textAlign = 'center';
+                ctx.fillText("With PagedAttention (Virtual Memory)", 400, mY + gridH + 40);
+
+                // Draw Block Table mapping
+                const btX = 80, btY = mY + 10;
+                drawRoundedRect(ctx, btX, btY, 150, 130, 8, '#1e293b', colors.reqE);
+                ctx.fillStyle = colors.reqE; ctx.font = 'bold 12px Inter'; ctx.fillText("BLOCK TABLE (Req E)", btX + 75, btY + 20);
+
+                ctx.font = '10px monospace';
+                targets.forEach((t, i) => {
+                    ctx.fillText(`Log Page ${i} → Phy [${t[0]},${t[1]}]`, btX + 75, btY + 45 + i*15);
+                    // Draw lines
+                    ctx.beginPath();
+                    ctx.moveTo(btX + 150, btY + 40 + i*15);
+                    ctx.lineTo(mX + t[1]*cellSize, mY + t[0]*cellSize + cellSize/2);
+                    ctx.strokeStyle = `rgba(234, 179, 8, 0.4)`; // Semi-transparent yellow
+                    ctx.lineWidth = 1.5;
+                    ctx.stroke();
+                });
+
+                ctx.fillStyle = colors.active; ctx.font = 'bold 18px Inter'; ctx.fillText("BLOCKS SCATTERED: SWAP SUCCESSFUL!", 400, mY + gridH + 70);
+            }
+        }
+
+        // --- RENDER & LOGIC ---
+        function render() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // Smoothly animate visual time towards target time
+            visualTime += (targetTime - visualTime) * 0.1;
+
+            if (currentMode === 'static') {
+                drawComputeView(ctx, visualTime, schedStatic);
+            } else if (currentMode === 'continuous') {
+                drawComputeView(ctx, visualTime, schedContinuous);
+            } else {
+                drawSynergyView(ctx, visualTime);
+            }
+
+            animationId = requestAnimationFrame(render);
+        }
+
+        function updateUI() {
+            const data = checkpoints[currentMode];
+            const cp = data[currentStepIdx];
+
+            // Update Text
+            stepTitle.innerHTML = cp.title;
+            stepDesc.innerHTML = cp.desc;
+            stepCounter.innerText = `EVENT ${currentStepIdx + 1} / ${data.length}`;
+
+            // Update Mode Label
+            if(currentMode === 'static') { modeLabel.innerText = 'Mode 1: Static Batching'; modeLabel.className = 'inline-block px-3 py-1 rounded-full text-xs font-bold mb-4 w-max uppercase tracking-wider bg-slate-700 text-slate-300'; }
+            if(currentMode === 'continuous') { modeLabel.innerText = 'Mode 2: Continuous Batching'; modeLabel.className = 'inline-block px-3 py-1 rounded-full text-xs font-bold mb-4 w-max uppercase tracking-wider bg-purple-900/50 text-purple-300'; }
+            if(currentMode === 'synergy') { modeLabel.innerText = 'Mode 3: Architecture Synergy'; modeLabel.className = 'inline-block px-3 py-1 rounded-full text-xs font-bold mb-4 w-max uppercase tracking-wider bg-pink-900/50 text-pink-300'; }
+
+            // Update target time for animation
+            targetTime = cp.time;
+
+            // Buttons
+            btnBack.disabled = currentStepIdx === 0;
+            btnNext.disabled = currentStepIdx === data.length - 1;
+
+            // Progress Dots
+            progressDots.innerHTML = '';
+            for(let i=0; i<data.length; i++) {
+                const dot = document.createElement('div');
+                dot.className = `w-2 h-2 rounded-full transition-colors ${i === currentStepIdx ? (currentMode === 'synergy' ? 'bg-pink-400' : 'bg-purple-400') : 'bg-slate-600'}`;
+                progressDots.appendChild(dot);
+            }
+        }
+
+        function changeStep(delta) {
+            const data = checkpoints[currentMode];
+            if (currentStepIdx + delta >= 0 && currentStepIdx + delta < data.length) {
+                currentStepIdx += delta;
+                updateUI();
+            }
+        }
+
+        function switchMode(modeId) {
+            currentMode = modeId;
+            currentStepIdx = 0;
+            visualTime = checkpoints[modeId][0].time; // Snap instantly on mode change
+
+            // Update tab styles
+            Object.values(tabs).forEach(t => t.classList.remove('active'));
+            tabs[modeId].classList.add('active');
+
+            updateUI();
+        }
+
+        // Event Listeners
+        btnBack.addEventListener('click', () => changeStep(-1));
+        btnNext.addEventListener('click', () => changeStep(1));
+
+        tabs.static.addEventListener('click', () => switchMode('static'));
+        tabs.continuous.addEventListener('click', () => switchMode('continuous'));
+        tabs.synergy.addEventListener('click', () => switchMode('synergy'));
+
+        // Initialize
+        updateUI();
+        render();
+
+    </script>
+</body>
+</html>

@@ -3,220 +3,674 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>RoPE: Rotary Position Embedding Visualizer</title>
+    <title>RoPE: Rotary Position Embedding</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        .math-block { font-family: 'Courier New', Courier, monospace; }
-        .dp-track { background: linear-gradient(90deg, #fecaca 0%, #f1f5f9 50%, #bbf7d0 100%); }
-    </style>
-    <!-- Add MathJax for rendering LaTeX -->
     <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        :root {
+            --ink: #10233d;
+            --accent: #0f766e;
+            --accent-soft: #ccfbf1;
+            --warm: #fb923c;
+            --cool: #2563eb;
+            --rose: #e11d48;
+            --gold: #f59e0b;
+            --paper: #fffdf8;
+            --grid: rgba(148, 163, 184, 0.22);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: "Avenir Next", "Segoe UI", sans-serif;
+            background:
+                radial-gradient(circle at top left, rgba(254, 240, 138, 0.55), transparent 30%),
+                radial-gradient(circle at top right, rgba(153, 246, 228, 0.45), transparent 28%),
+                linear-gradient(180deg, #f7fafc 0%, #eef4f7 100%);
+            color: var(--ink);
+        }
+
+        .display-font {
+            font-family: Georgia, "Times New Roman", serif;
+        }
+
+        .formula-card .MathJax {
+            font-size: 1.05rem !important;
+        }
+
+        .math-inline .MathJax {
+            font-size: 0.95rem !important;
+        }
+
+        .panel-shadow {
+            box-shadow: 0 18px 60px rgba(15, 23, 42, 0.08);
+        }
+
+        .grid-bg {
+            background-image:
+                linear-gradient(to right, var(--grid) 1px, transparent 1px),
+                linear-gradient(to bottom, var(--grid) 1px, transparent 1px);
+            background-size: 28px 28px;
+        }
+
+        .dot-track {
+            background: linear-gradient(90deg, #fecaca 0%, #f8fafc 50%, #bbf7d0 100%);
+        }
+
+        .token-bar {
+            background-image: linear-gradient(90deg, rgba(255,255,255,0.22) 1px, transparent 1px);
+            background-size: 18px 100%;
+        }
+
+        .quiet-note {
+            background: linear-gradient(135deg, rgba(255,255,255,0.92), rgba(248,250,252,0.92));
+            backdrop-filter: blur(8px);
+        }
+
+        ::-webkit-scrollbar { width: 10px; }
+        ::-webkit-scrollbar-track { background: #e2e8f0; }
+        ::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 999px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+    </style>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen flex items-center justify-center p-4 lg:p-8">
-
-    <div class="max-w-6xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col md:flex-row">
-        
-        <!-- Left Panel: Controls & Explanation -->
-        <div class="w-full md:w-5/12 bg-slate-50 p-6 md:p-8 border-r border-slate-200 flex flex-col gap-5 overflow-y-auto">
-            <div>
-                <h1 class="text-2xl font-bold text-slate-900 mb-2">RoPE Visualizer</h1>
-                <p class="text-sm text-slate-600 leading-relaxed">
-                    Unlike the original Transformer which adds positions, <b>RoPE rotates the vectors</b> based on their position. 
-                    The magic is in the <b>Dot Product</b>: rotating two vectors by the same amount doesn't change the angle between them!
-                </p>
-                
-                <!-- Mathematical Formulation -->
-                <div class="mt-4 bg-white p-4 rounded-lg border border-slate-200 shadow-sm text-sm text-slate-700">
-                    <div class="font-semibold text-xs uppercase tracking-wider text-slate-500 mb-2">2D Rotation Formulation</div>
-                    <div class="overflow-x-auto text-center pb-2">
-                        \( \text{RoPE}(x, m) = \begin{pmatrix} \cos(m\theta) & -\sin(m\theta) \\ \sin(m\theta) & \cos(m\theta) \end{pmatrix} \begin{pmatrix} x_0 \\ x_1 \end{pmatrix} \)
+<body class="min-h-screen px-4 py-6 md:px-6 lg:px-8">
+    <main class="mx-auto flex max-w-7xl flex-col gap-6">
+        <section class="panel-shadow overflow-hidden rounded-[2rem] border border-slate-200 bg-[var(--paper)]">
+            <div class="grid gap-0 lg:grid-cols-[1.15fr_0.85fr]">
+                <div class="bg-slate-950 px-6 py-8 text-white md:px-10 md:py-10">
+                    <div class="mb-5 inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/10 px-3 py-1 text-xs font-semibold uppercase tracking-[0.24em] text-teal-100">
+                        Transformer Geometry
                     </div>
-                    <div class="font-semibold text-xs uppercase tracking-wider text-slate-500 mt-3 mb-2">Dot Product Property</div>
-                    <p class="text-xs text-slate-500 mb-1 leading-tight">The rotation matrices cancel out, leaving only the relative distance \((n-m)\):</p>
-                    <div class="overflow-x-auto text-center">
-                        \( \langle \text{RoPE}(Q, m), \text{RoPE}(K, n) \rangle = Q^T R_{n-m} K \)
+                    <h1 class="display-font max-w-3xl text-4xl font-bold leading-tight md:text-5xl">
+                        RoPE makes attention care about distance, not just index.
+                    </h1>
+                    <p class="mt-4 max-w-2xl text-base leading-7 text-slate-300 md:text-lg">
+                        Rotary Position Embedding rotates each 2D slice of query and key vectors by a position-dependent angle. That keeps content intact while turning absolute position into a relative phase difference inside the attention score.
+                    </p>
+                    <div class="mt-8 grid gap-3 sm:grid-cols-3">
+                        <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-amber-200">What It Does</div>
+                            <div class="mt-2 text-sm leading-6 text-slate-200">
+                                Rotates each pair of channels by <span class="font-semibold text-white">position × frequency</span>.
+                            </div>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-teal-200">Why It Helps</div>
+                            <div class="mt-2 text-sm leading-6 text-slate-200">
+                                The attention score ends up depending on the <span class="font-semibold text-white">gap</span> between tokens.
+                            </div>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.2em] text-rose-200">Cache Reality</div>
+                            <div class="mt-2 text-sm leading-6 text-slate-200">
+                                <span class="font-semibold text-white">0%</span> smaller KV cache in normal decoding. The gain is <span class="font-semibold text-white">reuse flexibility</span>, not smaller memory.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid-bg relative overflow-hidden bg-slate-100 px-6 py-8 md:px-8 md:py-10">
+                    <div class="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.12),transparent_35%),radial-gradient(circle_at_bottom_left,rgba(251,146,60,0.14),transparent_30%)]"></div>
+                    <div class="relative">
+                        <div class="rounded-[1.75rem] border border-slate-200 bg-white/90 p-5 shadow-lg">
+                            <div class="text-xs font-semibold uppercase tracking-[0.22em] text-slate-500">Three-Sentence Summary</div>
+                            <ol class="mt-4 space-y-3 text-sm leading-6 text-slate-700">
+                                <li><span class="font-semibold text-slate-900">1.</span> Query and key channels are grouped into 2D pairs.</li>
+                                <li><span class="font-semibold text-slate-900">2.</span> Each pair is rotated by an angle that grows with token position.</li>
+                                <li><span class="font-semibold text-slate-900">3.</span> When attention takes a dot product, those rotations collapse into a term based on relative offset.</li>
+                            </ol>
+                            <div class="mt-5 rounded-2xl border border-teal-100 bg-teal-50 p-4 text-sm leading-6 text-teal-950">
+                                <span class="font-semibold">Mental model:</span> RoPE does not attach a position label to a token. It tilts the query and key so their alignment reveals how far apart the tokens are.
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
+        </section>
 
-            <!-- Sliders -->
-            <div class="space-y-4 flex-grow bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
-                
-                <!-- Query Pos -->
-                <div>
-                    <div class="flex justify-between mb-1">
-                        <label class="text-sm font-semibold text-slate-700">Query Position (<span class="text-blue-600 font-bold">m</span>)</label>
-                        <span id="m-val" class="text-sm font-mono font-bold text-blue-600">2</span>
-                    </div>
-                    <input type="range" id="m-slider" min="0" max="40" value="2" class="w-full accent-blue-600">
+        <section class="grid gap-6 lg:grid-cols-[0.92fr_1.08fr]">
+            <aside class="panel-shadow rounded-[2rem] border border-slate-200 bg-white p-6 md:p-7">
+                <div class="mb-5">
+                    <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Interactive Setup</div>
+                    <h2 class="mt-2 text-2xl font-bold text-slate-900">See the rotation happen</h2>
+                    <p class="mt-2 text-sm leading-6 text-slate-600">
+                        Move the query and key positions, or shift the whole phrase together. If the relative gap stays the same, the dot-product relationship stays the same too.
+                    </p>
                 </div>
 
-                <!-- Key Pos -->
-                <div>
-                    <div class="flex justify-between mb-1">
-                        <label class="text-sm font-semibold text-slate-700">Key Position (<span class="text-rose-500 font-bold">n</span>)</label>
-                        <span id="n-val" class="text-sm font-mono font-bold text-rose-500">6</span>
+                <div class="space-y-5">
+                    <div class="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <label for="m-slider" class="text-sm font-semibold text-blue-950">Query Base Position (<span class="text-blue-700">m</span>)</label>
+                            <span id="m-val" class="rounded-full bg-white px-2 py-1 text-sm font-bold text-blue-700">2</span>
+                        </div>
+                        <input type="range" id="m-slider" min="0" max="24" value="2" class="w-full accent-blue-700">
                     </div>
-                    <input type="range" id="n-slider" min="0" max="40" value="6" class="w-full accent-rose-500">
-                </div>
 
-                <!-- Lock Feature -->
-                <div class="flex items-center gap-2 pt-2 pb-2 border-b border-slate-100">
-                    <input type="checkbox" id="lock-dist" class="w-4 h-4 accent-purple-600 cursor-pointer">
-                    <label for="lock-dist" class="text-sm font-bold text-purple-700 cursor-pointer select-none">
-                        Lock Relative Distance (<span id="rel-dist-val">4</span>)
+                    <div class="rounded-2xl border border-rose-100 bg-rose-50 p-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <label for="n-slider" class="text-sm font-semibold text-rose-950">Key Base Position (<span class="text-rose-700">n</span>)</label>
+                            <span id="n-val" class="rounded-full bg-white px-2 py-1 text-sm font-bold text-rose-700">6</span>
+                        </div>
+                        <input type="range" id="n-slider" min="0" max="24" value="6" class="w-full accent-rose-700">
+                    </div>
+
+                    <label class="flex items-center gap-3 rounded-2xl border border-teal-100 bg-teal-50 p-4">
+                        <input type="checkbox" id="lock-dist" class="h-4 w-4 accent-teal-700">
+                        <div class="text-sm leading-5 text-teal-950">
+                            <div class="font-semibold">Lock relative distance</div>
+                            <div>The base gap stays at <span id="locked-gap-label" class="font-bold">+4</span> while you drag either slider.</div>
+                        </div>
                     </label>
-                </div>
 
-                <!-- Dimension Index -->
-                <div class="pt-2">
-                    <div class="flex justify-between mb-1">
-                        <label class="text-sm font-semibold text-slate-700">Dimension Index (<span class="text-slate-500 font-bold">i</span>)</label>
-                        <span id="dim-val" class="text-sm font-mono font-bold text-slate-500">0</span>
+                    <div class="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <label for="shift-slider" class="text-sm font-semibold text-amber-950">Shift Entire Phrase Together</label>
+                            <span id="shift-val" class="rounded-full bg-white px-2 py-1 text-sm font-bold text-amber-700">0</span>
+                        </div>
+                        <input type="range" id="shift-slider" min="0" max="20" value="0" class="w-full accent-amber-600">
+                        <p class="mt-2 text-xs leading-5 text-amber-900">
+                            This adds the same offset to both positions. It is the cleanest way to see RoPE preserve relative distance.
+                        </p>
                     </div>
-                    <input type="range" id="dim-slider" min="0" max="31" value="0" class="w-full accent-slate-500">
-                    <p class="text-xs text-slate-400 mt-1">Changes rotation speed (frequency \(\theta\)).</p>
-                </div>
-            </div>
 
-            <!-- Mathematical breakdown -->
-            <div class="bg-slate-800 p-5 rounded-xl shadow-inner text-slate-100 flex flex-col gap-3">
-                <div class="text-xs font-semibold text-slate-400 uppercase tracking-wider">Attention Score (Dot Product)</div>
-                
-                <div class="flex justify-between items-center math-block text-sm">
-                    <span class="text-blue-300">Q(m)</span> <span class="text-slate-400">•</span> <span class="text-rose-300">K(n)</span>
-                    <span class="text-slate-400">=</span>
-                    <span class="font-bold text-lg" id="dp-val-text">0.000</span>
-                </div>
+                    <div class="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                        <div class="mb-2 flex items-center justify-between">
+                            <label for="dim-slider" class="text-sm font-semibold text-slate-900">2D Pair Index (<span class="text-slate-700">i</span>)</label>
+                            <span id="dim-val" class="rounded-full bg-white px-2 py-1 text-sm font-bold text-slate-700">0</span>
+                        </div>
+                        <input type="range" id="dim-slider" min="0" max="31" value="0" class="w-full accent-slate-700">
+                        <p class="mt-2 text-xs leading-5 text-slate-500">
+                            Higher-index 2D pairs rotate more slowly because <span class="math-inline">\( \theta_i = 10000^{-2i/d_{\text{model}}} \)</span>.
+                        </p>
+                    </div>
 
-                <!-- Visual Dot Product Bar -->
-                <div class="relative w-full h-4 rounded-full dp-track overflow-hidden border border-slate-600">
-                    <div id="dp-marker" class="absolute top-0 bottom-0 w-1 bg-slate-900 border-x border-white/20 shadow-[0_0_8px_rgba(0,0,0,0.5)] z-10 transition-all duration-75" style="left: 50%;"></div>
-                </div>
-                <div class="flex justify-between text-[10px] text-slate-400 font-mono">
-                    <span>-1 (Opposite)</span>
-                    <span>0 (Orthogonal)</span>
-                    <span>+1 (Aligned)</span>
-                </div>
-            </div>
-        </div>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Notation Guide</div>
+                        <div class="mt-3 grid gap-2 text-sm leading-6 text-slate-700">
+                            <div><span class="font-semibold text-slate-950">x</span> = original token vector before RoPE rotation</div>
+                            <div><span class="font-semibold text-blue-900">m</span> = query token position, <span class="font-semibold text-rose-900">n</span> = key token position</div>
+                            <div><span class="font-semibold text-slate-950">i</span> = which 2D channel pair <span class="math-inline">\( (2i, 2i+1) \)</span> you are rotating</div>
+                            <div><span class="font-semibold text-slate-950">\(\theta_i\)</span> = rotation frequency used for pair <span class="math-inline">\(i\)</span></div>
+                            <div><span class="font-semibold text-slate-950">q, k</span> = one query/key vector pair, while <span class="font-semibold text-slate-950">Q, K</span> usually mean whole matrices of many queries and keys built from those same 2D pairs</div>
+                        </div>
+                    </div>
 
-        <!-- Right Panel: Canvas -->
-        <div class="w-full md:w-7/12 p-6 md:p-8 flex flex-col items-center justify-center relative bg-white">
-            <h2 class="text-lg font-semibold text-slate-700 mb-4 self-start">2D Slice Rotation</h2>
-            
-            <div class="relative w-full max-w-md aspect-square">
-                <!-- Legend -->
-                <div class="absolute top-0 right-0 bg-white/90 backdrop-blur border border-slate-200 p-3 rounded-lg shadow-sm text-xs space-y-2 z-10">
-                    <div class="flex items-center gap-2">
-                        <div class="w-4 h-0 border-t-2 border-dashed border-slate-300"></div>
-                        <span class="text-slate-500">Base Word Embeddings</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <div class="w-3 h-3 rounded-full bg-blue-600"></div>
-                        <span>Query Rotated (<strong class="text-blue-600">m·θ</strong>)</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <div class="w-3 h-3 rounded-full bg-rose-500"></div>
-                        <span>Key Rotated (<strong class="text-rose-500">n·θ</strong>)</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <div class="w-3 h-3 bg-purple-200 border border-purple-400 rounded-sm"></div>
-                        <span>Relative Angle (<strong class="text-purple-600">m-n</strong>)</span>
+                    <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                        <div class="flex items-center justify-between gap-3">
+                            <div>
+                                <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Pair Map</div>
+                                <div id="pair-map-summary" class="mt-1 text-sm font-semibold text-slate-900">i = 0 maps to (x0, x1)</div>
+                            </div>
+                            <div class="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                                Adjacent coordinates
+                            </div>
+                        </div>
+                        <div class="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+                            <div id="pair-map-grid" class="grid gap-1"></div>
+                        </div>
+                        <p class="mt-3 text-xs leading-5 text-slate-500">
+                            This is a compact local view around the active pair. The top row shows pair index <span class="font-semibold text-slate-700">i</span>, and the bottom row shows the two aligned embedding coordinates for each visible pair.
+                        </p>
                     </div>
                 </div>
 
-                <canvas id="rope-canvas" class="w-full h-full"></canvas>
-            </div>
-            
-            <div class="text-center text-sm text-slate-600 mt-6 max-w-md bg-purple-50 border border-purple-100 p-4 rounded-lg">
-                <b>Try this:</b> Check "Lock Relative Distance" and move a slider. The vectors spin wildly, but the purple relative angle (and the Attention Score) remain <b>perfectly identical</b>!
-            </div>
-        </div>
-    </div>
+                <div class="mt-6 rounded-[1.5rem] bg-slate-950 p-5 text-white">
+                    <div class="flex items-center justify-between text-xs font-semibold uppercase tracking-[0.24em] text-slate-400">
+                        <span>Live Attention Score</span>
+                        <span id="delta-pill" class="rounded-full border border-white/10 bg-white/10 px-2 py-1 text-[11px] text-slate-200">n - m = +4</span>
+                    </div>
+                    <div class="mt-4 grid gap-4 sm:grid-cols-2">
+                        <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div class="text-xs uppercase tracking-[0.18em] text-slate-400">Actual Positions</div>
+                            <div class="mt-2 text-sm text-slate-200">Query <span id="actual-m" class="font-bold text-blue-300">2</span></div>
+                            <div class="text-sm text-slate-200">Key <span id="actual-n" class="font-bold text-rose-300">6</span></div>
+                        </div>
+                        <div class="rounded-2xl border border-white/10 bg-white/5 p-4">
+                            <div class="text-xs uppercase tracking-[0.18em] text-slate-400">Relative Phase</div>
+                            <div id="phase-text" class="mt-2 text-lg font-bold text-teal-300">0.040 rad</div>
+                            <div id="theta-text" class="mt-1 text-xs text-slate-400">theta = 1.000000</div>
+                        </div>
+                    </div>
+                    <div class="mt-5 flex items-center justify-between">
+                        <div class="text-sm text-slate-300">Rotated Q · Rotated K</div>
+                        <div id="dp-val-text" class="text-2xl font-bold text-white">0.000</div>
+                    </div>
+                    <div class="dot-track mt-3 h-4 overflow-hidden rounded-full border border-white/10">
+                        <div id="dp-marker" class="relative h-full w-1 rounded-full bg-slate-950 shadow-[0_0_12px_rgba(15,23,42,0.45)]" style="left: calc(50% - 2px);"></div>
+                    </div>
+                    <div class="mt-2 flex justify-between text-[10px] font-mono text-slate-400">
+                        <span>-1 opposite</span>
+                        <span>0 orthogonal</span>
+                        <span>+1 aligned</span>
+                    </div>
+                </div>
+            </aside>
+
+            <section class="panel-shadow rounded-[2rem] border border-slate-200 bg-white p-6 md:p-7">
+                <div class="mb-4 flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                    <div>
+                        <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Geometry View</div>
+                        <h2 class="mt-2 text-2xl font-bold text-slate-900">One 2D slice of the embedding</h2>
+                    </div>
+                    <div class="quiet-note rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600">
+                        The dashed vectors are the original content directions. The solid vectors show the same content after position-dependent rotation.
+                    </div>
+                </div>
+
+                <div class="relative overflow-hidden rounded-[1.75rem] border border-slate-200 bg-slate-50 p-4">
+                    <div class="absolute right-4 top-4 z-10 rounded-2xl border border-slate-200 bg-white/90 p-3 text-xs shadow-sm backdrop-blur">
+                        <div class="mb-2 font-semibold uppercase tracking-[0.18em] text-slate-500">Legend</div>
+                        <div class="space-y-2">
+                            <div class="flex items-center gap-2"><span class="h-0 w-5 border-t-2 border-dashed border-slate-400"></span><span>Base content vectors</span></div>
+                            <div class="flex items-center gap-2"><span class="h-3 w-3 rounded-full bg-blue-700"></span><span>Rotated query</span></div>
+                            <div class="flex items-center gap-2"><span class="h-3 w-3 rounded-full bg-rose-600"></span><span>Rotated key</span></div>
+                            <div class="flex items-center gap-2"><span class="h-3 w-3 rounded-sm border border-teal-500 bg-teal-100"></span><span>Relative angle</span></div>
+                        </div>
+                    </div>
+                    <div class="aspect-square w-full">
+                        <canvas id="rope-canvas" class="h-full w-full"></canvas>
+                    </div>
+                </div>
+
+                <div class="mt-5 grid gap-4 md:grid-cols-3">
+                    <div class="rounded-2xl border border-blue-100 bg-blue-50 p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-900">What Changed</div>
+                        <div id="rotation-summary" class="mt-2 text-sm leading-6 text-blue-950">
+                            Q rotated by 2.000 rad and K by 6.000 rad.
+                        </div>
+                    </div>
+                    <div class="rounded-2xl border border-teal-100 bg-teal-50 p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-teal-900">What Stayed Invariant</div>
+                        <div class="mt-2 text-sm leading-6 text-teal-950">
+                            If you shift both tokens together, <span class="font-semibold">the relative phase term stays the same</span>.
+                        </div>
+                    </div>
+                    <div class="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">Reader Shortcut</div>
+                        <div class="mt-2 text-sm leading-6 text-amber-950">
+                            RoPE turns “where is this token?” into “how far apart are these two tokens?”
+                        </div>
+                    </div>
+                </div>
+            </section>
+        </section>
+
+        <section class="grid gap-6 lg:grid-cols-[1.02fr_0.98fr]">
+            <section class="panel-shadow rounded-[2rem] border border-slate-200 bg-white p-6 md:p-7">
+                <div class="mb-5">
+                    <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Why The Math Works</div>
+                    <h2 class="mt-2 text-2xl font-bold text-slate-900">RoPE preserves content and exposes distance</h2>
+                </div>
+
+                <div class="formula-card space-y-4">
+                    <div class="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Rotation Formula</div>
+                        <div class="mt-3 overflow-x-auto text-center text-slate-900">
+                            \[
+                            \operatorname{RoPE}(x, m, i) =
+                            \begin{pmatrix}
+                            \cos(m\theta_i) &amp; -\sin(m\theta_i) \\
+                            \sin(m\theta_i) &amp; \cos(m\theta_i)
+                            \end{pmatrix}
+                            \begin{pmatrix}
+                            x_{2i} \\
+                            x_{2i+1}
+                            \end{pmatrix}
+                            \]
+                        </div>
+                        <p class="mt-3 text-sm leading-6 text-slate-700">
+                            Read this as: take the original vector <span class="math-inline">\(x\)</span>, look only at coordinates <span class="math-inline">\(x_{2i}\)</span> and <span class="math-inline">\(x_{2i+1}\)</span>, and rotate that 2D pair by angle <span class="math-inline">\(m\theta_i\)</span>. Here <span class="math-inline">\(m\)</span> is the token position and <span class="math-inline">\(i\)</span> chooses which frequency band you are in.
+                        </p>
+                    </div>
+
+                    <div class="rounded-[1.5rem] border border-teal-100 bg-teal-50 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-teal-900">Dot Product Property</div>
+                        <div class="mt-3 overflow-x-auto text-center text-teal-950">
+                            \[
+                            \langle \operatorname{RoPE}(q,m,i), \operatorname{RoPE}(k,n,i) \rangle
+                            = q_i^\top R_{(n-m)\theta_i} k_i
+                            \]
+                        </div>
+                        <div class="mt-2 text-center text-xs font-medium text-teal-800">
+                            <span class="math-inline">\( \langle a, b \rangle = a^\top b \)</span>
+                        </div>
+                        <p class="mt-3 text-sm leading-6 text-teal-950">
+                            This is the single query-single key score for one 2D pair. Use lowercase <span class="math-inline">\(q, k\)</span> for individual vectors and uppercase <span class="math-inline">\(QK^\top\)</span> for the full attention-score matrix. The positions do not disappear; they collapse into the relative offset term <span class="math-inline">\((n-m)\theta_i\)</span>.
+                        </p>
+                    </div>
+
+                    <div class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Symbols In This Section</div>
+                        <div class="mt-3 grid gap-2 text-sm leading-6 text-slate-700 md:grid-cols-2">
+                            <div><span class="font-semibold text-slate-950">q, k</span> are the unrotated query and key vectors.</div>
+                            <div><span class="font-semibold text-slate-950">q_i, k_i</span> are their <span class="math-inline">\(i\)</span>th 2D slices.</div>
+                            <div><span class="font-semibold text-slate-950">m, n</span> are the query and key positions.</div>
+                            <div><span class="font-semibold text-slate-950 math-inline">\( R_{(n-m)\theta_i} \)</span> is the rotation matrix for the relative phase gap.</div>
+                        </div>
+                    </div>
+
+                    <div class="grid gap-4 md:grid-cols-2">
+                        <div class="rounded-[1.5rem] border border-rose-100 bg-rose-50 p-5">
+                            <div class="text-xs font-semibold uppercase tracking-[0.18em] text-rose-900">Additive Positional Encoding</div>
+                            <div class="mt-3 overflow-x-auto text-center text-rose-950">
+                                \[
+                                (q+p_m)^\top (k+p_n)
+                                = q^\top k + q^\top p_n + p_m^\top k + p_m^\top p_n
+                                \]
+                            </div>
+                            <p class="mt-3 text-sm leading-6 text-rose-950">
+                                Here <span class="math-inline">\(p_m\)</span> and <span class="math-inline">\(p_n\)</span> are positional vectors added directly onto token content. Content and position get mixed through extra cross terms, so the signal is less clean than RoPE's relative phase relation.
+                            </p>
+                        </div>
+                        <div class="rounded-[1.5rem] border border-blue-100 bg-blue-50 p-5">
+                            <div class="text-xs font-semibold uppercase tracking-[0.18em] text-blue-900">RoPE Attention Signal</div>
+                            <div class="mt-3 overflow-x-auto text-center text-blue-950">
+                                \[
+                                \text{score}_i
+                                =
+                                (q_i^\top k_i)\,\cos((n-m)\theta_i)
+                                +
+                                (q_{i,1}k_{i,2} - q_{i,2}k_{i,1})\,\sin((n-m)\theta_i)
+                                \]
+                            </div>
+                            <p class="mt-3 text-sm leading-6 text-blue-950">
+                                The sine term is the phase-sensitive part: it tracks the oriented relationship between the two coordinates in pair <span class="math-inline">\(i\)</span>, so it is part of the real positional signal, not just a negligible correction. Different frequency bands let the model track both short-range and long-range offsets, which is one reason RoPE tends to extrapolate better than learned absolute embeddings.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="panel-shadow rounded-[2rem] border border-slate-200 bg-white p-6 md:p-7">
+                <div class="mb-5">
+                    <div class="text-xs font-semibold uppercase tracking-[0.24em] text-slate-500">Caching Impact</div>
+                    <h2 class="mt-2 text-2xl font-bold text-slate-900">RoPE helps cache reuse more than cache size</h2>
+                </div>
+
+                <div class="rounded-[1.5rem] border border-slate-200 bg-slate-50 p-5">
+                    <div class="grid gap-4 sm:grid-cols-3">
+                        <div class="rounded-2xl border border-slate-200 bg-white p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">Normal Decoding</div>
+                            <div class="mt-2 text-3xl font-bold text-slate-950">0%</div>
+                            <div class="mt-1 text-sm leading-6 text-slate-600">KV cache memory reduction from RoPE alone.</div>
+                        </div>
+                        <div class="rounded-2xl border border-amber-100 bg-amber-50 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.18em] text-amber-900">Shifted Prefix</div>
+                            <div id="reuse-percent" class="mt-2 text-3xl font-bold text-amber-900">up to 100%</div>
+                            <div class="mt-1 text-sm leading-6 text-amber-950">Potential recompute saved for a moved cached block.</div>
+                        </div>
+                        <div class="rounded-2xl border border-teal-100 bg-teal-50 p-4">
+                            <div class="text-xs font-semibold uppercase tracking-[0.18em] text-teal-900">Saved Work</div>
+                            <div id="saved-tokens" class="mt-2 text-3xl font-bold text-teal-900">2048</div>
+                            <div class="mt-1 text-sm leading-6 text-teal-950">Token positions you do not need to fully recompute in that reuse scenario.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-5 space-y-4">
+                    <div class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+                        <div class="mb-2 flex items-center justify-between">
+                            <label for="prefix-slider" class="text-sm font-semibold text-slate-900">Cached Prefix Length</label>
+                            <span id="prefix-val" class="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-800">2048 tokens</span>
+                        </div>
+                        <input type="range" id="prefix-slider" min="256" max="8192" step="256" value="2048" class="w-full accent-slate-800">
+                    </div>
+
+                    <div class="rounded-[1.5rem] border border-slate-200 bg-white p-5">
+                        <div class="mb-2 flex items-center justify-between">
+                            <label for="cache-shift-slider" class="text-sm font-semibold text-slate-900">New Absolute Offset For That Prefix</label>
+                            <span id="cache-shift-val" class="rounded-full bg-slate-100 px-3 py-1 text-sm font-bold text-slate-800">+256</span>
+                        </div>
+                        <input type="range" id="cache-shift-slider" min="32" max="2048" step="32" value="256" class="w-full accent-slate-800">
+                    </div>
+                </div>
+
+                <div class="mt-5 grid gap-4 md:grid-cols-2">
+                    <div class="rounded-[1.5rem] border border-rose-100 bg-rose-50 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-rose-900">Absolute / Additive PE</div>
+                        <div class="token-bar mt-4 flex h-12 items-center rounded-xl border border-rose-200 bg-rose-100 px-3 text-xs font-bold text-rose-950">
+                            <span class="rounded-full bg-white/80 px-3 py-1">cached prefix at old positions</span>
+                            <span class="ml-2 rounded-full bg-rose-700 px-3 py-1 text-white">moved block no longer matches</span>
+                        </div>
+                        <div class="mt-3 text-sm leading-6 text-rose-950">
+                            “Absolute / Additive PE” means you add a position vector such as <span class="math-inline">\(p_m\)</span> directly into each token representation. Move the same prefix to a new location and the cached vectors still contain the old absolute position, so they no longer match the new block location. You usually have to recompute the whole block.
+                        </div>
+                        <div id="absolute-recompute" class="mt-3 text-sm font-semibold text-rose-900">Recompute: 2048 token positions</div>
+                    </div>
+
+                    <div class="rounded-[1.5rem] border border-teal-100 bg-teal-50 p-5">
+                        <div class="text-xs font-semibold uppercase tracking-[0.18em] text-teal-900">RoPE-Aware Prefix Reuse</div>
+                        <div class="token-bar mt-4 flex h-12 items-center rounded-xl border border-teal-200 bg-teal-100 px-3 text-xs font-bold text-teal-900">
+                            <span class="rounded-full bg-white/80 px-3 py-1">reuse cached content</span>
+                            <span class="ml-2 rounded-full bg-teal-700 px-3 py-1 text-white" id="rephase-chip">rephase keys by +256</span>
+                        </div>
+                        <div class="mt-3 text-sm leading-6 text-teal-950">
+                            RoPE keeps positional information as a phase relationship, so systems can sometimes reuse a cached prefix by applying the new offset instead of recomputing all token representations.
+                        </div>
+                        <div id="rope-recompute" class="mt-3 text-sm font-semibold text-teal-900">Full-prefix recompute avoided: 2048 token positions</div>
+                    </div>
+                </div>
+
+                <div class="mt-5 rounded-[1.5rem] border border-slate-200 bg-slate-950 p-5 text-sm leading-6 text-slate-300">
+                    <span class="font-semibold text-white">Important nuance:</span> vanilla RoPE does <span class="font-semibold text-white">not</span> make cached keys and values “position-free,” and it does <span class="font-semibold text-white">not</span> shrink the standard autoregressive KV cache. The practical benefit is that relative-position structure makes <span class="font-semibold text-white">prefix reuse and sequence shifting more tractable</span> than with absolute additive encodings. In the shifted-prefix scenario above, the full recompute saved can approach <span class="font-semibold text-white">100% of that moved block</span>, but that is a reuse advantage, not a per-token memory reduction.
+                </div>
+            </section>
+        </section>
+    </main>
 
     <script>
         const canvas = document.getElementById('rope-canvas');
         const ctx = canvas.getContext('2d');
-        
-        // UI Elements
+
         const mSlider = document.getElementById('m-slider');
         const nSlider = document.getElementById('n-slider');
+        const shiftSlider = document.getElementById('shift-slider');
         const dimSlider = document.getElementById('dim-slider');
         const lockCheckbox = document.getElementById('lock-dist');
-        
+
+        const prefixSlider = document.getElementById('prefix-slider');
+        const cacheShiftSlider = document.getElementById('cache-shift-slider');
+
         const mVal = document.getElementById('m-val');
         const nVal = document.getElementById('n-val');
+        const shiftVal = document.getElementById('shift-val');
         const dimVal = document.getElementById('dim-val');
-        const relDistVal = document.getElementById('rel-dist-val');
-        
+        const lockedGapLabel = document.getElementById('locked-gap-label');
+        const actualMText = document.getElementById('actual-m');
+        const actualNText = document.getElementById('actual-n');
+        const deltaPill = document.getElementById('delta-pill');
+        const phaseText = document.getElementById('phase-text');
+        const thetaText = document.getElementById('theta-text');
         const dpValText = document.getElementById('dp-val-text');
         const dpMarker = document.getElementById('dp-marker');
+        const rotationSummary = document.getElementById('rotation-summary');
+        const pairMapSummary = document.getElementById('pair-map-summary');
+        const pairMapGrid = document.getElementById('pair-map-grid');
 
-        const d_model = 128;
+        const prefixVal = document.getElementById('prefix-val');
+        const cacheShiftVal = document.getElementById('cache-shift-val');
+        const reusePercent = document.getElementById('reuse-percent');
+        const savedTokens = document.getElementById('saved-tokens');
+        const absoluteRecompute = document.getElementById('absolute-recompute');
+        const ropeRecompute = document.getElementById('rope-recompute');
+        const rephaseChip = document.getElementById('rephase-chip');
 
-        // "Base" Word embeddings before RoPE is applied
-        // We give them arbitrary starting angles and lengths to show how RoPE modifies them.
-        const baseQAngle = 20 * (Math.PI / 180); // 20 degrees
-        const baseKAngle = 65 * (Math.PI / 180); // 65 degrees
-        const magQ = 0.9;
-        const magK = 0.85;
+        const dModel = 128;
+        const baseQAngle = 18 * (Math.PI / 180);
+        const baseKAngle = 64 * (Math.PI / 180);
+        const magQ = 0.88;
+        const magK = 0.84;
+        const pairMapWindowPairs = 8;
 
-        // Lock State
         let isLocked = false;
-        let lockedDiff = parseFloat(nSlider.value) - parseFloat(mSlider.value);
+        let lockedDiff = Number(nSlider.value) - Number(mSlider.value);
+        const pairHeaderCells = [];
+        const pairElementCells = [];
+        let pairMapStart = 0;
 
-        lockCheckbox.addEventListener('change', (e) => {
-            isLocked = e.target.checked;
-            if (isLocked) {
-                lockedDiff = parseFloat(nSlider.value) - parseFloat(mSlider.value);
+        function formatSigned(value) {
+            return value >= 0 ? `+${value}` : `${value}`;
+        }
+
+        function getTheta(i) {
+            return 1 / Math.pow(10000, (2 * i) / dModel);
+        }
+
+        function updateLockedGap() {
+            lockedGapLabel.textContent = formatSigned(lockedDiff);
+        }
+
+        function initializePairMap() {
+            const totalElements = pairMapWindowPairs * 2;
+
+            pairMapGrid.style.gridTemplateColumns = `2.2rem repeat(${totalElements}, minmax(0, 1fr))`;
+
+            const headerLabel = document.createElement('div');
+            headerLabel.className = 'flex items-center justify-center rounded-lg bg-slate-200/70 px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-600';
+            headerLabel.textContent = 'i';
+            pairMapGrid.appendChild(headerLabel);
+
+            for (let i = 0; i < pairMapWindowPairs; i += 1) {
+                const cell = document.createElement('div');
+                cell.className = 'col-span-2 flex min-h-[2rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-1 text-[10px] font-semibold text-slate-700 transition-colors';
+                cell.textContent = i;
+                pairMapGrid.appendChild(cell);
+                pairHeaderCells.push(cell);
             }
-        });
 
-        function handleSliderInteraction(activeSlider, passiveSlider, isMSlider) {
+            const elementLabel = document.createElement('div');
+            elementLabel.className = 'flex items-center justify-center rounded-lg bg-slate-200/70 px-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-600';
+            elementLabel.textContent = 'x';
+            pairMapGrid.appendChild(elementLabel);
+
+            for (let elementIndex = 0; elementIndex < totalElements; elementIndex += 1) {
+                const cell = document.createElement('div');
+                cell.className = 'flex min-h-[2rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-1 text-[9px] font-medium text-slate-600 transition-colors';
+                cell.textContent = elementIndex;
+                pairMapGrid.appendChild(cell);
+                pairElementCells.push(cell);
+            }
+        }
+
+        function updatePairMap(activePair) {
+            const totalPairs = Number(dimSlider.max) + 1;
+            const maxStart = Math.max(0, totalPairs - pairMapWindowPairs);
+            pairMapStart = Math.min(
+                maxStart,
+                Math.max(0, activePair - Math.floor(pairMapWindowPairs / 2))
+            );
+            const start = 2 * activePair;
+            const end = start + 1;
+            pairMapSummary.textContent = `i = ${activePair} maps to (x${start}, x${end})`;
+
+            pairHeaderCells.forEach((cell, index) => {
+                const pairIndex = pairMapStart + index;
+                cell.textContent = pairIndex;
+                cell.className = pairIndex === activePair
+                    ? 'col-span-2 flex min-h-[2rem] items-center justify-center rounded-lg border border-blue-300 bg-blue-50 px-1 text-[10px] font-semibold text-blue-700 shadow-sm ring-2 ring-blue-200 transition-colors'
+                    : 'col-span-2 flex min-h-[2rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-1 text-[10px] font-semibold text-slate-700 transition-colors';
+            });
+
+            pairElementCells.forEach((cell, index) => {
+                const elementIndex = (2 * pairMapStart) + index;
+                const isActive = elementIndex === start || elementIndex === end;
+                cell.textContent = elementIndex;
+                cell.className = isActive
+                    ? 'flex min-h-[2rem] items-center justify-center rounded-lg border border-blue-300 bg-blue-50 px-1 text-[9px] font-semibold text-blue-700 shadow-sm ring-1 ring-blue-200 transition-colors'
+                    : 'flex min-h-[2rem] items-center justify-center rounded-lg border border-slate-200 bg-white px-1 text-[9px] font-medium text-slate-600 transition-colors';
+            });
+        }
+
+        function handleSliderInteraction(activeSlider, passiveSlider, activeIsM) {
             if (isLocked) {
-                const val = parseFloat(activeSlider.value);
-                let passiveVal = isMSlider ? (val + lockedDiff) : (val - lockedDiff);
-                
-                // Clamp
-                if (passiveVal > parseFloat(passiveSlider.max)) passiveVal = parseFloat(passiveSlider.max);
-                if (passiveVal < parseFloat(passiveSlider.min)) passiveVal = parseFloat(passiveSlider.min);
-                
-                passiveSlider.value = passiveVal;
-                
-                // Readjust active slider if clamping happened
-                if (isMSlider) {
-                    activeSlider.value = passiveVal - lockedDiff;
+                const activeValue = Number(activeSlider.value);
+                let passiveValue = activeIsM ? activeValue + lockedDiff : activeValue - lockedDiff;
+                const min = Number(passiveSlider.min);
+                const max = Number(passiveSlider.max);
+
+                if (passiveValue > max) passiveValue = max;
+                if (passiveValue < min) passiveValue = min;
+
+                passiveSlider.value = passiveValue;
+
+                if (activeIsM) {
+                    activeSlider.value = passiveValue - lockedDiff;
                 } else {
-                    activeSlider.value = passiveVal + lockedDiff;
+                    activeSlider.value = passiveValue + lockedDiff;
                 }
+            } else {
+                lockedDiff = Number(nSlider.value) - Number(mSlider.value);
+                updateLockedGap();
             }
+
             draw();
         }
 
+        lockCheckbox.addEventListener('change', (event) => {
+            isLocked = event.target.checked;
+            lockedDiff = Number(nSlider.value) - Number(mSlider.value);
+            updateLockedGap();
+            draw();
+        });
+
         mSlider.addEventListener('input', () => handleSliderInteraction(mSlider, nSlider, true));
         nSlider.addEventListener('input', () => handleSliderInteraction(nSlider, mSlider, false));
+        shiftSlider.addEventListener('input', draw);
         dimSlider.addEventListener('input', draw);
+        prefixSlider.addEventListener('input', updateCacheStory);
+        cacheShiftSlider.addEventListener('input', updateCacheStory);
 
         function resizeCanvas() {
             const rect = canvas.parentElement.getBoundingClientRect();
             const dpr = window.devicePixelRatio || 1;
             canvas.width = rect.width * dpr;
             canvas.height = rect.height * dpr;
+            ctx.setTransform(1, 0, 0, 1, 0, 0);
             ctx.scale(dpr, dpr);
             canvas.style.width = `${rect.width}px`;
             canvas.style.height = `${rect.height}px`;
             draw();
         }
 
-        function getTheta(i) {
-            // RoPE standard frequency calculation
-            return 1 / Math.pow(10000, (2 * i) / d_model);
+        function drawVector(cx, cy, radius, angle, mag, color, options = {}) {
+            const { dashed = false, label = '', labelColor = color } = options;
+            const x = cx + (radius * mag) * Math.cos(angle);
+            const y = cy - (radius * mag) * Math.sin(angle);
+
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(x, y);
+            ctx.strokeStyle = color;
+            ctx.lineWidth = dashed ? 2 : 3;
+            ctx.setLineDash(dashed ? [6, 6] : []);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            if (!dashed) {
+                const headLength = 10;
+                const backAngle = Math.atan2(cy - y, cx - x);
+                ctx.beginPath();
+                ctx.moveTo(x, y);
+                ctx.lineTo(
+                    x + headLength * Math.cos(backAngle - Math.PI / 6),
+                    y + headLength * Math.sin(backAngle - Math.PI / 6)
+                );
+                ctx.lineTo(
+                    x + headLength * Math.cos(backAngle + Math.PI / 6),
+                    y + headLength * Math.sin(backAngle + Math.PI / 6)
+                );
+                ctx.closePath();
+                ctx.fillStyle = color;
+                ctx.fill();
+            }
+
+            if (label) {
+                ctx.fillStyle = labelColor;
+                ctx.font = '600 13px "Avenir Next", sans-serif';
+                ctx.fillText(label, x + 10, y - 10);
+            }
         }
 
         function draw() {
@@ -224,128 +678,134 @@
             const height = canvas.height / (window.devicePixelRatio || 1);
             const cx = width / 2;
             const cy = height / 2;
-            const radius = Math.min(width, height) * 0.4;
+            const radius = Math.min(width, height) * 0.38;
 
             ctx.clearRect(0, 0, width, height);
 
-            // Get values
-            const m = parseFloat(mSlider.value);
-            const n = parseFloat(nSlider.value);
-            const i = parseFloat(dimSlider.value);
-            const theta = getTheta(i);
+            const m = Number(mSlider.value);
+            const n = Number(nSlider.value);
+            const shift = Number(shiftSlider.value);
+            const dim = Number(dimSlider.value);
+            const theta = getTheta(dim);
+            const actualM = m + shift;
+            const actualN = n + shift;
+            const delta = actualN - actualM;
 
-            // Update Labels
-            mVal.innerText = m;
-            nVal.innerText = n;
-            dimVal.innerText = i;
-            
-            const relDist = Math.abs(m - n);
-            relDistVal.innerText = m <= n ? `+${n-m}` : `-${m-n}`;
+            mVal.textContent = m;
+            nVal.textContent = n;
+            shiftVal.textContent = shift;
+            dimVal.textContent = dim;
+            actualMText.textContent = actualM;
+            actualNText.textContent = actualN;
+            deltaPill.textContent = `n - m = ${formatSigned(delta)}`;
+            thetaText.textContent = `theta = ${theta.toFixed(6)}`;
+            phaseText.textContent = `${(delta * theta).toFixed(3)} rad`;
+            updateLockedGap();
+            updatePairMap(dim);
 
-            if (isLocked && m <= n) relDistVal.innerText = `+${lockedDiff}`;
-            if (isLocked && m > n) relDistVal.innerText = `${-lockedDiff}`;
+            const qRotAngle = baseQAngle + actualM * theta;
+            const kRotAngle = baseKAngle + actualN * theta;
+            rotationSummary.textContent = `Q rotated by ${(actualM * theta).toFixed(3)} rad and K by ${(actualN * theta).toFixed(3)} rad. The relative offset contributes ${(delta * theta).toFixed(3)} rad.`;
 
-            // Calculate Rotations
-            const qRotAngle = baseQAngle + (m * theta);
-            const kRotAngle = baseKAngle + (n * theta);
+            ctx.save();
 
-            // Draw Grid & Axes
-            ctx.strokeStyle = '#e2e8f0';
+            ctx.strokeStyle = '#dbe4ec';
             ctx.lineWidth = 1;
+            for (let x = 0; x <= width; x += 28) {
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, height);
+                ctx.stroke();
+            }
+            for (let y = 0; y <= height; y += 28) {
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(width, y);
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = '#94a3b8';
+            ctx.lineWidth = 1.5;
             ctx.beginPath();
-            ctx.moveTo(0, cy); ctx.lineTo(width, cy);
-            ctx.moveTo(cx, 0); ctx.lineTo(cx, height);
+            ctx.moveTo(0, cy);
+            ctx.lineTo(width, cy);
+            ctx.moveTo(cx, 0);
+            ctx.lineTo(cx, height);
             ctx.stroke();
 
-            // Draw Unit Circle
             ctx.beginPath();
             ctx.arc(cx, cy, radius, 0, 2 * Math.PI);
-            ctx.strokeStyle = '#e2e8f0';
+            ctx.strokeStyle = '#cbd5e1';
             ctx.lineWidth = 2;
             ctx.stroke();
 
-            // Helper to draw vectors
-            const drawVector = (angle, mag, color, isDashed = false) => {
-                const vx = cx + (radius * mag) * Math.cos(angle);
-                const vy = cy - (radius * mag) * Math.sin(angle);
-
-                ctx.beginPath();
-                ctx.moveTo(cx, cy);
-                ctx.lineTo(vx, vy);
-                ctx.strokeStyle = color;
-                ctx.lineWidth = isDashed ? 2 : 3;
-                if (isDashed) ctx.setLineDash([5, 5]);
-                ctx.stroke();
-                ctx.setLineDash([]); // reset
-
-                if (!isDashed) {
-                    const headlen = 10;
-                    const arrowAngle = Math.atan2(cy - vy, cx - vx);
-                    ctx.beginPath();
-                    ctx.moveTo(vx, vy);
-                    ctx.lineTo(vx + headlen * Math.cos(arrowAngle - Math.PI / 6), vy + headlen * Math.sin(arrowAngle - Math.PI / 6));
-                    ctx.lineTo(vx + headlen * Math.cos(arrowAngle + Math.PI / 6), vy + headlen * Math.sin(arrowAngle + Math.PI / 6));
-                    ctx.lineTo(vx, vy);
-                    ctx.fillStyle = color;
-                    ctx.fill();
-                }
-            };
-
-            // Draw Base Vectors (Faint, Dashed)
-            drawVector(baseQAngle, magQ, '#cbd5e1', true);
-            drawVector(baseKAngle, magK, '#cbd5e1', true);
-
-            // Draw Relative Angle Arc between Q and K
             ctx.beginPath();
-            // Canvas arcs are clockwise, Math angles are CCW, so invert angles
-            // Draw arc from smallest angle to largest angle
-            const startA = Math.min(-qRotAngle, -kRotAngle);
-            const endA = Math.max(-qRotAngle, -kRotAngle);
-            
-            // Draw filled wedge
+            ctx.arc(cx, cy, radius * 0.68, 0, 2 * Math.PI);
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 1;
+            ctx.stroke();
+
+            drawVector(cx, cy, radius, baseQAngle, magQ, '#94a3b8', { dashed: true });
+            drawVector(cx, cy, radius, baseKAngle, magK, '#94a3b8', { dashed: true });
+
+            const startAngle = -qRotAngle;
+            const endAngle = -kRotAngle;
+            ctx.beginPath();
             ctx.moveTo(cx, cy);
-            ctx.arc(cx, cy, radius * 0.3, startA, endA, false);
-            ctx.lineTo(cx, cy);
-            ctx.fillStyle = 'rgba(168, 85, 247, 0.15)'; // Light purple fill
+            ctx.arc(cx, cy, radius * 0.28, startAngle, endAngle, endAngle < startAngle);
+            ctx.closePath();
+            ctx.fillStyle = 'rgba(15, 118, 110, 0.16)';
             ctx.fill();
-            
-            // Draw outline of arc
+
             ctx.beginPath();
-            ctx.arc(cx, cy, radius * 0.3, startA, endA, false);
-            ctx.strokeStyle = 'rgba(168, 85, 247, 0.8)';
+            ctx.arc(cx, cy, radius * 0.28, startAngle, endAngle, endAngle < startAngle);
+            ctx.strokeStyle = 'rgba(15, 118, 110, 0.95)';
             ctx.lineWidth = 4;
             ctx.stroke();
 
-            // Draw Rotated Vectors (Solid)
-            drawVector(kRotAngle, magK, '#f43f5e'); // Rose (Key)
-            drawVector(qRotAngle, magQ, '#2563eb'); // Blue (Query)
+            drawVector(cx, cy, radius, qRotAngle, magQ, '#2563eb', { label: 'Q', labelColor: '#1d4ed8' });
+            drawVector(cx, cy, radius, kRotAngle, magK, '#e11d48', { label: 'K', labelColor: '#be123c' });
 
-            // Calculate Dot Product
-            // Qx*Kx + Qy*Ky
+            ctx.fillStyle = '#0f766e';
+            ctx.font = '700 13px "Avenir Next", sans-serif';
+            ctx.fillText(`relative phase = ${formatSigned((delta * theta).toFixed(3))} rad`, cx - radius * 0.35, cy - radius * 0.36);
+
+            ctx.restore();
+
             const qx = magQ * Math.cos(qRotAngle);
             const qy = magQ * Math.sin(qRotAngle);
             const kx = magK * Math.cos(kRotAngle);
             const ky = magK * Math.sin(kRotAngle);
-            const dotProduct = (qx * kx) + (qy * ky);
-            
-            // Update UI Dot Product Math
-            dpValText.innerText = dotProduct.toFixed(3);
-            
-            // Max possible theoretical DP with these magnitudes is magQ * magK
-            // We'll normalize it to a visual -1 to 1 scale for the bar
-            const maxDp = magQ * magK; 
-            const normalizedDp = dotProduct / maxDp; // Ranges roughly -1 to 1
+            const dotProduct = qx * kx + qy * ky;
+            const maxDp = magQ * magK;
+            const normalizedDp = dotProduct / maxDp;
             const dpPercent = ((normalizedDp + 1) / 2) * 100;
-            
-            dpMarker.style.left = `${Math.max(0, Math.min(100, dpPercent))}%`;
-            
-            // Color change for text based on alignment
-            if (dotProduct > 0.4) dpValText.className = "font-bold text-lg text-emerald-400";
-            else if (dotProduct < -0.4) dpValText.className = "font-bold text-lg text-rose-400";
-            else dpValText.className = "font-bold text-lg text-slate-100";
+
+            dpValText.textContent = dotProduct.toFixed(3);
+            dpMarker.style.left = `calc(${Math.max(0, Math.min(100, dpPercent))}% - 2px)`;
+
+            if (dotProduct > 0.35) dpValText.className = 'text-2xl font-bold text-emerald-300';
+            else if (dotProduct < -0.35) dpValText.className = 'text-2xl font-bold text-rose-300';
+            else dpValText.className = 'text-2xl font-bold text-white';
+        }
+
+        function updateCacheStory() {
+            const prefixTokens = Number(prefixSlider.value);
+            const offset = Number(cacheShiftSlider.value);
+
+            prefixVal.textContent = `${prefixTokens} tokens`;
+            cacheShiftVal.textContent = `+${offset}`;
+            reusePercent.textContent = 'up to 100%';
+            savedTokens.textContent = prefixTokens.toLocaleString();
+            absoluteRecompute.textContent = `Recompute: ${prefixTokens.toLocaleString()} token positions`;
+            ropeRecompute.textContent = `Full-prefix recompute avoided: ${prefixTokens.toLocaleString()} token positions`;
+            rephaseChip.textContent = `rephase keys by +${offset}`;
         }
 
         window.addEventListener('resize', resizeCanvas);
+        initializePairMap();
+        updateLockedGap();
+        updateCacheStory();
         window.setTimeout(resizeCanvas, 0);
     </script>
 </body>

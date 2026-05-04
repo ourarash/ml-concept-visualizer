@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizing Inference Math</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+    .grid-cell { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
+
+    /* Highlight states for discrete steps */
+    .active-memory { background-color: #f87171 !important; transform: scale(1.1); box-shadow: 0 0 12px rgba(248,113,113,0.8); z-index: 10; border-color: #ef4444; }
+    .active-compute { background-color: #60a5fa !important; transform: scale(1.1); box-shadow: 0 0 12px rgba(96,165,250,0.8); z-index: 10; border-color: #3b82f6;}
+    .active-output { background-color: #4ade80 !important; transform: scale(1.1); box-shadow: 0 0 12px rgba(74,222,128,0.8); z-index: 10; border-color: #22c55e;}
+    .completed-output { background-color: #dcfce7 !important; border-color: #86efac !important; }
+
+    /* Progress bar gradients */
+    .bg-intensity-gradient { background: linear-gradient(90deg, #ef4444 0%, #eab308 50%, #3b82f6 100%); }
+
+    /* Vertical Text Labels */
+    .vertical-label {
+        writing-mode: vertical-rl;
+        transform: rotate(180deg);
+        text-align: right;
+    }
+</style>
+</head>
+<body class="bg-slate-50 min-h-screen p-4 md:p-8 font-sans text-slate-800">
+
+<div class="max-w-6xl mx-auto space-y-6">
+
+    <!-- Header -->
+    <div class="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm text-center">
+        <h1 class="text-3xl font-extrabold text-slate-900 mb-3">The Matrix Math of Inference</h1>
+        <p class="text-slate-600 max-w-2xl mx-auto">
+            Use the controls to step through the math. <span class="font-bold text-red-500">Red</span> means the GPU is waiting to load weights from VRAM. <span class="font-bold text-blue-500">Blue</span> means the GPU is doing math. Arithmetic Intensity is the ratio of Blue to Red.
+        </p>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+        <!-- Main Animation Canvas (Takes up 2/3) -->
+        <div class="lg:col-span-2 bg-white rounded-2xl border border-slate-200 shadow-sm p-6 flex flex-col">
+
+            <!-- Controls -->
+            <div class="flex items-center justify-between mb-8 border-b border-slate-100 pb-4">
+                <div class="flex gap-2">
+                    <button id="btn-prefill" onclick="setMode('prefill')" class="px-4 py-2 rounded-lg font-bold bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 transition-colors">
+                        1. Prefill Phase
+                    </button>
+                    <button id="btn-decode" onclick="setMode('decode')" class="px-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors">
+                        2. Decode Phase
+                    </button>
+                </div>
+
+                <!-- Manual Step Controls -->
+                <div class="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                    <button onclick="handleReset()" id="btn-reset" class="px-3 py-1.5 rounded-md font-bold text-sm text-slate-600 hover:bg-white hover:shadow-sm transition-all flex items-center gap-1">
+                        <i data-lucide="rotate-ccw" class="w-4 h-4"></i> Reset
+                    </button>
+                    <div class="w-px h-6 bg-slate-300"></div>
+                    <button onclick="handleStep(-1)" id="btn-back" class="px-3 py-1.5 rounded-md font-bold text-sm text-slate-700 hover:bg-white hover:shadow-sm transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                        <i data-lucide="chevron-left" class="w-4 h-4"></i> Back
+                    </button>
+                    <button onclick="handleStep(1)" id="btn-next" class="px-5 py-1.5 rounded-md font-bold text-sm bg-slate-800 text-white hover:bg-slate-700 shadow-sm transition-all flex items-center gap-1 disabled:opacity-50 disabled:cursor-not-allowed">
+                        Next <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                    </button>
+                </div>
+            </div>
+
+            <div class="text-center mb-6 min-h-[80px]">
+                <h2 id="phase-title" class="text-xl font-bold text-slate-800">Prefill: Processing Prompt Tokens</h2>
+                <p id="phase-desc" class="text-sm text-slate-500 mb-3">Notice how we load the weights ONCE, but perform math across MANY tokens.</p>
+                <div id="full-prompt-display" class="inline-block px-4 py-2 bg-slate-100 rounded-lg text-sm font-mono text-slate-700 border border-slate-200 shadow-inner">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+
+            <!-- Matrix Visuals -->
+            <div class="flex-1 flex items-end justify-center gap-4 overflow-x-auto min-h-[320px] pb-8 pt-4">
+
+                <!-- Weights Matrix -->
+                <div class="flex flex-col items-center gap-2">
+                    <span class="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-[60px]">Model Weights</span>
+                    <div id="matrix-weights" class="grid gap-1 bg-slate-100 p-2 rounded-lg border border-slate-200">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <div class="text-2xl font-bold text-slate-300 mb-6">×</div>
+
+                <!-- Input Matrix -->
+                <div class="flex flex-col items-center gap-2">
+                    <span id="lbl-input" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Input Tokens</span>
+                    <div id="labels-input" class="grid gap-1 px-2 w-full justify-items-center mb-1"></div>
+                    <div id="matrix-input" class="grid gap-1 bg-slate-100 p-2 rounded-lg border border-slate-200">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <div class="text-2xl font-bold text-slate-300 mb-6">=</div>
+
+                <!-- Output Matrix -->
+                <div class="flex flex-col items-center gap-2">
+                    <span id="lbl-output" class="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Predicted</span>
+                    <div id="labels-output" class="grid gap-1 px-2 w-full justify-items-center mb-1"></div>
+                    <div id="matrix-output" class="grid gap-1 bg-slate-100 p-2 rounded-lg border border-slate-200">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Interactive Explainer Box -->
+            <div id="step-explainer" class="mt-4 p-4 rounded-xl border border-slate-200 bg-slate-50 text-center text-sm font-medium text-slate-700 min-h-[60px] transition-all">
+                Click "Next" to begin stepping through the calculations.
+            </div>
+        </div>
+
+        <!-- Sidebar Stats (Takes up 1/3) -->
+        <div class="flex flex-col gap-6">
+
+            <!-- Parameters -->
+            <div class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+                <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                    <i data-lucide="sliders-horizontal" class="w-4 h-4"></i> Parameters
+                </h3>
+
+                <div id="slider-container-n" class="space-y-2">
+                    <div class="flex justify-between text-sm">
+                        <label class="font-medium text-slate-600">Prompt Length (N Tokens)</label>
+                        <span id="lbl-tokens" class="font-bold text-blue-600">8</span>
+                    </div>
+                    <input type="range" id="slider-n" min="1" max="12" value="8" class="w-full accent-blue-600" oninput="updateVisualizer()">
+                </div>
+
+                <div id="slider-container-gen" class="space-y-2 hidden mt-4">
+                    <div class="flex justify-between text-sm">
+                        <label class="font-medium text-slate-600">Tokens to Generate</label>
+                        <span id="lbl-gen" class="font-bold text-green-600">5</span>
+                    </div>
+                    <input type="range" id="slider-gen" min="1" max="10" value="5" class="w-full accent-green-600" oninput="updateVisualizer()">
+                </div>
+            </div>
+
+            <!-- Live Scoreboard -->
+            <div class="bg-slate-800 rounded-2xl border border-slate-700 shadow-lg p-6 text-white flex-1 flex flex-col">
+                <h3 class="font-bold text-slate-300 mb-6 flex items-center gap-2 uppercase tracking-wider text-xs">
+                    <i data-lucide="activity" class="w-4 h-4"></i> Live Hardware Counters
+                </h3>
+
+                <div class="space-y-6 flex-1">
+                    <!-- Memory Counter -->
+                    <div>
+                        <div class="flex justify-between text-sm mb-2 text-slate-300">
+                            <span class="flex items-center gap-1"><div class="w-3 h-3 rounded-full bg-red-500"></div> Memory Loads (Weights)</span>
+                            <span id="count-memory" class="font-mono font-bold text-xl">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Compute Counter -->
+                    <div>
+                        <div class="flex justify-between text-sm mb-2 text-slate-300">
+                            <span class="flex items-center gap-1"><div class="w-3 h-3 rounded-full bg-blue-500"></div> Math Ops (Compute)</span>
+                            <span id="count-compute" class="font-mono font-bold text-xl">0</span>
+                        </div>
+                    </div>
+
+                    <div class="h-px bg-slate-700 w-full my-4"></div>
+
+                    <!-- Ratio / Intensity -->
+                    <div class="bg-slate-900 rounded-xl p-4 border border-slate-700">
+                        <div class="text-xs text-slate-400 uppercase tracking-widest text-center mb-2">Arithmetic Intensity</div>
+                        <div class="text-center font-mono text-3xl font-extrabold text-white" id="count-intensity">0.0</div>
+                        <div class="text-center text-xs text-slate-500 mt-1">Ops per Memory Load</div>
+
+                        <!-- Bottleneck Bar -->
+                        <div class="mt-4">
+                            <div class="flex justify-between text-[10px] text-slate-400 mb-1 font-bold">
+                                <span>MEMORY BOUND</span>
+                                <span>COMPUTE BOUND</span>
+                            </div>
+                            <div class="h-2 w-full bg-slate-800 rounded-full overflow-hidden relative border border-slate-700">
+                                <div class="absolute inset-0 bg-intensity-gradient opacity-50"></div>
+                                <div id="indicator-pin" class="absolute top-0 bottom-0 w-1 bg-white shadow-[0_0_8px_white] transition-all duration-300" style="left: 0%;"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div id="conclusion-box" class="mt-4 text-xs text-slate-400 italic text-center min-h-[40px]">
+                    Step through the animation to see hardware utilization.
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<script>
+    // Configuration
+    const DIM = 5; // Simulating a 5x5 dimension model weight block
+    let mode = 'prefill'; // 'prefill' or 'decode'
+
+    // State Machine
+    let currentStep = 0;
+    let maxSteps = 0;
+
+    // Counters
+    let memLoads = 0;
+    let computeOps = 0;
+
+    // Vocab Data
+    const promptWords = ["The", "robot", "must", "obey", "all", "human", "orders", "without", "question", "or", "hesitation", "today"];
+    const genWords = ["unless", "it", "conflicts", "with", "the", "First", "Law", "of", "Robotics", "forever"];
+
+    document.addEventListener("DOMContentLoaded", () => {
+        lucide.createIcons();
+        updateVisualizer(); // Init
+    });
+
+    function setMode(newMode) {
+        mode = newMode;
+
+        const btnPrefill = document.getElementById('btn-prefill');
+        const btnDecode = document.getElementById('btn-decode');
+        const slideN = document.getElementById('slider-container-n');
+        const slideGen = document.getElementById('slider-container-gen');
+        const title = document.getElementById('phase-title');
+        const desc = document.getElementById('phase-desc');
+
+        if (mode === 'prefill') {
+            btnPrefill.className = "px-4 py-2 rounded-lg font-bold bg-blue-100 text-blue-700 border border-blue-200 hover:bg-blue-200 transition-colors";
+            btnDecode.className = "px-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors";
+            slideN.style.display = 'block';
+            slideGen.style.display = 'none';
+            title.innerText = "Prefill: Processing Prompt Tokens";
+            desc.innerText = "Notice how we load the weights ONCE, but perform math across MANY prompt tokens simultaneously.";
+        } else {
+            btnDecode.className = "px-4 py-2 rounded-lg font-bold bg-green-100 text-green-700 border border-green-200";
+            btnPrefill.className = "px-4 py-2 rounded-lg font-bold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-slate-200 transition-colors";
+            slideN.style.display = 'none';
+            slideGen.style.display = 'block';
+            title.innerText = "Decode: Generating New Tokens";
+            desc.innerText = "Notice how we must load the ENTIRE weight matrix from memory again for EVERY single new token generated.";
+        }
+
+        handleReset();
+    }
+
+    function buildGrid(containerId, rows, cols, baseClass) {
+        const container = document.getElementById(containerId);
+        container.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+        container.innerHTML = '';
+
+        for (let r = 0; r < rows; r++) {
+            for (let c = 0; c < cols; c++) {
+                const cell = document.createElement('div');
+                cell.className = `w-4 h-4 md:w-6 md:h-6 rounded-sm border ${baseClass} grid-cell`;
+                cell.id = `${containerId}-r${r}-c${c}`;
+                container.appendChild(cell);
+            }
+        }
+    }
+
+    function buildLabels(containerId, words, colCount) {
+        const container = document.getElementById(containerId);
+        container.style.gridTemplateColumns = `repeat(${colCount}, minmax(0, 1fr))`;
+        container.innerHTML = '';
+
+        for (let c = 0; c < colCount; c++) {
+            const lbl = document.createElement('div');
+            lbl.className = 'w-4 md:w-6 h-16 text-[10px] text-slate-500 font-mono flex items-end justify-center pb-1 vertical-label';
+            lbl.innerText = words[c] || `T${c+1}`;
+            container.appendChild(lbl);
+        }
+    }
+
+    function handleStep(delta) {
+        currentStep += delta;
+        if (currentStep < 0) currentStep = 0;
+        if (currentStep > maxSteps) currentStep = maxSteps;
+        renderStep();
+    }
+
+    function handleReset() {
+        currentStep = 0;
+        updateVisualizer(); // Re-fetch sliders and rebuild
+    }
+
+    function updateVisualizer() {
+        const N = parseInt(document.getElementById('slider-n').value);
+        const G = parseInt(document.getElementById('slider-gen').value);
+
+        document.getElementById('lbl-tokens').innerText = N;
+        document.getElementById('lbl-gen').innerText = G;
+
+        if (mode === 'prefill') maxSteps = 1 + N;
+        else maxSteps = 2 * G;
+
+        // Render full prompt block
+        const pWords = promptWords.slice(0, N).join(" ");
+        document.getElementById('full-prompt-display').innerHTML = `<span class="text-slate-500 font-sans text-xs uppercase tracking-wider font-bold mr-2">Prompt:</span> "${pWords}"`;
+
+        currentStep = 0;
+        renderStep();
+    }
+
+    function renderStep() {
+        const N = parseInt(document.getElementById('slider-n').value);
+        const G = parseInt(document.getElementById('slider-gen').value);
+
+        const btnBack = document.getElementById('btn-back');
+        const btnNext = document.getElementById('btn-next');
+        const explainer = document.getElementById('step-explainer');
+
+        btnBack.disabled = currentStep === 0;
+        btnNext.disabled = currentStep === maxSteps;
+
+        // Reset all grids to default neutral states first
+        buildGrid('matrix-weights', DIM, DIM, 'bg-slate-200 border-slate-300');
+
+        if (mode === 'prefill') {
+            document.getElementById('lbl-input').innerText = `Prompt Tokens (N=${N})`;
+            document.getElementById('lbl-output').innerText = `Output / KV`;
+
+            buildGrid('matrix-input', DIM, N, 'bg-blue-50 border-blue-200');
+            buildGrid('matrix-output', DIM, N, 'bg-slate-50 border-slate-200');
+
+            const pWords = promptWords.slice(0, N);
+            const oWords = promptWords.slice(1, N).concat([genWords[0]]);
+
+            buildLabels('labels-input', pWords, N);
+            buildLabels('labels-output', oWords, N);
+
+            // Step Logic Calculation
+            memLoads = currentStep > 0 ? 1 : 0;
+            computeOps = Math.max(0, currentStep - 1);
+
+            // Explainer Text
+            if (currentStep === 0) {
+                explainer.innerHTML = `Click <b class="px-1 text-slate-800">Next</b> to begin the Prefill phase.`;
+            } else if (currentStep === 1) {
+                explainer.innerHTML = `<span class="text-red-600 font-bold"><i data-lucide="download" class="w-4 h-4 inline-block align-text-bottom mr-1"></i> Step 1: Memory Load.</span> The entire model weight matrix is read from VRAM into the GPU processing cores.`;
+            } else {
+                const activeCol = currentStep - 2;
+                const word = pWords[activeCol];
+                const isLastToken = activeCol === (N - 1);
+
+                if (isLastToken) {
+                    explainer.innerHTML = `<span class="text-blue-600 font-bold"><i data-lucide="cpu" class="w-4 h-4 inline-block align-text-bottom mr-1"></i> Step ${currentStep}: Final Parallel Compute.</span> Computing the <b>KV Cache</b> for <b>"${word}"</b> AND predicting the first new token!`;
+                } else {
+                    explainer.innerHTML = `<span class="text-blue-600 font-bold"><i data-lucide="cpu" class="w-4 h-4 inline-block align-text-bottom mr-1"></i> Step ${currentStep}: Parallel Compute.</span> Computing the <b>KV Cache</b> representation for <b>"${word}"</b>. We reuse the weights already in memory!`;
+                }
+            }
+
+            // Apply Visual Highlights
+            if (currentStep === 1) {
+                document.querySelectorAll('#matrix-weights .grid-cell').forEach(c => c.classList.add('active-memory'));
+            } else if (currentStep > 1) {
+                // Highlight completed tokens
+                for (let c = 0; c < computeOps; c++) {
+                    for(let r = 0; r < DIM; r++) {
+                        const outCell = document.getElementById(`matrix-output-r${r}-c${c}`);
+                        outCell.classList.add('completed-output');
+                    }
+                }
+
+                // Highlight currently active token column
+                const activeCol = currentStep - 2;
+                for(let r = 0; r < DIM; r++) {
+                    const inCell = document.getElementById(`matrix-input-r${r}-c${activeCol}`);
+                    const outCell = document.getElementById(`matrix-output-r${r}-c${activeCol}`);
+                    inCell.classList.add('active-compute');
+                    outCell.classList.remove('completed-output');
+                    outCell.classList.add('active-output');
+                }
+            }
+        } else {
+            // Decode Mode
+            document.getElementById('lbl-input').innerText = `1 Token`;
+            document.getElementById('lbl-output').innerText = `Next Token`;
+
+            buildGrid('matrix-input', DIM, 1, 'bg-green-50 border-green-200');
+            buildGrid('matrix-output', DIM, 1, 'bg-slate-50 border-slate-200');
+
+            if (currentStep === 0) {
+                buildLabels('labels-input', [""], 1);
+                buildLabels('labels-output', [""], 1);
+                memLoads = 0;
+                computeOps = 0;
+                explainer.innerHTML = `Click <b class="px-1 text-slate-800">Next</b> to begin sequential Decode.`;
+            } else {
+                const g = Math.floor((currentStep - 1) / 2); // Token generation index
+                const isLoading = currentStep % 2 !== 0;
+
+                const inWord = g === 0 ? promptWords[promptWords.length - 1] : genWords[g - 1];
+                const outWord = genWords[g];
+
+                buildLabels('labels-input', [inWord], 1);
+                buildLabels('labels-output', isLoading ? ["?"] : [outWord], 1);
+
+                memLoads = Math.ceil(currentStep / 2);
+                computeOps = Math.floor(currentStep / 2);
+
+                if (isLoading) {
+                    document.querySelectorAll('#matrix-weights .grid-cell').forEach(c => c.classList.add('active-memory'));
+                    explainer.innerHTML = `<span class="text-red-600 font-bold"><i data-lucide="download" class="w-4 h-4 inline-block align-text-bottom mr-1"></i> Step ${currentStep}: Memory Load.</span> To predict the word after <b>"${inWord}"</b>, the GPU must fetch the ENTIRE model weight matrix again!`;
+                } else {
+                    for(let r = 0; r < DIM; r++) {
+                        const inCell = document.getElementById(`matrix-input-r${r}-c0`);
+                        const outCell = document.getElementById(`matrix-output-r${r}-c0`);
+                        inCell.classList.add('active-compute');
+                        outCell.classList.add('active-output');
+                    }
+                    explainer.innerHTML = `<span class="text-green-600 font-bold"><i data-lucide="cpu" class="w-4 h-4 inline-block align-text-bottom mr-1"></i> Step ${currentStep}: Sequential Compute.</span> Math performed. The model predicts <b>"${outWord}"</b>.`;
+                }
+            }
+        }
+
+        lucide.createIcons(); // Refresh icons in explainer
+        updateScoreboard();
+    }
+
+    function updateScoreboard() {
+        document.getElementById('count-memory').innerText = memLoads;
+        document.getElementById('count-compute').innerText = computeOps;
+
+        let intensity = memLoads === 0 ? 0 : (computeOps / memLoads);
+        document.getElementById('count-intensity').innerText = intensity.toFixed(1);
+
+        // Update Pin (0 intensity = 0%, 10 intensity = 100%)
+        let pinPos = Math.min(100, Math.max(0, (intensity / Math.max(2, parseInt(document.getElementById('slider-n').value))) * 100));
+        if(mode === 'decode') pinPos = Math.min(100, (intensity/2) * 20); // Scale differently so decode stays left
+
+        document.getElementById('indicator-pin').style.left = `${pinPos}%`;
+
+        const conclusion = document.getElementById('conclusion-box');
+        if (currentStep === 0) {
+            conclusion.innerText = 'Step through to see hardware utilization.';
+        } else if (intensity > 2) {
+            conclusion.innerHTML = `<span class="text-blue-500 font-bold">COMPUTE BOUND:</span> The GPU is doing lots of math for every memory load. Highly efficient.`;
+        } else {
+            conclusion.innerHTML = `<span class="text-red-500 font-bold">MEMORY BOUND:</span> The GPU is starved for data, spending its time waiting for weights to load.`;
+        }
+    }
+</script>
+</body>
+</html>

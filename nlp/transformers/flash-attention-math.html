@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlashAttention: Mathematical Tiling</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; }
+        #canvas-container { position: relative; width: 100%; height: 500px; background-color: white; border-radius: 0.5rem; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); overflow: hidden; }
+        canvas { display: block; width: 100%; height: 100%; }
+        .math { font-family: "Cambria Math", "Times New Roman", serif; font-style: italic; }
+        .eq-block { background-color: #f1f5f9; padding: 0.75rem; border-radius: 0.5rem; font-family: "Cambria Math", serif; font-size: 1.1rem; text-align: center; margin: 0.5rem 0; border: 1px solid #e2e8f0; }
+        .numeric-box { background-color: #fffbeb; border: 1px solid #fde68a; padding: 0.5rem; border-radius: 0.4rem; font-family: monospace; font-size: 0.85rem; margin-top: 0.5rem; }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8 flex flex-col items-center">
+
+    <div class="max-w-6xl w-full">
+        <div class="flex justify-between items-end mb-2">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800">FlashAttention: Tiling & Comparison</h1>
+                <p class="text-slate-600">Understand the math behind tiling and how it compares to Standard Attention.</p>
+            </div>
+            <!-- View Toggle -->
+            <div class="bg-slate-200 p-1 rounded-lg flex text-sm font-medium">
+                <button id="viewConceptual" class="px-3 py-1.5 rounded-md bg-white shadow-sm text-slate-800">Conceptual</button>
+                <button id="viewNumeric" class="px-3 py-1.5 rounded-md text-slate-600 hover:text-slate-800 transition-colors">Numerical</button>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <!-- Canvas Area -->
+            <div class="lg:col-span-2 flex flex-col">
+                <div id="canvas-container">
+                    <canvas id="vizCanvas"></canvas>
+                </div>
+
+                <!-- Controls -->
+                <div class="flex justify-center items-center gap-4 mt-4">
+                    <button id="btnPrev" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-800 rounded-lg font-medium transition-colors disabled:opacity-50">← Previous</button>
+                    <span id="stepCounter" class="font-medium text-slate-600">Step 1 of 6</span>
+                    <button id="btnNext" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-medium transition-colors disabled:opacity-50">Next Step →</button>
+                </div>
+            </div>
+
+            <!-- Explanatory Panel -->
+            <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200 flex flex-col h-full overflow-y-auto max-h-[600px]">
+                <h2 id="stepTitle" class="text-xl font-bold text-slate-800 mb-4 border-b pb-2">Step</h2>
+
+                <div id="conceptualContent" class="text-slate-700 space-y-4 flex-grow text-sm lg:text-base leading-relaxed">
+                    <!-- Dynamic Conceptual Content -->
+                </div>
+
+                <div id="numericContent" class="hidden text-slate-700 space-y-4 flex-grow text-sm lg:text-base leading-relaxed">
+                    <!-- Dynamic Numeric Content -->
+                </div>
+
+                <div class="mt-6 p-4 bg-indigo-50 rounded-lg text-sm text-indigo-900 border border-indigo-100" id="comparison">
+                    <strong class="block mb-1">Visual Guide:</strong>
+                    <p id="comparisonText">The dotted line shows the <strong>Data Flow</strong>. In Step 2C, we normalize the matrix <span class="math">A(1)</span> by dividing each row by its sum <span class="math">l(1)</span>.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+    const canvas = document.getElementById('vizCanvas');
+    const ctx = canvas.getContext('2d');
+
+    const btnNext = document.getElementById('btnNext');
+    const btnPrev = document.getElementById('btnPrev');
+    const stepTitle = document.getElementById('stepTitle');
+    const conceptualContent = document.getElementById('conceptualContent');
+    const numericContent = document.getElementById('numericContent');
+    const stepCounter = document.getElementById('stepCounter');
+    const viewConceptual = document.getElementById('viewConceptual');
+    const viewNumeric = document.getElementById('viewNumeric');
+
+    // Matrix Dimensions
+    const d = 60; const N = 180; const B = 80;
+    let layout = {};
+    let isNumericMode = false;
+
+    // Numerical Data (Consistent 2-column data for N x d blocks)
+    const data = {
+        Q: [1.0, 0.5],
+        K1: [[1.0, 2.0], [0.0, 1.0]],
+        S1: [2.0, 0.5],
+        A1: [7.4, 1.7],
+        L1: [9.1],
+        V1: [10.0, 20.0],
+        O1: [11.9, 15.4],
+        K2: [[1.0, 1.0], [0.0, 0.0]],
+        S2: [1.0, 0.0],
+        A2: [2.7, 1.0],
+        L2: [12.8],
+        V2: [30.0, 40.0],
+        O2: [18.2, 22.1]
+    };
+
+    function resizeCanvas() {
+        const container = document.getElementById('canvas-container');
+        canvas.width = container.clientWidth;
+        canvas.height = container.clientHeight;
+        // Increased total width estimate for centering
+        const baseX = Math.max((canvas.width - 850) / 2, 20);
+        const baseY = 160;
+
+        // Increased gaps: A -> L (180px gap), L -> O (120px gap)
+        layout = {
+            Q:  { x: baseX, y: baseY, w: d, h: N, color: "#3b82f6", label: "Q", desc: "N × d", val: data.Q },
+            K1: { x: baseX + d + 40, y: baseY - d - 30, w: B, h: d, color: "#10b981", label: "K(1)ᵀ", desc: "d × B", val: data.K1 },
+            S1: { x: baseX + d + 40, y: baseY, w: B, h: N, color: "#8b5cf6", label: "S(1)", desc: "N × B", val: data.S1 },
+            A1: { x: baseX + d + 40, y: baseY, w: B, h: N, color: "#f59e0b", label: "A(1)", desc: "N × B", val: data.A1 },
+            L1: { x: baseX + d + B + 200, y: baseY, w: 35, h: N, color: "#ef4444", label: "l(1)", desc: "N × 1", val: data.L1 },
+            V1: { x: baseX + d + B + 330, y: baseY - B - 30, w: d, h: B, color: "#06b6d4", label: "V(1)", desc: "B × d", val: data.V1 },
+            O1: { x: baseX + d + B + 330, y: baseY, w: d, h: N, color: "#ec4899", label: "O(1)", desc: "N × d", val: data.O1 },
+            K2: { x: baseX + d + 40, y: baseY - d - 30, w: B, h: d, color: "#059669", label: "K(2)ᵀ", desc: "d × B", val: data.K2 },
+            S2: { x: baseX + d + 40, y: baseY, w: B, h: N, color: "#7c3aed", label: "S(2)", desc: "N × B", val: data.S2 },
+            A2: { x: baseX + d + 40, y: baseY, w: B, h: N, color: "#d97706", label: "A(2)", desc: "N × B", val: data.A2 },
+            L2: { x: baseX + d + B + 200, y: baseY, w: 35, h: N, color: "#dc2626", label: "l(2)", desc: "N × 1", val: data.L2 },
+            V2: { x: baseX + d + B + 330, y: baseY - B - 30, w: d, h: B, color: "#0891b2", label: "V(2)", desc: "B × d", val: data.V2 },
+            O2: { x: baseX + d + B + 330, y: baseY, w: d, h: N, color: "#db2777", label: "O final", desc: "N × d", val: data.O2 }
+        };
+        draw();
+    }
+
+    window.addEventListener('resize', resizeCanvas);
+
+    let currentStep = 0;
+    const maxSteps = 6;
+
+    const steps = [
+        {
+            title: "Step 1: Compute Scores",
+            conceptual: `<p>We multiply <span class="math">Q</span> and <span class="math">K<sup>(1)T</sup></span> to get the scores for this block.</p><div class="eq-block">S<sup>(1)</sup> = Q(K<sup>(1)</sup>)<sup>T</sup></div>`,
+            numeric: `<p>Scores for the first query row:</p><div class="numeric-box">Q_row: [1.0, 0.5]<br>K1_T:  [[1.0, 2.0], [0.0, 1.0]]<br><br>S1 = [1*1 + 0.5*2, 1*0 + 0.5*1]<br>S1 = [2.0, 0.5]</div>`
+        },
+        {
+            title: "Step 2A: Exponentiate (Numerator)",
+            conceptual: `<p>Element-wise exponentiation of the scores.</p><div class="eq-block">A<sup>(1)</sup> = exp(S<sup>(1)</sup>)</div>`,
+            numeric: `<p>Calculate numerators for Softmax:</p><div class="numeric-box">S1_row: [2.0, 0.5]<br><br>A1 = [e^2.0, e^0.5]<br>A1 ≈ [7.4, 1.7]</div>`
+        },
+        {
+            title: "Step 2B: Local Denominator",
+            conceptual: `<p>Sum the row values of <span class="math">A</span> to get a local denominator sum.</p><div class="eq-block">l<sup>(1)</sup> = &Sigma; A<sup>(1)</sup></div>`,
+            numeric: `<p>Summing along the row:</p><div class="numeric-box">A1_row: [7.4, 1.7]<br><br>l1 = 7.4 + 1.7 = 9.1</div>`
+        },
+        {
+            title: "Step 2C: Partial Output",
+            conceptual: `<p>Multiply normalized weights by the values <span class="math">V<sup>(1)</sup></span>.</p><div class="eq-block">O<sup>(1)</sup> = [ A<sup>(1)</sup> / l<sup>(1)</sup> ] V<sup>(1)</sup></div>`,
+            numeric: `<p>First "guess" at the output:</p><div class="numeric-box">Weights: [7.4/9.1, 1.7/9.1] ≈ [0.81, 0.19]<br>V1: [10.0, 20.0]<br><br>O1_col1 = (0.81*10) + (0.19*20) = 11.9</div>`
+        },
+        {
+            title: "Step 3A: Accumulate Block 2",
+            conceptual: `<p>Repeat for Block 2 and add its row-sums to the running denominator total.</p><div class="eq-block">l<sup>(2)</sup> = l<sup>(1)</sup> + &Sigma; A<sup>(2)</sup></div>`,
+            numeric: `<p>New block data:<br>A2 sum: 2.7 + 1.0 = 3.7</p><div class="numeric-box">l1 (old): 9.1<br>New: 3.7<br><br>l2 = 9.1 + 3.7 = 12.8</div>`
+        },
+        {
+            title: "Step 3B: O Final Correction",
+            conceptual: `<p>We rescale the old <span class="math">O<sup>(1)</sup></span> to match the new global denominator <span class="math">l<sup>(2)</sup></span>.</p><div class="eq-block text-xs">O = [ l<sup>(1)</sup> / l<sup>(2)</sup> ] O<sup>(1)</sup> + [ A<sup>(2)</sup> / l<sup>(2)</sup> ] V<sup>(2)</sup></div>`,
+            numeric: `<p>Combining the blocks exactly:</p><div class="numeric-box">Rescale old: (9.1/12.8) * 11.8 ≈ 8.4<br>New part: (3.7/12.8) * V2 ≈ 9.8<br><br>O Final = 8.4 + 9.8 = 18.2</div>`
+        }
+    ];
+
+    function updateUI() {
+        stepCounter.innerText = `Step ${currentStep + 1} of ${maxSteps}`;
+        stepTitle.innerText = steps[currentStep].title;
+        conceptualContent.innerHTML = steps[currentStep].conceptual;
+        numericContent.innerHTML = steps[currentStep].numeric;
+
+        btnPrev.disabled = currentStep === 0;
+        btnNext.disabled = currentStep === maxSteps - 1;
+
+        if(isNumericMode) {
+            conceptualContent.classList.add('hidden');
+            numericContent.classList.remove('hidden');
+        } else {
+            conceptualContent.classList.remove('hidden');
+            numericContent.classList.add('hidden');
+        }
+
+        draw();
+    }
+
+    viewConceptual.addEventListener('click', () => {
+        isNumericMode = false;
+        viewConceptual.className = "px-3 py-1.5 rounded-md bg-white shadow-sm text-slate-800";
+        viewNumeric.className = "px-3 py-1.5 rounded-md text-slate-600 hover:text-slate-800 transition-colors";
+        updateUI();
+    });
+
+    viewNumeric.addEventListener('click', () => {
+        isNumericMode = true;
+        viewNumeric.className = "px-3 py-1.5 rounded-md bg-white shadow-sm text-slate-800";
+        viewConceptual.className = "px-3 py-1.5 rounded-md text-slate-600 hover:text-slate-800 transition-colors";
+        updateUI();
+    });
+
+    btnNext.addEventListener('click', () => { if (currentStep < maxSteps - 1) { currentStep++; updateUI(); } });
+    btnPrev.addEventListener('click', () => { if (currentStep > 0) { currentStep--; updateUI(); } });
+
+    // Drawing Functions
+    function drawBlock(block, alpha = 1.0, isVector = false, hideLabel = false) {
+        ctx.globalAlpha = alpha;
+        ctx.fillStyle = 'rgba(0,0,0,0.05)';
+        ctx.fillRect(block.x + 4, block.y + 4, block.w, block.h);
+        ctx.fillStyle = block.color + "22";
+        ctx.strokeStyle = block.color;
+        ctx.lineWidth = 2;
+        ctx.fillRect(block.x, block.y, block.w, block.h);
+        ctx.strokeRect(block.x, block.y, block.w, block.h);
+
+        const rowH = block.h / 4;
+        const colW = isVector ? block.w : block.w / 2;
+
+        ctx.beginPath();
+        ctx.strokeStyle = block.color + "55";
+        ctx.lineWidth = 1;
+        for(let i=1; i<4; i++) {
+            let y = block.y + rowH * i;
+            ctx.moveTo(block.x, y); ctx.lineTo(block.x + block.w, y);
+        }
+        if (!isVector) {
+            ctx.moveTo(block.x + block.w/2, block.y); ctx.lineTo(block.x + block.w/2, block.y + block.h);
+        }
+        ctx.stroke();
+
+        if (isNumericMode && block.val) {
+            ctx.globalAlpha = alpha;
+            ctx.fillStyle = block.color;
+            ctx.font = "bold 11px monospace";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+
+            const valArr = Array.isArray(block.val[0]) ? block.val : [block.val];
+            for (let r = 0; r < 4; r++) {
+                const rowData = valArr[r] || valArr[0];
+                for (let c = 0; c < (isVector ? 1 : 2); c++) {
+                    let v = null;
+                    if (Array.isArray(rowData)) {
+                        v = rowData[c];
+                    } else if (c === 0) {
+                        v = rowData;
+                    }
+
+                    if (v !== null && v !== undefined) {
+                        const txt = typeof v === 'number' ? v.toFixed(1) : v;
+                        ctx.fillText(txt, block.x + colW*c + colW/2, block.y + rowH*r + rowH/2);
+                    }
+                }
+            }
+        }
+
+        if (!hideLabel) {
+            ctx.globalAlpha = 1.0;
+            ctx.fillStyle = "#1e293b";
+            ctx.textAlign = "center";
+            const labelY = isNumericMode ? block.y - 25 : block.y + block.h/2;
+            ctx.font = "bold 16px 'Cambria Math', serif";
+            ctx.fillText(block.label, block.x + block.w/2, labelY);
+            ctx.font = "10px sans-serif";
+            ctx.fillStyle = "#64748b";
+            let descY = block.y + block.h + 14;
+            if (block.label.includes("T") || block.label.includes("V")) descY = block.y - 8;
+            ctx.fillText(block.desc, block.x + block.w/2, descY);
+        }
+    }
+
+    function drawConnection(fromBlock, toBlock, direction="horizontal") {
+        ctx.beginPath();
+        ctx.strokeStyle = "#94a3b8";
+        ctx.lineWidth = 2;
+        ctx.setLineDash([5, 5]);
+        if (direction === "horizontal") {
+            let startY = fromBlock.y + fromBlock.h/2;
+            ctx.moveTo(fromBlock.x + fromBlock.w, startY);
+            ctx.lineTo(toBlock.x, startY);
+        } else {
+            let startX = fromBlock.x + fromBlock.w/2;
+            ctx.moveTo(startX, fromBlock.y + fromBlock.h);
+            ctx.lineTo(startX, toBlock.y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+    }
+
+    function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        if (!layout.Q) return;
+        drawBlock(layout.Q);
+        if (currentStep === 0) {
+            drawBlock(layout.K1); drawBlock(layout.S1);
+            drawConnection(layout.Q, layout.S1); drawConnection(layout.K1, layout.S1, "vertical");
+        } else if (currentStep === 1) {
+            drawBlock(layout.A1); drawConnection(layout.Q, layout.A1);
+        } else if (currentStep === 2) {
+            drawBlock(layout.A1); drawBlock(layout.L1, 1.0, true); drawConnection(layout.A1, layout.L1);
+            ctx.fillStyle = "#ef4444"; ctx.font = "14px sans-serif"; ctx.textAlign = "center";
+            let gapCenterX = layout.A1.x + layout.A1.w + (layout.L1.x - (layout.A1.x + layout.A1.w)) / 2;
+            ctx.fillText("Row Sums →", gapCenterX, layout.A1.y + layout.A1.h/2 - 10);
+        } else if (currentStep === 3) {
+            drawBlock(layout.A1, 0.6); drawBlock(layout.L1, 0.6, true); drawBlock(layout.V1); drawBlock(layout.O1);
+            drawConnection(layout.A1, layout.O1);
+            drawConnection(layout.V1, layout.O1, "vertical");
+            ctx.fillStyle = "#ec4899"; ctx.font = "bold 15px 'Cambria Math', serif"; ctx.textAlign = "center";
+            let gapCenterX = layout.L1.x + layout.L1.w + (layout.O1.x - (layout.L1.x + layout.L1.w)) / 2;
+            ctx.fillText("A(1) / l(1)", gapCenterX, layout.A1.y + layout.A1.h/2 - 10);
+        } else if (currentStep === 4) {
+            drawBlock(layout.K2); drawBlock(layout.A2); drawBlock(layout.L1, 0.3, true); drawBlock(layout.L2, 1.0, true);
+            drawConnection(layout.A2, layout.L2);
+            ctx.fillStyle = "#dc2626"; ctx.font = "bold 14px sans-serif"; ctx.textAlign = "center";
+            let gapCenterX = layout.A2.x + layout.A2.w + (layout.L2.x - (layout.A2.x + layout.A2.w)) / 2;
+            ctx.fillText("+ add to l(1)", gapCenterX, layout.A2.y + layout.A2.h/2 - 10);
+        } else if (currentStep === 5) {
+            drawBlock(layout.A2, 0.5); drawBlock(layout.L2, 0.8, true); drawBlock(layout.V2);
+            drawBlock(layout.O1, 0.3, false, true); drawBlock(layout.O2);
+            drawConnection(layout.A2, layout.O2); drawConnection(layout.V2, layout.O2, "vertical");
+            ctx.fillStyle = "#db2777"; ctx.textAlign = "left"; ctx.font = "italic 13px 'Cambria Math', serif";
+            ctx.fillText("Rescale: O(1) * [l(1)/l(2)]", layout.O2.x + layout.O2.w + 12, layout.O2.y + layout.O2.h/2 - 10);
+            ctx.fillText("+ New Data", layout.O2.x + layout.O2.w + 12, layout.O2.y + layout.O2.h/2 + 15);
+        }
+    }
+
+    resizeCanvas();
+    updateUI();
+</script>
+</body>
+</html>

@@ -17,7 +17,7 @@
         }
         .fade-in { animation: fadeIn 0.4s ease-out forwards; }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        
+
         input[type="range"]::-webkit-slider-thumb {
             -webkit-appearance: none;
             appearance: none;
@@ -75,7 +75,7 @@
         };
 
         const NavBtn = ({ active, onClick, icon, label }) => (
-            <button 
+            <button
                 onClick={onClick}
                 className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all ${active ? 'bg-indigo-600 text-white shadow-lg' : 'text-slate-500 hover:bg-slate-50'}`}
             >
@@ -84,10 +84,41 @@
             </button>
         );
 
+        const formatVector = (vector) => `[${vector.map((value) => value.toFixed(2)).join(', ')}]`;
+
         const TabArchitecture = () => {
             const [hoveredIdx, setHoveredIdx] = useState(null);
+            const [selectedInputIdx, setSelectedInputIdx] = useState(2);
             const tokens = ["The", "bank", "was", "flooded"];
-            
+            const inputSequence = [
+                { label: "[CLS]", segment: "A", position: 0, tokenVec: [0.32, -0.11, 0.48, 0.07], structural: true },
+                { label: "The", segment: "A", position: 1, tokenVec: [0.09, 0.34, -0.21, 0.18] },
+                { label: "bank", segment: "A", position: 2, tokenVec: [0.14, -0.82, 0.55, 0.20] },
+                { label: "[SEP]", segment: "A", position: 3, tokenVec: [0.28, 0.12, 0.09, -0.14], structural: true },
+                { label: "It", segment: "B", position: 4, tokenVec: [-0.17, 0.29, 0.24, -0.05] },
+                { label: "flooded", segment: "B", position: 5, tokenVec: [0.41, -0.16, 0.37, 0.26] },
+                { label: "[SEP]", segment: "B", position: 6, tokenVec: [0.28, 0.12, 0.09, -0.14], structural: true }
+            ];
+            const segmentVectors = {
+                A: [0.04, 0.11, -0.02, 0.03],
+                B: [-0.06, 0.07, 0.13, -0.05]
+            };
+            const positionVectors = {
+                0: [0.02, -0.04, 0.01, 0.00],
+                1: [0.01, 0.03, 0.09, -0.02],
+                2: [-0.01, 0.08, 0.15, -0.04],
+                3: [0.03, -0.02, 0.05, 0.01],
+                4: [-0.04, 0.02, 0.12, -0.03],
+                5: [0.05, -0.01, 0.06, 0.02],
+                6: [0.00, 0.04, 0.08, -0.01]
+            };
+            const selectedToken = inputSequence[selectedInputIdx];
+            const selectedSegmentVector = segmentVectors[selectedToken.segment];
+            const selectedPositionVector = positionVectors[selectedToken.position];
+            const summedVector = selectedToken.tokenVec.map((value, idx) =>
+                Number((value + selectedSegmentVector[idx] + selectedPositionVector[idx]).toFixed(2))
+            );
+
             const getAttentionWeight = (from, to) => {
                 if (from === null) return 0.2;
                 if (from === to) return 1.0;
@@ -116,33 +147,79 @@
                                 <h3 className="font-bold text-slate-800 mb-2 flex items-center gap-2 uppercase text-xs tracking-widest text-slate-500">
                                     Constructing the Input Vector
                                 </h3>
-                                <p className="text-xs text-slate-500 mb-4">Before BERT processes a word, it mathematically adds three separate vectors together to capture its full context.</p>
+                                <p className="text-xs text-slate-500 mb-4">Click a token in the paired input below. BERT adds one token vector, one segment vector, and one learned absolute position vector for that exact slot.</p>
+                                <div className="bg-white rounded-2xl border border-slate-200 p-4 mb-4 shadow-sm">
+                                    <div className="flex items-center justify-between gap-3 mb-3">
+                                        <div className="text-[10px] uppercase font-bold tracking-[0.18em] text-slate-400">Example BERT Input</div>
+                                        <div className="text-[10px] text-slate-400">Sentence A: [CLS] The bank [SEP] | Sentence B: It flooded [SEP]</div>
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {inputSequence.map((token, idx) => (
+                                            <button
+                                                key={`${token.label}-${idx}`}
+                                                onClick={() => setSelectedInputIdx(idx)}
+                                                className={`px-3 py-2 rounded-xl border text-left transition-all shadow-sm ${selectedInputIdx === idx ? 'border-indigo-500 bg-indigo-50 shadow-indigo-100' : 'border-slate-200 bg-slate-50 hover:border-slate-300'}`}
+                                            >
+                                                <div className={`font-mono text-sm font-bold ${selectedInputIdx === idx ? 'text-indigo-700' : 'text-slate-700'}`}>{token.label}</div>
+                                                <div className="flex gap-1 mt-1 text-[10px]">
+                                                    <span className={`px-1.5 py-0.5 rounded-full font-bold ${token.segment === 'A' ? 'bg-indigo-100 text-indigo-700' : 'bg-purple-100 text-purple-700'}`}>Seg {token.segment}</span>
+                                                    <span className="px-1.5 py-0.5 rounded-full font-bold bg-pink-100 text-pink-700">Pos {token.position}</span>
+                                                </div>
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mt-4">
+                                        <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100">
+                                            <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-indigo-500 mb-1">Selected Token</div>
+                                            <div className="font-mono text-lg font-black text-indigo-700">{selectedToken.label}</div>
+                                            <div className="text-[11px] text-indigo-700/80 mt-1">{selectedToken.structural ? 'Special structural token used by BERT.' : 'Regular word/subword embedding lookup.'}</div>
+                                        </div>
+                                        <div className="p-3 rounded-xl bg-purple-50 border border-purple-100">
+                                            <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-purple-500 mb-1">Segment Assignment</div>
+                                            <div className="font-black text-purple-700">Sentence {selectedToken.segment}</div>
+                                            <div className="text-[11px] text-purple-700/80 mt-1">Every token in the same sentence shares this exact segment vector.</div>
+                                        </div>
+                                        <div className="p-3 rounded-xl bg-pink-50 border border-pink-100">
+                                            <div className="text-[10px] uppercase tracking-[0.18em] font-bold text-pink-500 mb-1">Absolute Position</div>
+                                            <div className="font-black text-pink-700">Slot {selectedToken.position}</div>
+                                            <div className="text-[11px] text-pink-700/80 mt-1">BERT learns a vector for position {selectedToken.position} instead of using a fixed sinusoid.</div>
+                                        </div>
+                                    </div>
+                                </div>
                                 <div className="space-y-2">
-                                    <EmbeddingStep 
-                                        label="Token Embeddings" 
-                                        desc="Captures the base dictionary meaning of the word/sub-word." 
-                                        example='Lookup "bank" → [0.14, -0.82, 0.55...]'
+                                    <EmbeddingStep
+                                        label="Token Embeddings"
+                                        desc="Captures the base dictionary meaning of the word/sub-word."
+                                        example={`Lookup "${selectedToken.label}" → ${formatVector(selectedToken.tokenVec)}`}
                                         colorClass={{ border: 'border-l-indigo-500', bg: 'bg-indigo-50', text: 'text-indigo-700' }}
                                     />
                                     <div className="text-center font-bold text-slate-300 leading-none">+</div>
-                                    <EmbeddingStep 
-                                        label="Segment Embeddings" 
-                                        desc="A learned vector added to distinguish Sentence A from Sentence B." 
-                                        example='Add vector for "Sentence A" → [0.04, 0.11, -0.02...]'
+                                    <EmbeddingStep
+                                        label="Segment Embeddings"
+                                        desc="A shared learned token-type vector: one for Sentence A, another for Sentence B."
+                                        example={`Add Segment ${selectedToken.segment} → ${formatVector(selectedSegmentVector)}`}
                                         colorClass={{ border: 'border-l-purple-500', bg: 'bg-purple-50', text: 'text-purple-700' }}
                                     />
                                     <div className="text-center font-bold text-slate-300 leading-none">+</div>
-                                    <EmbeddingStep 
-                                        label="Position Embeddings" 
-                                        desc="A learned vector added to mark the word's exact sequential order." 
-                                        example='Add vector for "Position 2" → [-0.01, 0.08, 0.15...]'
+                                    <EmbeddingStep
+                                        label="Position Embeddings"
+                                        desc="A learned absolute-position vector for that exact slot in the sequence."
+                                        example={`Add Position ${selectedToken.position} → ${formatVector(selectedPositionVector)}`}
                                         colorClass={{ border: 'border-l-pink-500', bg: 'bg-pink-50', text: 'text-pink-700' }}
                                     />
                                     <div className="text-center font-bold text-slate-300 leading-none">=</div>
                                     <div className="p-3 bg-slate-800 border border-slate-700 rounded-xl shadow-sm flex flex-col gap-1 transition-all border-l-4 border-l-emerald-500">
                                         <span className="text-sm font-bold text-white">Final Input Vector</span>
-                                        <span className="text-[11px] text-slate-400 leading-relaxed">The combined array of numbers fed into BERT's first layer.</span>
-                                        <span className="text-[10px] font-mono p-1.5 rounded mt-1 bg-slate-900 text-emerald-400">Sum → [0.17, -0.63, 0.68...]</span>
+                                        <span className="text-[11px] text-slate-400 leading-relaxed">The combined array of numbers fed into BERT's first layer for <span className="font-mono text-white">{selectedToken.label}</span>.</span>
+                                        <span className="text-[10px] font-mono p-1.5 rounded mt-1 bg-slate-900 text-emerald-400">Sum → {formatVector(summedVector)}</span>
+                                    </div>
+                                </div>
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4">
+                                    <div className="p-3 rounded-xl bg-purple-50 border border-purple-100 text-[11px] text-purple-800 leading-relaxed">
+                                        <span className="font-bold">Segment embeddings:</span> BERT usually has just two learned vectors here, <span className="font-mono">E_A</span> and <span className="font-mono">E_B</span>. It adds the same <span className="font-mono">E_A</span> to every token in Sentence A, and the same <span className="font-mono">E_B</span> to every token in Sentence B.
+                                    </div>
+                                    <div className="p-3 rounded-xl bg-pink-50 border border-pink-100 text-[11px] text-pink-800 leading-relaxed">
+                                        <span className="font-bold">Position embeddings:</span> In BERT these are learned absolute position embeddings. That differs from the original Transformer paper, which used fixed sinusoidal positional encodings.
                                     </div>
                                 </div>
                             </div>
@@ -150,11 +227,11 @@
 
                         <div className="bg-slate-900 rounded-2xl p-8 relative flex flex-col items-center justify-between overflow-hidden">
                             <div className="text-center text-white font-bold text-[10px] tracking-[0.2em] uppercase opacity-40 mb-4">Self-Attention Map (Visualizing Head 1)</div>
-                            
+
                             <div className="w-full flex justify-around relative z-20">
                                 {tokens.map((t, i) => (
-                                    <div 
-                                        key={`src-${i}`} 
+                                    <div
+                                        key={`src-${i}`}
                                         onMouseEnter={() => setHoveredIdx(i)}
                                         onMouseLeave={() => setHoveredIdx(null)}
                                         className={`w-20 py-2 rounded-lg border-2 text-center transition-all cursor-pointer font-bold text-sm shadow-lg ${hoveredIdx === i ? 'bg-indigo-600 border-indigo-400 text-white scale-110' : 'bg-slate-800 border-white/10 text-slate-400'}`}
@@ -173,12 +250,12 @@
                                             const startX = 50 + (i * 100);
                                             const endX = 50 + (j * 100);
                                             return (
-                                                <line 
+                                                <line
                                                     key={`${i}-${j}`}
-                                                    x1={startX} y1="0" 
-                                                    x2={endX} y2="200" 
-                                                    stroke={isActive ? '#818cf8' : '#ffffff'} 
-                                                    strokeWidth={isActive ? weight * 4 : 0.2} 
+                                                    x1={startX} y1="0"
+                                                    x2={endX} y2="200"
+                                                    stroke={isActive ? '#818cf8' : '#ffffff'}
+                                                    strokeWidth={isActive ? weight * 4 : 0.2}
                                                     strokeOpacity={isActive ? weight : 0.05}
                                                     className="bidirectional-arrow"
                                                 />
@@ -194,8 +271,8 @@
                                     const isActive = hoveredIdx !== null;
                                     const isHighlighted = isActive && weight > 0.6;
                                     return (
-                                        <div 
-                                            key={`target-${j}`} 
+                                        <div
+                                            key={`target-${j}`}
                                             className={`w-20 py-2 rounded-lg border text-center transition-all font-mono text-xs ${isHighlighted ? 'bg-indigo-900/50 border-indigo-500 text-indigo-200' : 'bg-slate-800/50 border-white/5 text-slate-500'}`}
                                         >
                                             {t}
@@ -222,11 +299,11 @@
         const TabPretraining = () => {
             const [maskRevealed, setMaskRevealed] = useState(false);
             const [tokenInput, setTokenInput] = useState("embedding");
-            
+
             // --- Next Sentence Prediction State & Logic ---
             const [nspIndex, setNspIndex] = useState(0);
             const [nspFeedback, setNspFeedback] = useState(null); // 'correct', 'wrong', null
-            
+
             const nspPairs = [
                 { a: "The man went to the store.", b: "He bought a gallon of milk.", isNext: true },
                 { a: "I love playing guitar.", b: "The stock market crashed today.", isNext: false },
@@ -265,19 +342,19 @@
                                         Special Tokens: [CLS] & [SEP]
                                     </h2>
                                     <p className="text-sm text-indigo-100 leading-relaxed mb-4">
-                                        BERT doesn't just receive raw words. It uses special "structural" markers to understand the boundaries and intent of the input.
+                                        BERT does not just receive words. It also receives special control tokens that mark structure, especially where the whole input begins and where one sentence ends and another begins.
                                     </p>
                                     <div className="space-y-4">
                                         <div className="bg-indigo-800/50 p-3 rounded-xl border border-indigo-700">
                                             <span className="font-mono font-bold text-indigo-300">[CLS]</span>
                                             <p className="text-[11px] mt-1 text-indigo-200">
-                                                Short for <strong>"Classification"</strong>. Always the first token. Its final hidden state is used as the "summary" of the entire sequence for tasks like sentiment analysis.
+                                                Short for <strong>"Classification"</strong>. BERT usually places exactly one <span className="font-mono">[CLS]</span> at the very start of the full input. After self-attention, its final hidden state can serve as a single readout for the entire sequence or sentence pair in tasks like sentiment analysis.
                                             </p>
                                         </div>
                                         <div className="bg-indigo-800/50 p-3 rounded-xl border border-indigo-700">
                                             <span className="font-mono font-bold text-indigo-300">[SEP]</span>
                                             <p className="text-[11px] mt-1 text-indigo-200">
-                                                Short for <strong>"Separator"</strong>. It marks the end of a sentence or the boundary between two different sentences (Sentence A vs. Sentence B).
+                                                Short for <strong>"Separator"</strong>. It marks a boundary. In a pair input like <span className="font-mono">[CLS] A [SEP] B [SEP]</span>, the first <span className="font-mono">[SEP]</span> ends Sentence A and the second ends Sentence B.
                                             </p>
                                         </div>
                                     </div>
@@ -298,25 +375,25 @@
                                     <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-4 text-[11px]">
                                         <div className="flex gap-2">
                                             <div className="w-1 h-full bg-indigo-500 rounded-full"></div>
-                                            <span className="text-indigo-200 italic">Sentence A is encapsulated by [CLS] and the first [SEP].</span>
+                                            <span className="text-indigo-200 italic">There is one global <span className="font-mono">[CLS]</span> at the start; Sentence A runs until the first <span className="font-mono">[SEP]</span>.</span>
                                         </div>
                                         <div className="flex gap-2">
                                             <div className="w-1 h-full bg-purple-500 rounded-full"></div>
-                                            <span className="text-indigo-200 italic">Sentence B follows the first [SEP] and ends with another [SEP].</span>
+                                            <span className="text-indigo-200 italic">Sentence B starts after the first <span className="font-mono">[SEP]</span>. It does not get its own <span className="font-mono">[CLS]</span>; it ends with the final <span className="font-mono">[SEP]</span>.</span>
                                         </div>
                                     </div>
                                 </div>
                             </div>
-                            
+
                             {/* Visualizing the [CLS] Summary in Action */}
                             <div className="mt-8 border-t border-indigo-800/50 pt-8">
                                 <h3 className="text-center text-sm font-bold text-indigo-300 mb-6 flex items-center justify-center gap-2">
-                                    <IconZap /> 
-                                    Visualizing the [CLS] Summary in Action
+                                    <IconZap />
+                                    Visualizing the [CLS] Readout
                                 </h3>
-                                
+
                                 <div className="flex flex-col items-center bg-indigo-950/30 p-6 rounded-2xl border border-indigo-800/50 overflow-x-auto">
-                                    
+
                                     <div className="grid grid-cols-4 gap-4 w-full max-w-md mx-auto text-center justify-items-center min-w-[350px]">
                                         {/* Row 1: Tokens */}
                                         <Token label="[CLS]" highlight="indigo" />
@@ -348,7 +425,7 @@
                                         <div className="flex flex-col items-center opacity-30 grayscale mt-7 z-10">
                                             <div className="w-14 h-8 bg-slate-700 rounded border border-slate-600 flex items-center justify-center text-[11px] font-mono text-white">H_[SEP]</div>
                                         </div>
-                                        
+
                                         {/* Discard line logic */}
                                         <div className="absolute top-[60px] left-[35%] right-[5%] border-t-2 border-slate-600/50 pt-1 text-[9px] text-slate-400 uppercase tracking-widest font-bold hidden sm:block">
                                             Discarded for Sequence Classification
@@ -370,7 +447,7 @@
                                     </div>
 
                                     <p className="text-xs text-indigo-200 mt-8 text-center max-w-2xl leading-relaxed">
-                                        Because self-attention allows every word to look at every other word, the <span className="font-bold text-indigo-300">[CLS]</span> token dynamically gathers context from the entire sentence as it passes through BERT. At the final layer, its output vector (<span className="font-mono text-indigo-300">H_[CLS]</span>) contains a rich "summary" of the sequence, making it the perfect single input for classification tasks.
+                                        Because self-attention lets every token interact with every other token, the single <span className="font-bold text-indigo-300">[CLS]</span> token can gather information from the whole input as it passes through BERT. At the final layer, <span className="font-mono text-indigo-300">H_[CLS]</span> is often used as a sequence-level readout for classification tasks. It is not a separate summary for each segment.
                                     </p>
                                 </div>
                             </div>
@@ -378,16 +455,16 @@
 
                         <div className="flex flex-col lg:flex-row gap-12">
                             <div className="lg:w-2/3 space-y-8">
-                                <h2 className="text-3xl font-bold text-slate-800">2. Training Strategy</h2>
-                                
+                                <h2 className="text-3xl font-bold text-slate-800">2. Pretraining Objectives</h2>
+
                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                                     {/* MLM Card */}
                                     <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                                         <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                                             <div className="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center text-sm font-black shrink-0">1</div>
-                                            Masked LM
+                                            Masked LM (MLM)
                                         </h3>
-                                        <p className="text-xs text-slate-500 mb-4">BERT masks 15% of words and tries to guess them.</p>
+                                        <p className="text-xs text-slate-500 mb-4">BERT selects 15% of WordPiece tokens for prediction. Most become <span className="font-mono">[MASK]</span>, some are replaced with random tokens, and some stay unchanged.</p>
                                         <div className="bg-white p-6 rounded-2xl shadow-inner border border-slate-100 text-center flex-1 flex flex-col justify-center">
                                             <div className="text-lg text-slate-700 leading-relaxed">
                                                 "The movie was so <span className={`px-2 py-1 rounded transition-all cursor-pointer ${maskRevealed ? 'bg-emerald-100 text-emerald-700 font-bold' : 'bg-slate-800 text-white animate-pulse'}`} onClick={() => setMaskRevealed(true)}>
@@ -396,6 +473,7 @@
                                             </div>
                                             {maskRevealed && <div className="text-xs text-emerald-600 font-bold animate-in zoom-in mt-4">Correct! (Conf: 92%)</div>}
                                             {!maskRevealed && <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mt-4">Click mask to reveal</div>}
+                                            <div className="text-[10px] text-slate-400 mt-3">This demo shows the common <span className="font-mono">[MASK]</span> case only.</div>
                                         </div>
                                     </div>
 
@@ -403,35 +481,36 @@
                                     <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col">
                                         <h3 className="text-xl font-bold mb-4 flex items-center gap-2">
                                             <div className="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center text-sm font-black shrink-0">2</div>
-                                            Next Sentence Pred
+                                            Next Sentence Prediction (NSP)
                                         </h3>
                                         <p className="text-xs text-slate-500 mb-4">
-                                            Play the role of BERT! Look at the sentences below. Does Sentence B logically follow Sentence A in the original text?
+                                            Play the role of BERT. Given Sentence A and Sentence B, predict whether Sentence B was the actual next sentence in the corpus or a random sentence.
                                         </p>
                                         <div className="space-y-3 flex-1 flex flex-col">
                                             <div className="p-3 bg-white rounded-xl border border-slate-100 text-xs text-slate-600 shadow-sm min-h-[60px] flex items-center">
-                                                <span className="font-bold text-indigo-500 mr-2 shrink-0">[CLS]</span> 
+                                                <span className="font-bold text-indigo-500 mr-2 shrink-0">[CLS]</span>
                                                 <span>{nspPairs[nspIndex].a}</span>
                                             </div>
                                             <div className="p-3 bg-white rounded-xl border border-slate-100 text-xs text-slate-600 shadow-sm min-h-[60px] flex items-center">
-                                                <span className="font-bold text-purple-500 mr-2 shrink-0">[SEP]</span> 
+                                                <span className="font-bold text-purple-500 mr-2 shrink-0">[SEP]</span>
                                                 <span>{nspPairs[nspIndex].b}</span>
+                                                <span className="font-bold text-purple-500 ml-2 shrink-0">[SEP]</span>
                                             </div>
-                                            
+
                                             <div className="flex gap-2 pt-2 mt-auto relative">
-                                                <button 
+                                                <button
                                                     onClick={() => handleNspGuess(true)}
                                                     className="flex-1 py-2 text-xs font-bold rounded-lg transition-all bg-white border-2 border-slate-200 hover:border-emerald-300 text-slate-700 active:scale-95"
                                                 >
-                                                    IsNext
+                                                    Actual Next
                                                 </button>
-                                                <button 
+                                                <button
                                                     onClick={() => handleNspGuess(false)}
                                                     className="flex-1 py-2 text-xs font-bold rounded-lg transition-all bg-white border-2 border-slate-200 hover:border-red-300 text-slate-700 active:scale-95"
                                                 >
-                                                    NotNext
+                                                    Random Sentence
                                                 </button>
-                                                
+
                                                 {/* Feedback Overlay */}
                                                 {nspFeedback && (
                                                     <div className={`absolute -top-4 left-0 w-full h-full flex items-center justify-center ${nspFeedback === 'correct' ? 'text-emerald-500' : 'text-red-500'}`}>
@@ -450,17 +529,17 @@
                             <div className="lg:w-1/3 bg-white rounded-3xl p-6 border border-slate-200 shadow-sm">
                                 <h3 className="text-xl font-bold mb-4 flex items-center gap-2 text-indigo-600">
                                     <IconType className="w-5 h-5" />
-                                    WordPiece Tokenizer
+                                    Input Tokenization
                                 </h3>
                                 <p className="text-xs text-slate-500 mb-6 leading-relaxed">
-                                    BERT breaks complex words into sub-tokens to handle vocabulary efficiently.
+                                    Before pretraining, BERT uses WordPiece tokenization to break rare or complex words into sub-tokens. This is preprocessing, not a separate training objective.
                                 </p>
-                                
+
                                 <div className="space-y-6">
                                     <div>
                                         <label className="text-[10px] uppercase font-black text-slate-400 block mb-2">Try a word</label>
-                                        <select 
-                                            value={tokenInput} 
+                                        <select
+                                            value={tokenInput}
                                             onChange={(e) => setTokenInput(e.target.value)}
                                             className="w-full bg-slate-50 border border-slate-200 p-2 rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                                         >
@@ -491,8 +570,8 @@
 
         const Token = ({ label, highlight }) => (
             <div className={`px-2 py-1.5 rounded-lg border font-mono text-xs font-bold shadow-sm transition-all text-center flex-1 min-w-[60px] whitespace-nowrap ${
-                highlight === 'indigo' ? 'bg-indigo-600 border-indigo-400 text-white' : 
-                highlight === 'purple' ? 'bg-purple-600 border-purple-400 text-white' : 
+                highlight === 'indigo' ? 'bg-indigo-600 border-indigo-400 text-white' :
+                highlight === 'purple' ? 'bg-purple-600 border-purple-400 text-white' :
                 'bg-slate-800 border-white/20 text-white/70'
             }`}>
                 {label}
@@ -560,32 +639,32 @@
                         <StatCard label="Params" val={size === 'base' ? "110M" : "340M"} />
                     </div>
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 items-stretch">
-                        <VariationCard 
-                            title="RoBERTa" 
-                            company="Meta" 
-                            tag="Better" 
-                            desc="Researchers realized BERT was significantly undertrained. RoBERTa trains on 10x more data (160GB vs 16GB) for much longer, and proves that the 'Next Sentence Prediction' task actually hurt performance, so they removed it." 
+                        <VariationCard
+                            title="RoBERTa"
+                            company="Meta"
+                            tag="Better"
+                            desc="Researchers realized BERT was significantly undertrained. RoBERTa trains on 10x more data (160GB vs 16GB) for much longer, and proves that the 'Next Sentence Prediction' task actually hurt performance, so they removed it."
                             example="Consistently beats standard BERT on logic, reasoning, and reading comprehension benchmarks."
                         />
-                        <VariationCard 
-                            title="DistilBERT" 
-                            company="HuggingFace" 
-                            tag="Faster" 
-                            desc="Uses a technique called 'Knowledge Distillation'. A small 'student' network learns to mimic the exact outputs of a large 'teacher' BERT network, dropping half the layers." 
+                        <VariationCard
+                            title="DistilBERT"
+                            company="HuggingFace"
+                            tag="Faster"
+                            desc="Uses a technique called 'Knowledge Distillation'. A small 'student' network learns to mimic the exact outputs of a large 'teacher' BERT network, dropping half the layers."
                             example="Perfect for deploying NLP features on smartphones or low-latency web servers where standard BERT is too slow."
                         />
-                        <VariationCard 
-                            title="ALBERT" 
-                            company="Google" 
-                            tag="Efficient" 
-                            desc="A 'Lite' BERT. It drastically reduces memory usage by sharing the exact same mathematical weights across all of its 12 layers, rather than learning unique weights for each layer." 
+                        <VariationCard
+                            title="ALBERT"
+                            company="Google"
+                            tag="Efficient"
+                            desc="A 'Lite' BERT. It drastically reduces memory usage by sharing the exact same mathematical weights across all of its 12 layers, rather than learning unique weights for each layer."
                             example="Allows researchers to train a BERT-Large scale model on standard consumer graphics cards without running out of memory."
                         />
-                        <VariationCard 
-                            title="LegalBERT" 
-                            company="Niche / Domain" 
-                            tag="Specialized" 
-                            desc="A domain-specific BERT pretrained from scratch entirely on legal documents, contracts, and court cases instead of Wikipedia and romance novels." 
+                        <VariationCard
+                            title="LegalBERT"
+                            company="Niche / Domain"
+                            tag="Specialized"
+                            desc="A domain-specific BERT pretrained from scratch entirely on legal documents, contracts, and court cases instead of Wikipedia and romance novels."
                             example="Correctly understands that 'consideration' means a contractual exchange of value, not just 'being thoughtful'."
                         />
                     </div>

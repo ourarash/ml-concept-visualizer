@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Advanced Decoding: Beam, Greedy & Sampling</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [['$', '$'], ['\\(', '\\)']],
+                displayMath: [['\\[', '\\]']]
+            },
+            svg: {
+                fontCache: 'global'
+            }
+        };
+    </script>
+    <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f8fafc;
+        }
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            max-width: 1200px;
+            margin: 0 auto;
+            border-radius: 1rem;
+            background-color: #ffffff;
+            cursor: pointer;
+        }
+        input[type=range] {
+            -webkit-appearance: none;
+            width: 100%;
+            background: transparent;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            height: 18px; width: 18px;
+            border-radius: 50%;
+            background: currentColor;
+            cursor: pointer;
+            margin-top: -7px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        input[type=range]::-webkit-slider-runnable-track {
+            width: 100%; height: 4px;
+            cursor: pointer;
+            background: #cbd5e1;
+            border-radius: 2px;
+        }
+        input[type=range]:disabled::-webkit-slider-thumb {
+            background: #94a3b8; cursor: not-allowed; box-shadow: none;
+        }
+        .token-badge {
+            animation: popIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+        @keyframes popIn {
+            0% { transform: scale(0.5); opacity: 0; filter: blur(4px); }
+            100% { transform: scale(1); opacity: 1; filter: blur(0px); }
+        }
+        /* Custom Checkbox */
+        .custom-checkbox {
+            appearance: none;
+            background-color: #fff;
+            margin: 0;
+            font: inherit;
+            color: currentColor;
+            width: 1.15em;
+            height: 1.15em;
+            border: 2px solid currentColor;
+            border-radius: 0.25em;
+            display: grid;
+            place-content: center;
+            transition: all 0.2s ease-in-out;
+            cursor: pointer;
+        }
+        .custom-checkbox::before {
+            content: "";
+            width: 0.65em;
+            height: 0.65em;
+            transform: scale(0);
+            transition: 120ms transform ease-in-out;
+            box-shadow: inset 1em 1em white;
+            background-color: transform;
+            transform-origin: center;
+            clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%);
+        }
+        .custom-checkbox:checked {
+            background-color: #2563eb;
+            border-color: #2563eb;
+        }
+        .custom-checkbox:checked::before {
+            transform: scale(1);
+        }
+        /* Sidebar Scrollbar Styling */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col lg:flex-row bg-slate-50">
+
+    <!-- Left Sidebar -->
+    <aside class="w-full lg:w-80 xl:w-[400px] bg-white border-r border-slate-200 p-5 lg:p-6 lg:h-screen lg:overflow-y-auto flex flex-col gap-6 shrink-0 z-20 shadow-[4px_0_24px_rgba(0,0,0,0.02)]">
+
+        <!-- Header -->
+        <header>
+            <h1 class="text-3xl xl:text-4xl font-extrabold text-slate-800 tracking-tight leading-tight">LLM Decoding</h1>
+            <p class="text-slate-500 mt-2 text-sm">Interactive visualization of how language models choose their next words.</p>
+        </header>
+
+        <!-- Settings & Controls Panel -->
+        <div class="flex flex-col gap-5">
+
+            <!-- Mode Segmented Control -->
+            <div class="grid grid-cols-3 bg-slate-100 p-1.5 rounded-xl border border-slate-200 shadow-inner w-full">
+                <button id="btn-greedy" class="px-2 py-2 rounded-lg font-bold text-xs xl:text-sm transition-all active:scale-95 bg-white text-yellow-700 shadow-sm border border-yellow-200/50 flex flex-col items-center justify-center gap-1">
+                    <span class="text-lg leading-none">⚡</span> Greedy
+                </button>
+                <button id="btn-beam" class="px-2 py-2 rounded-lg font-medium text-xs xl:text-sm transition-all active:scale-95 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 flex flex-col items-center justify-center gap-1">
+                    <span class="text-lg leading-none">🔦</span> Beam
+                </button>
+                <button id="btn-sampling" class="px-2 py-2 rounded-lg font-medium text-xs xl:text-sm transition-all active:scale-95 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 flex flex-col items-center justify-center gap-1">
+                    <span class="text-lg leading-none">🎲</span> Sampling
+                </button>
+            </div>
+
+            <!-- Dynamic Options Panel -->
+            <div id="dynamic-options" class="flex flex-col w-full">
+
+                <!-- Greedy Options -->
+                <div id="greedy-options" class="flex items-center text-sm italic text-slate-500 bg-yellow-50/50 px-4 py-4 rounded-xl border border-yellow-100">
+                    Strict mathematical selection. Always picks the immediate highest score.
+                </div>
+
+                <!-- Beam Options -->
+                <div id="beam-options" class="hidden flex-col gap-4 bg-blue-50/50 px-4 py-4 rounded-xl border border-blue-100/50">
+                    <div class="flex flex-col gap-2 w-full">
+                        <div class="flex justify-between items-center w-full">
+                            <label class="text-sm font-bold text-slate-700">Beam Width (k):</label>
+                            <span id="k-display" class="text-blue-600 font-bold bg-blue-100 px-2 py-0.5 rounded text-sm">2</span>
+                        </div>
+                        <input type="range" id="beam-slider" min="1" max="3" value="2" class="w-full text-blue-600 cursor-pointer">
+                    </div>
+                    <div class="h-px w-full bg-blue-200/50"></div>
+                    <label class="flex items-center gap-3 text-sm font-bold text-slate-700 cursor-pointer select-none group w-full">
+                        <input type="checkbox" id="len-norm-toggle" class="custom-checkbox text-blue-600 border-slate-300 group-hover:border-blue-400">
+                        Length Normalization
+                    </label>
+                </div>
+
+                <!-- Sampling Options -->
+                <div id="sampling-options" class="hidden flex-col gap-4 bg-purple-50/50 px-4 py-4 rounded-xl border border-purple-100/50">
+                    <div class="flex flex-col gap-2 w-full">
+                        <div class="flex justify-between items-center w-full">
+                            <label class="text-sm font-bold text-slate-700">Temperature:</label>
+                            <span id="temp-display" class="text-purple-600 font-bold bg-purple-100 px-2 py-0.5 rounded text-sm">1.0</span>
+                        </div>
+                        <input type="range" id="temp-slider" min="0.1" max="2.0" step="0.1" value="1.0" class="w-full text-purple-600 cursor-pointer">
+                    </div>
+                    <div class="h-px w-full bg-purple-200/50"></div>
+                    <button id="btn-reroll" class="w-full py-2 bg-white hover:bg-purple-100 text-purple-700 rounded-lg text-sm font-bold transition-all border border-purple-200 shadow-sm active:scale-95 flex items-center justify-center gap-2">
+                        <span class="text-lg">🎲</span> Re-roll Sequence
+                    </button>
+                </div>
+
+            </div>
+        </div>
+
+        <!-- Step Navigation & Play -->
+        <div class="flex flex-col items-center gap-3 bg-slate-100 p-3 rounded-xl border border-slate-200 w-full shrink-0">
+            <button id="btn-play" class="w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold transition-all active:scale-95 flex justify-center shadow-sm">
+                ▶ Auto-Play
+            </button>
+            <div class="flex items-center justify-between w-full">
+                <button id="btn-prev" class="px-3 py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg font-medium transition-all border border-slate-200 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed shadow-sm flex-1 text-center">
+                    &larr; Prev
+                </button>
+                <div class="flex gap-1.5 mx-3 shrink-0" id="step-indicators">
+                    <!-- Dots generated by JS -->
+                </div>
+                <button id="btn-next" class="px-3 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg font-medium transition-all active:scale-95 shadow-sm disabled:opacity-50 disabled:cursor-not-allowed border border-slate-900 flex-1 text-center">
+                    Next &rarr;
+                </button>
+            </div>
+            <button id="btn-reset" class="w-full py-2 bg-white hover:bg-slate-50 text-slate-700 rounded-lg font-medium transition-all border border-slate-200 active:scale-95 shadow-sm">
+                Reset
+            </button>
+        </div>
+
+        <!-- Score Formula -->
+        <div class="bg-slate-50 px-4 py-4 rounded-xl border border-slate-200 shadow-sm">
+            <div class="text-xs font-bold uppercase tracking-wide text-slate-700">Score Formula</div>
+            <p class="text-sm text-slate-600 mt-2 leading-relaxed">
+                In greedy and beam search, each red transition label is treated as a log probability. The current path score is the previous score plus that transition score.
+            </p>
+            <div class="bg-white mt-3 p-3 rounded-lg border border-slate-200 text-sm text-slate-700 text-center overflow-x-auto">
+                \[
+                \mathrm{score}_t = \mathrm{score}_{t-1} + \log p(\mathrm{token}_t \mid \mathrm{prefix})
+                \]
+            </div>
+            <div class="bg-white mt-2 p-3 rounded-lg border border-slate-200 text-sm text-slate-700 text-center overflow-x-auto">
+                \[
+                \begin{aligned}
+                \text{displayed score} &= \frac{\mathrm{score}_t}{t} \\
+                &\text{(when length normalization is on)}
+                \end{aligned}
+                \]
+            </div>
+        </div>
+
+        <!-- Explanation Text Area -->
+        <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 relative overflow-hidden flex-1 flex flex-col min-h-[12rem]">
+            <div class="absolute top-0 left-0 w-1.5 h-full bg-blue-500 rounded-l-xl transition-colors duration-300" id="step-accent-bar"></div>
+            <h2 id="step-title" class="text-xl font-bold text-slate-800 mb-3 ml-2">Step 0: The Setup</h2>
+            <div class="overflow-y-auto pr-2 flex-1 ml-2">
+                <p id="step-desc" class="text-slate-600 leading-relaxed text-sm"></p>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Workspace Area -->
+    <main class="flex-grow p-4 md:p-6 lg:p-8 flex flex-col lg:h-screen lg:overflow-y-auto w-full relative">
+
+        <div class="max-w-5xl mx-auto w-full flex flex-col h-full gap-6">
+
+            <!-- Live Hypothesis Banner -->
+            <div class="bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 p-4 md:p-5 rounded-2xl shadow-lg flex flex-col md:flex-row items-start md:items-center gap-4 border border-slate-700 relative overflow-hidden shrink-0">
+                <div class="absolute -right-10 -top-10 w-40 h-40 bg-blue-500/10 rounded-full blur-3xl pointer-events-none"></div>
+
+                <div class="text-slate-400 text-xs font-bold uppercase tracking-widest whitespace-nowrap z-10 shrink-0">
+                    Current Best Sequence:
+                </div>
+                <div id="live-output" class="flex flex-wrap gap-2 min-h-[36px] w-full items-center z-10">
+                    <span class="text-slate-500 italic text-sm">Awaiting first step...</span>
+                </div>
+                <div class="text-emerald-400 text-base font-mono whitespace-nowrap md:ml-auto bg-black/40 px-4 py-2 rounded-xl border border-slate-600 z-10 backdrop-blur shadow-inner transition-colors duration-300 w-full md:w-auto text-center" id="live-score">
+                    Score: 0.00
+                </div>
+            </div>
+
+            <!-- Canvas Container -->
+            <div class="relative w-full bg-white rounded-2xl overflow-hidden flex-shrink-0 border border-slate-200 shadow-sm flex flex-col min-h-[400px] flex-grow">
+                <canvas id="beamCanvas"></canvas>
+
+                <!-- Legend overlay -->
+                <div class="absolute bottom-5 left-5 bg-white/95 backdrop-blur-md p-4 rounded-xl border border-slate-200/60 shadow-lg text-xs space-y-2.5 pointer-events-none">
+                    <div class="font-bold text-slate-700 mb-1 border-b border-slate-100 pb-1">Legend</div>
+                    <div class="flex items-center gap-2.5"><span class="w-3.5 h-3.5 rounded bg-slate-800 shadow-sm inline-block"></span> <span class="text-slate-600">Generated Token</span></div>
+                    <div class="flex items-center gap-2.5"><span class="w-3.5 h-3.5 rounded bg-emerald-500 shadow-sm inline-block"></span> <span id="legend-score" class="text-slate-600 font-medium">Cumulative Score</span></div>
+                    <div class="flex items-center gap-2.5"><span class="w-3.5 h-3.5 rounded bg-red-500 shadow-sm inline-block"></span> <span class="text-slate-600">Transition Log Prob</span></div>
+                    <div class="flex items-center gap-2.5 mt-1 pt-1 border-t border-slate-100 text-slate-400">
+                        <svg class="w-3.5 h-3.5 text-red-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><circle cx="12" cy="12" r="10"></circle><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"></line></svg>
+                        <span>Faded = Pruned / Dropped</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Restored Deep Dive Section -->
+            <details class="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm group shrink-0 mt-2">
+                <summary class="font-bold text-slate-800 px-6 py-5 cursor-pointer flex justify-between items-center bg-slate-50 hover:bg-slate-100 transition-colors">
+                    <span class="flex items-center gap-3 text-base md:text-lg">
+                        <span class="bg-indigo-100 text-indigo-600 p-2 rounded-lg">
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+                        </span>
+                        Deep Dive: Decoding Math & The Combinatorial Explosion
+                    </span>
+                    <span class="text-slate-400 transform group-open:rotate-180 transition-transform duration-300">▼</span>
+                </summary>
+
+                <div class="p-6 md:p-8 grid grid-cols-1 lg:grid-cols-2 gap-10 border-t border-slate-100 bg-white">
+                    <!-- Combinatorial Explosion -->
+                    <div class="space-y-4 text-sm text-slate-600">
+                        <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2 text-base">
+                            <span class="w-6 h-6 rounded bg-blue-100 text-blue-700 flex items-center justify-center text-xs">1</span>
+                            The Combinatorial Explosion
+                        </h4>
+                        <p class="leading-relaxed">If an LLM vocabulary has 50,000 words, a 5-word sentence has <strong>$50,000^5$</strong> combinations. Evaluating them all is mathematically impossible. Beam Search tames this by generating all next possibilities for active paths, but then <strong>ruthlessly pruning everything except the top <em>k</em></strong>.</p>
+                        <div class="bg-blue-50/50 p-4 rounded-xl border border-blue-100 mt-4 shadow-sm">
+                            <p class="text-blue-800 text-sm"><strong>The "Greedy Trap":</strong> Greedy Search ($k=1$) falls into traps by picking a word that looks good immediately (like 'a') but leads to terrible continuations. Beam Search survives this by keeping 'runner-up' paths alive.</p>
+                        </div>
+                    </div>
+
+                    <!-- Log Math & Length Norm -->
+                    <div class="space-y-4 text-sm text-slate-600">
+                        <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2 text-base">
+                            <span class="w-6 h-6 rounded bg-emerald-100 text-emerald-700 flex items-center justify-center text-xs">2</span>
+                            Log Probabilities & Length Penalty
+                        </h4>
+                        <p class="leading-relaxed">Probabilities are decimals (0 to 1). Multiplying many tiny decimals causes computer chips to hit <em>underflow</em> (round to 0). Instead, LLMs add <strong>Log Probabilities ($\log P$)</strong>. Because probabilities are $< 1$, Log Probs are always negative. Closer to 0 is better.</p>
+                        <div class="bg-slate-50 p-4 rounded-xl border border-slate-200 text-sm text-center text-slate-700 shadow-sm my-3">
+                            \[
+                            \mathrm{score}_t = \mathrm{score}_{t-1} + \log p(\mathrm{token}_t \mid \mathrm{prefix})
+                            \]
+                        </div>
+                        <p class="leading-relaxed"><strong class="text-slate-800">The Length Problem:</strong> Because we keep adding negative numbers, longer sentences will <em>always</em> have lower scores. To fix this, we apply <strong>Length Normalization</strong> (Score $\div$ Number of tokens) so the model doesn't unfairly favor artificially short sentences.</p>
+                    </div>
+
+                    <!-- Sampling -->
+                    <div class="space-y-4 text-sm text-slate-600 lg:col-span-2 pt-6 border-t border-slate-100">
+                        <h4 class="font-bold text-slate-800 mb-2 flex items-center gap-2 text-base">
+                            <span class="w-6 h-6 rounded bg-purple-100 text-purple-700 flex items-center justify-center text-xs">3</span>
+                            Temperature Sampling (Stochastic Decoding)
+                        </h4>
+                        <p class="leading-relaxed max-w-4xl">Instead of strictly picking the highest score, Sampling rolls a weighted dice. This is how ChatGPT generates creative, varied responses. The <strong>Temperature ($T$)</strong> scales the original probabilities before rolling the dice:</p>
+                        <ul class="list-none space-y-3 mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 max-w-4xl">
+                            <li class="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
+                                <strong class="text-slate-800 block mb-1">❄️ Low Temp ($T < 1$)</strong>
+                                Exaggerates differences. The most likely word becomes almost guaranteed (approaching Greedy behavior).
+                            </li>
+                            <li class="bg-slate-50 p-4 rounded-xl border border-slate-100 shadow-sm">
+                                <strong class="text-slate-800 block mb-1">🔥 High Temp ($T > 1$)</strong>
+                                Flattens the distribution. Crazy, less likely words have a much higher chance of being picked.
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </details>
+        </div>
+    </main>
+
+    <script>
+        const canvas = document.getElementById('beamCanvas');
+        const ctx = canvas.getContext('2d');
+        // Render at a high resolution, let CSS scale it down for retina clarity
+        const WIDTH = 1200;
+        const HEIGHT = 1080;
+
+        let currentStep = 0;
+        const MAX_STEPS = 5;
+        let mouseX = -1, mouseY = -1;
+
+        let currentMode = 'greedy';
+        let beamWidth = 2;
+        let lengthNorm = false;
+        let temperature = 1.0;
+        let sampledPaths = {}; // Stores chosen node ID for each step
+
+        // --- Data Structure for the Complex Tree ---
+        const baseNodes = [
+            { id: 'start', text: 'start', x: 80, y: 350, step: 0, transProb: 0, parent: null },
+
+            { id: 'a', text: 'a', x: 260, y: 150, step: 1, transProb: -0.5, parent: 'start' },
+            { id: 'the', text: 'the', x: 260, y: 350, step: 1, transProb: -0.8, parent: 'start' },
+            { id: 'it', text: 'it', x: 260, y: 500, step: 1, transProb: -2.0, parent: 'start' },
+            { id: 'she', text: 'she', x: 260, y: 650, step: 1, transProb: -2.5, parent: 'start' },
+
+            { id: 'a_dog', text: 'dog', x: 460, y: 50, step: 2, transProb: -2.0, parent: 'a' },
+            { id: 'a_cat', text: 'cat', x: 460, y: 120, step: 2, transProb: -2.2, parent: 'a' },
+            { id: 'a_car', text: 'car', x: 460, y: 190, step: 2, transProb: -3.0, parent: 'a' },
+            { id: 'the_cat', text: 'cat', x: 460, y: 280, step: 2, transProb: -0.4, parent: 'the' },
+            { id: 'the_dog', text: 'dog', x: 460, y: 350, step: 2, transProb: -1.0, parent: 'the' },
+            { id: 'the_man', text: 'man', x: 460, y: 420, step: 2, transProb: -2.2, parent: 'the' },
+            { id: 'the_bird', text: 'bird', x: 460, y: 490, step: 2, transProb: -2.5, parent: 'the' },
+            { id: 'it_is', text: 'is', x: 460, y: 580, step: 2, transProb: -0.6, parent: 'it' },
+            { id: 'it_was', text: 'was', x: 460, y: 650, step: 2, transProb: -1.0, parent: 'it' },
+            { id: 'she_said', text: 'said', x: 460, y: 730, step: 2, transProb: -0.7, parent: 'she' },
+
+            { id: 'ad_barked', text: 'barked', x: 660, y: 50, step: 3, transProb: -1.5, parent: 'a_dog' },
+            { id: 'ad_ran', text: 'ran', x: 660, y: 120, step: 3, transProb: -1.8, parent: 'a_dog' },
+            { id: 'tc_sat', text: 'sat', x: 660, y: 220, step: 3, transProb: -0.3, parent: 'the_cat' },
+            { id: 'tc_ran', text: 'ran', x: 660, y: 290, step: 3, transProb: -1.5, parent: 'the_cat' },
+            { id: 'tc_slept', text: 'slept', x: 660, y: 360, step: 3, transProb: -2.0, parent: 'the_cat' },
+            { id: 'td_barked', text: 'barked', x: 660, y: 430, step: 3, transProb: -0.6, parent: 'the_dog' },
+            { id: 'td_ran', text: 'ran', x: 660, y: 500, step: 3, transProb: -1.2, parent: 'the_dog' },
+            { id: 'td_bit', text: 'bit', x: 660, y: 570, step: 3, transProb: -2.0, parent: 'the_dog' },
+            { id: 'iti_a', text: 'a', x: 660, y: 640, step: 3, transProb: -0.8, parent: 'it_is' },
+            { id: 'ac_purred', text: 'purred', x: 660, y: 690, step: 3, transProb: -0.7, parent: 'a_cat' },
+            { id: 'acar_sped', text: 'sped', x: 660, y: 750, step: 3, transProb: -0.8, parent: 'a_car' },
+            { id: 'tm_spoke', text: 'spoke', x: 660, y: 810, step: 3, transProb: -0.6, parent: 'the_man' },
+            { id: 'tb_sang', text: 'sang', x: 660, y: 870, step: 3, transProb: -0.7, parent: 'the_bird' },
+            { id: 'itw_rained', text: 'rained', x: 660, y: 930, step: 3, transProb: -0.5, parent: 'it_was' },
+            { id: 'sh_smiled', text: 'smiled', x: 660, y: 990, step: 3, transProb: -0.6, parent: 'she_said' },
+
+            { id: 'adb_loudly', text: 'loudly', x: 880, y: 50, step: 4, transProb: -1.0, parent: 'ad_barked' },
+            { id: 'adb_at', text: 'at', x: 880, y: 120, step: 4, transProb: -1.4, parent: 'ad_barked' },
+            { id: 'tc_s_on', text: 'on', x: 880, y: 220, step: 4, transProb: -0.5, parent: 'tc_sat' },
+            { id: 'tc_s_down', text: 'down', x: 880, y: 290, step: 4, transProb: -1.2, parent: 'tc_sat' },
+            { id: 'tc_s_quietly', text: 'quietly', x: 880, y: 360, step: 4, transProb: -1.8, parent: 'tc_sat' },
+            { id: 'td_b_loudly', text: 'loudly', x: 880, y: 430, step: 4, transProb: -0.8, parent: 'td_barked' },
+            { id: 'td_b_at', text: 'at', x: 880, y: 500, step: 4, transProb: -1.1, parent: 'td_barked' },
+            { id: 'td_b_end', text: '</s>', x: 880, y: 570, step: 4, transProb: -2.0, parent: 'td_barked' },
+            { id: 'acp_end', text: '</s>', x: 880, y: 690, step: 4, transProb: -0.3, parent: 'ac_purred' },
+            { id: 'acar_end', text: '</s>', x: 880, y: 750, step: 4, transProb: -0.4, parent: 'acar_sped' },
+            { id: 'tm_end', text: '</s>', x: 880, y: 810, step: 4, transProb: -0.4, parent: 'tm_spoke' },
+            { id: 'tb_end', text: '</s>', x: 880, y: 870, step: 4, transProb: -0.3, parent: 'tb_sang' },
+            { id: 'itw_end', text: '</s>', x: 880, y: 930, step: 4, transProb: -0.2, parent: 'itw_rained' },
+            { id: 'sh_end', text: '</s>', x: 880, y: 990, step: 4, transProb: -0.3, parent: 'sh_smiled' },
+
+            { id: 'adbl_end', text: '</s>', x: 1080, y: 50, step: 5, transProb: -0.5, parent: 'adb_loudly' },
+            { id: 'adbl_and', text: 'and', x: 1080, y: 120, step: 5, transProb: -1.2, parent: 'adb_loudly' },
+            { id: 'end1', text: '</s>', x: 1080, y: 220, step: 5, transProb: -0.1, parent: 'tc_s_on' },
+            { id: 'tc_s_o_it', text: 'the', x: 1080, y: 290, step: 5, transProb: -1.0, parent: 'tc_s_on' },
+            { id: 'end2', text: '</s>', x: 1080, y: 430, step: 5, transProb: -0.1, parent: 'td_b_loudly' },
+            { id: 'td_b_l_and', text: 'and', x: 1080, y: 500, step: 5, transProb: -0.9, parent: 'td_b_loudly' }
+        ];
+
+        let nodes = [];
+        let activePathsByStep = {};
+
+        // --- Core Algorithm Logic ---
+        function evaluateGraph() {
+            nodes = JSON.parse(JSON.stringify(baseNodes));
+            nodes.forEach(n => { n.status = 'unreached'; });
+
+            const startNode = nodes.find(n => n.id === 'start');
+            startNode.status = 'active';
+            startNode.pathProb = 0;
+            startNode.displayScore = 0;
+
+            activePathsByStep = { 0: [['start']] };
+
+            for (let t = 1; t <= MAX_STEPS; t++) {
+                const activeParents = nodes.filter(n => n.step === t - 1 && n.status === 'active');
+                let candidates = nodes.filter(n => n.step === t && activeParents.some(p => p.id === n.parent));
+
+                // Safety break if graph ends
+                if (candidates.length === 0) break;
+
+                candidates.forEach(c => {
+                    const parent = nodes.find(n => n.id === c.parent);
+                    c.pathProb = parent.pathProb + c.transProb;
+                    c.displayScore = lengthNorm ? (c.pathProb / c.step) : c.pathProb;
+                });
+
+                if (currentMode === 'sampling') {
+                    // --- SAMPLING LOGIC ---
+                    if (!sampledPaths[t]) {
+                        const expScores = candidates.map(c => Math.exp(c.transProb / temperature));
+                        const sumExp = expScores.reduce((a, b) => a + b, 0);
+                        const probs = expScores.map(e => e / sumExp);
+
+                        let r = Math.random();
+                        let chosenIdx = 0;
+                        for (let i = 0; i < probs.length; i++) {
+                            r -= probs[i];
+                            if (r <= 0) { chosenIdx = i; break; }
+                        }
+                        sampledPaths[t] = candidates[chosenIdx].id;
+                        candidates.forEach((c, i) => c.sampleProb = probs[i]);
+                    } else {
+                        // Restore existing prob calculation for tooltip
+                        const expScores = candidates.map(c => Math.exp(c.transProb / temperature));
+                        const sumExp = expScores.reduce((a, b) => a + b, 0);
+                        candidates.forEach((c, i) => c.sampleProb = expScores[i] / sumExp);
+                    }
+
+                    candidates.forEach(c => {
+                        c.status = c.id === sampledPaths[t] ? 'active' : 'dropped';
+                    });
+
+                } else {
+                    // --- GREEDY & BEAM LOGIC ---
+                    candidates.sort((a, b) => b.displayScore - a.displayScore);
+                    const limit = currentMode === 'greedy' ? 1 : beamWidth;
+                    candidates.forEach((c, idx) => {
+                        c.status = idx < limit ? 'active' : 'dropped';
+                    });
+                }
+
+                activePathsByStep[t] = [];
+                const activeNow = candidates.filter(c => c.status === 'active');
+                activeNow.forEach(a => {
+                    let path = [a.id];
+                    let curr = a;
+                    while (curr.parent) {
+                        path.unshift(curr.parent);
+                        curr = nodes.find(n => n.id === curr.parent);
+                    }
+                    activePathsByStep[t].push(path);
+                });
+
+                if (t === MAX_STEPS) {
+                    activeNow.forEach((a, idx) => {
+                        a.status = idx === 0 ? 'winner' : 'runnerup';
+                    });
+                }
+            }
+        }
+
+        // --- Canvas Rendering Logic ---
+        canvas.addEventListener('mousemove', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            mouseX = (e.clientX - rect.left) * (WIDTH / rect.width);
+            mouseY = (e.clientY - rect.top) * (HEIGHT / rect.height);
+        });
+        canvas.addEventListener('mouseleave', () => { mouseX = -1; mouseY = -1; });
+
+        function resizeCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = WIDTH * dpr;
+            canvas.height = HEIGHT * dpr;
+            ctx.scale(dpr, dpr);
+        }
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        function drawText(text, x, y, font, color, align = 'center') {
+            ctx.font = font; ctx.fillStyle = color; ctx.textAlign = align; ctx.textBaseline = 'middle';
+            ctx.fillText(text, x, y);
+        }
+
+        function drawEdge(n1, n2, isActive) {
+            ctx.save();
+            ctx.globalAlpha = isActive ? 1.0 : 0.65;
+            ctx.beginPath();
+            ctx.moveTo(n1.x + 30, n1.y);
+            const dist = Math.abs(n2.y - n1.y);
+            const ctrlOffset = Math.min(80, Math.max(30, dist * 0.5));
+            ctx.bezierCurveTo(n1.x + ctrlOffset, n1.y, n2.x - ctrlOffset, n2.y, n2.x - 30, n2.y);
+
+            ctx.strokeStyle = isActive ? '#94a3b8' : '#94a3b8';
+            ctx.lineWidth = isActive ? 2 : 1.5;
+            if (!isActive) ctx.setLineDash([4, 4]);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            if (n2.transProb !== undefined) {
+                const midX = (n1.x + n2.x) / 2, midY = (n1.y + n2.y) / 2;
+                ctx.fillStyle = isActive ? "rgba(255,255,255,0.95)" : "rgba(255,255,255,0.92)";
+
+                if (isActive) {
+                    ctx.shadowColor = 'rgba(0,0,0,0.1)';
+                    ctx.shadowBlur = 4;
+                    ctx.shadowOffsetY = 2;
+                }
+
+                ctx.beginPath();
+                ctx.roundRect(midX - 16, midY - 11, 32, 22, 4);
+                ctx.fill();
+
+                ctx.shadowColor = 'transparent';
+                drawText(n2.transProb.toFixed(1), midX, midY, "bold 12px sans-serif", isActive ? "#ef4444" : "#dc2626");
+            }
+            ctx.restore();
+        }
+
+        function drawBeam(pathIds) {
+            ctx.save();
+            ctx.beginPath();
+            const points = pathIds.map(id => nodes.find(n => n.id === id));
+            ctx.moveTo(points[0].x, points[0].y);
+            for (let i = 1; i < points.length; i++) {
+                const p1 = points[i-1], p2 = points[i];
+                const dist = Math.abs(p2.y - p1.y);
+                const ctrlOffset = Math.min(80, Math.max(30, dist * 0.5));
+                ctx.bezierCurveTo(p1.x + ctrlOffset, p1.y, p2.x - ctrlOffset, p2.y, p2.x, p2.y);
+            }
+            ctx.strokeStyle = currentMode === 'greedy' ? "rgba(253, 224, 71, 0.25)" :
+                              currentMode === 'sampling' ? "rgba(216, 180, 254, 0.3)" : "rgba(148, 163, 184, 0.15)";
+            ctx.lineWidth = 60; ctx.lineCap = "round"; ctx.lineJoin = "round";
+            ctx.stroke();
+            ctx.strokeStyle = currentMode === 'greedy' ? "rgba(234, 179, 8, 0.4)" :
+                              currentMode === 'sampling' ? "rgba(168, 85, 247, 0.4)" : "rgba(71, 85, 105, 0.3)";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawDroppedIcon(x, y) {
+            const r = 7;
+            ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+            ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2.5; ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(x - r*0.7, y - r*0.7); ctx.lineTo(x + r*0.7, y + r*0.7); ctx.stroke();
+        }
+
+        function drawNode(node) {
+            ctx.save();
+
+            const isHovered = (mouseX > 0 && Math.abs(node.x - mouseX) < 35 && Math.abs(node.y - mouseY) < 25);
+
+            if (node.status === 'dropped') {
+                ctx.globalAlpha = isHovered ? 0.95 : 0.78;
+            }
+
+            ctx.fillStyle = node.status === 'winner' ? '#dcfce7' : (node.status === 'runnerup' ? '#f1f5f9' : '#ffffff');
+
+            ctx.strokeStyle = node.status === 'dropped' ? '#94a3b8' :
+                              node.status === 'winner' ? '#22c55e' :
+                              (currentMode==='greedy' ? '#eab308' : currentMode==='sampling' ? '#a855f7' : '#3b82f6');
+            ctx.lineWidth = 2;
+
+            if (node.status !== 'dropped' || isHovered) {
+                ctx.shadowColor = 'rgba(0,0,0,0.1)';
+                ctx.shadowBlur = isHovered ? 8 : 4;
+                ctx.shadowOffsetY = isHovered ? 4 : 2;
+            }
+
+            ctx.beginPath();
+            const width = ctx.measureText(node.text).width + 36;
+            ctx.roundRect(node.x - width/2, node.y - 16, width, 32, 16);
+            ctx.fill();
+            ctx.shadowColor = 'transparent';
+            ctx.stroke();
+
+            const textColor = node.status === 'dropped' ? '#334155' :
+                              (currentMode==='greedy' ? '#854d0e' : currentMode==='sampling' ? '#6b21a8' : '#1e40af');
+            drawText(node.text, node.x, node.y + 1, (node.status === 'winner' ? "bold " : "") + "15px sans-serif", textColor);
+
+            if (node.displayScore !== undefined && node.id !== 'start') {
+                const probColor = node.status === 'dropped' ? '#059669' : '#10b981';
+                drawText(node.displayScore.toFixed(2), node.x, node.y - 28, "bold 13px sans-serif", probColor);
+            }
+
+            if (node.status === 'dropped') drawDroppedIcon(node.x + width/2 + 12, node.y);
+            ctx.restore();
+        }
+
+        function drawTooltip(x, y, node) {
+            if (node.id === 'start') return;
+            const pNode = nodes.find(n => n.id === node.parent);
+            if (!pNode) return;
+
+            const lines = [];
+
+            if (currentMode === 'sampling') {
+                lines.push(`Sampling Data (Temp=${temperature.toFixed(1)}):`);
+                lines.push(`Raw Trans Score: ${node.transProb.toFixed(2)}`);
+                lines.push(`Softmax Prob: ${(node.sampleProb * 100).toFixed(1)}%`);
+                if (node.status === 'active' || node.status === 'winner') {
+                    lines.push(``, `🎲 The dice roll picked this node!`);
+                } else {
+                    lines.push(``, `🚫 Not chosen by the roll`);
+                }
+            } else {
+                lines.push(`Log Prob Calculation:`);
+                lines.push(`s_t = s_(t-1) + log p(token_t|prefix)`);
+                lines.push(`Prev Score: ${pNode.pathProb.toFixed(2)}`);
+                lines.push(`+ Transition: ${node.transProb.toFixed(2)}`);
+                lines.push(`--------------------`);
+                lines.push(`= Cumulative: ${node.pathProb.toFixed(2)}`);
+                if (lengthNorm) {
+                    lines.push(`÷ Length (${node.step}) = ${node.displayScore.toFixed(2)}`);
+                }
+
+                if (node.status === 'dropped') {
+                    lines.push(``, currentMode === 'greedy' ? `🚫 Dropped: Not the absolute highest` : `🚫 Dropped: Not in top k=${beamWidth}`);
+                } else if (currentMode === 'greedy') {
+                    lines.push(``, `✅ Greedy picked the immediate best score`);
+                }
+            }
+
+            ctx.save(); ctx.font = "14px sans-serif";
+            let mw = lines.reduce((max, l) => Math.max(max, ctx.measureText(l).width), 0) + 32;
+            let bh = lines.length * 22 + 20, dx = Math.min(x + 15, WIDTH - mw - 10), dy = Math.min(y + 15, HEIGHT - bh - 10);
+
+            ctx.fillStyle = "rgba(15, 23, 42, 0.95)";
+            ctx.shadowColor = "rgba(0,0,0,0.4)"; ctx.shadowBlur = 12; ctx.shadowOffsetY = 6;
+            ctx.beginPath(); ctx.roundRect(dx, dy, mw, bh, 10); ctx.fill();
+
+            ctx.shadowColor = "transparent"; ctx.fillStyle = "#f8fafc"; ctx.textAlign = "left"; ctx.textBaseline = "top";
+            lines.forEach((l, i) => {
+                ctx.font = i === 0 ? "bold 14px sans-serif" : "14px font-mono";
+                if (l.includes('✅')) ctx.fillStyle = '#a3e635';
+                else if (l.includes('🚫')) ctx.fillStyle = '#fca5a5';
+                else if (l.includes('🎲')) ctx.fillStyle = '#d8b4fe';
+                else ctx.fillStyle = "#f8fafc";
+                ctx.fillText(l, dx + 16, dy + 14 + i * 20);
+            });
+            ctx.restore();
+        }
+
+        function render() {
+            ctx.clearRect(0, 0, WIDTH, HEIGHT);
+            const visibleNodes = nodes.filter(n => n.step <= currentStep && n.status !== 'unreached');
+
+            if (currentStep > 0 && activePathsByStep[currentStep]) {
+                activePathsByStep[currentStep].forEach(path => drawBeam(path));
+            }
+
+            visibleNodes.forEach(node => {
+                if (node.parent) {
+                    const pNode = nodes.find(n => n.id === node.parent);
+                    drawEdge(pNode, node, node.status !== 'dropped');
+                }
+            });
+
+            visibleNodes.filter(n => n.status === 'dropped').forEach(node => drawNode(node));
+            visibleNodes.filter(n => n.status !== 'dropped').forEach(node => drawNode(node));
+
+            if (mouseX > 0 && mouseY > 0) {
+                const hitNode = visibleNodes.find(n => Math.abs(n.x - mouseX) < 35 && Math.abs(n.y - mouseY) < 25);
+                if (hitNode) { canvas.style.cursor = 'help'; drawTooltip(mouseX, mouseY, hitNode); }
+                else { canvas.style.cursor = 'default'; }
+            }
+
+            ctx.fillStyle = "#94a3b8"; ctx.font = "italic 16px serif"; ctx.textAlign = "center";
+            for(let i=1; i<=Math.min(currentStep, MAX_STEPS); i++) {
+                const headerX = i === 4 ? 880 : (i === 5 ? 1080 : 80 + (i * 200));
+                ctx.fillText(`t${i}`, headerX, HEIGHT - 25);
+            }
+
+            requestAnimationFrame(render);
+        }
+
+        // --- UI Dynamics ---
+
+        const btnPrev = document.getElementById('btn-prev');
+        const btnNext = document.getElementById('btn-next');
+        const btnReset = document.getElementById('btn-reset');
+        const btnPlay = document.getElementById('btn-play');
+        const dotsC = document.getElementById('step-indicators');
+        const btnGreedy = document.getElementById('btn-greedy');
+        const btnBeam = document.getElementById('btn-beam');
+        const btnSampling = document.getElementById('btn-sampling');
+        const greedyOpts = document.getElementById('greedy-options');
+        const beamOpts = document.getElementById('beam-options');
+        const samplingOpts = document.getElementById('sampling-options');
+        const slider = document.getElementById('beam-slider');
+        const kDisplay = document.getElementById('k-display');
+        const tempSlider = document.getElementById('temp-slider');
+        const tempDisplay = document.getElementById('temp-display');
+        const lenNormToggle = document.getElementById('len-norm-toggle');
+        const btnReroll = document.getElementById('btn-reroll');
+        const liveOutput = document.getElementById('live-output');
+        const liveScore = document.getElementById('live-score');
+        const legendScore = document.getElementById('legend-score');
+        const stepAccentBar = document.getElementById('step-accent-bar');
+
+        let playTimer = null;
+        let isPlaying = false;
+
+        for(let i=0; i<=MAX_STEPS; i++) {
+            const dot = document.createElement('div');
+            dot.className = `w-2.5 h-2.5 rounded-full transition-colors`;
+            dotsC.appendChild(dot);
+        }
+
+        function updateLiveBanner() {
+            if (currentStep === 0) {
+                liveOutput.innerHTML = `<span class="text-slate-500 italic text-sm">Awaiting first step...</span>`;
+                liveScore.textContent = `Score: 0.00`;
+                liveScore.className = "text-emerald-400 text-base font-mono whitespace-nowrap md:ml-auto bg-black/40 px-4 py-2 rounded-xl border border-slate-600 z-10 backdrop-blur shadow-inner transition-colors duration-300 w-full md:w-auto text-center";
+                return;
+            }
+
+            const activeAtStep = nodes.filter(n => n.step === currentStep && (n.status === 'active' || n.status === 'winner' || n.status === 'runnerup'));
+            activeAtStep.sort((a, b) => b.displayScore - a.displayScore);
+            const bestNode = activeAtStep[0];
+
+            if (!bestNode) {
+                liveOutput.innerHTML = `<span class="text-slate-400 italic text-sm">Path ended early. No further tokens generated.</span>`;
+                liveScore.textContent = `Score: ---`;
+                liveScore.className = "text-slate-400 text-base font-mono whitespace-nowrap md:ml-auto bg-black/40 px-4 py-2 rounded-xl border border-slate-700 z-10 backdrop-blur shadow-inner transition-colors duration-300 w-full md:w-auto text-center";
+                return;
+            }
+
+            let pathWords = [];
+            let curr = bestNode;
+            while (curr && curr.id !== 'start') {
+                pathWords.unshift(curr.text);
+                curr = nodes.find(n => n.id === curr.parent);
+            }
+
+            let html = '';
+            pathWords.forEach((word, idx) => {
+                const isNew = idx === pathWords.length - 1;
+                const badgeColor = word === '</s>' ? 'bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-inner shadow-indigo-500/20' :
+                                  (currentMode==='greedy' ? 'bg-yellow-500/20 text-yellow-300 border-yellow-500/50 shadow-inner shadow-yellow-500/20' :
+                                   currentMode==='sampling' ? 'bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-inner shadow-purple-500/20' :
+                                   'bg-blue-500/20 text-blue-300 border-blue-500/50 shadow-inner shadow-blue-500/20');
+                html += `<span class="px-3 py-1.5 rounded-lg border ${badgeColor} font-mono ${isNew ? 'token-badge' : ''}">${word}</span>`;
+            });
+            liveOutput.innerHTML = html;
+
+            liveScore.textContent = `Score: ${bestNode.displayScore.toFixed(2)}`;
+
+            if (bestNode.displayScore < -3.5) {
+                liveScore.className = "text-red-400 text-base font-mono whitespace-nowrap md:ml-auto bg-red-900/40 px-4 py-2 rounded-xl border border-red-500/50 z-10 backdrop-blur shadow-[inset_0_0_12px_rgba(239,68,68,0.2)] transition-colors duration-300 w-full md:w-auto text-center";
+            } else {
+                liveScore.className = "text-emerald-400 text-base font-mono whitespace-nowrap md:ml-auto bg-emerald-900/40 px-4 py-2 rounded-xl border border-emerald-500/50 z-10 backdrop-blur shadow-[inset_0_0_12px_rgba(16,185,129,0.2)] transition-colors duration-300 w-full md:w-auto text-center";
+            }
+        }
+
+        function updateUIText() {
+            const stepT = document.getElementById('step-title');
+            const stepD = document.getElementById('step-desc');
+
+            updateLiveBanner();
+
+            stepAccentBar.className = `absolute top-0 left-0 w-1.5 h-full rounded-l-xl transition-colors duration-300 ${
+                currentMode === 'greedy' ? 'bg-yellow-500' :
+                currentMode === 'sampling' ? 'bg-purple-500' : 'bg-blue-500'
+            }`;
+
+            if (currentStep === 0) {
+                stepT.innerHTML = "Step 0: The Setup";
+                if (currentMode === 'greedy') stepD.innerHTML = "You are using <strong>Greedy Search</strong>. The model acts short-sighted: it only picks the single highest probability token at each step and never re-evaluates previous choices.";
+                else if (currentMode === 'sampling') stepD.innerHTML = "You are using <strong>Temperature Sampling</strong>. Instead of picking the absolute best token, the model rolls a weighted dice based on probabilities. Adjust the Temperature slider to see how it affects the distribution!";
+                else stepD.innerHTML = `You are using <strong>Beam Search</strong>. The model explores multiple timelines simultaneously, maintaining a beam of the top <strong>k=${beamWidth}</strong> paths at each step.`;
+            } else {
+                const activeNodes = nodes.filter(n => n.step === currentStep && (n.status === 'active' || n.status === 'winner' || n.status === 'runnerup'));
+
+                if (!activeNodes || activeNodes.length === 0) {
+                    stepT.innerHTML = `Step ${currentStep}: Path Terminated`;
+                    stepD.innerHTML = `The selected sequence reached a dead-end in this simulation's tree and no further branches were generated.`;
+                    if (isPlaying) togglePlay();
+                } else if (currentMode === 'greedy') {
+                    const picked = activeNodes[0];
+                    const parent = nodes.find(n => n.id === picked.parent);
+                    stepT.innerHTML = `Step ${currentStep}: Greedy Choice`;
+                    let desc = `Greedy search evaluated the children of <strong>'${parent ? parent.text : 'Unknown'}'</strong>. It picked the single highest transition probability: <strong class='text-yellow-700 font-semibold px-1.5 py-0.5 bg-yellow-50 border border-yellow-200 rounded inline-block'>'${picked.text}'</strong>.<br><br>Current Score: <strong>${picked.displayScore.toFixed(2)}</strong>.`;
+                    if (currentStep === 2) desc += "<br><br><span class='text-red-600 font-bold bg-red-50 border border-red-200 px-2 py-1 rounded inline-block'>⚠️ The Greedy Trap!</span> It was locked into 'a' from step 1, so it picked 'dog' (-2.0). It completely missed the better 'the cat' path because it didn't look ahead.";
+                    stepD.innerHTML = desc;
+                } else if (currentMode === 'sampling') {
+                    const picked = activeNodes[0];
+                    stepT.innerHTML = `Step ${currentStep}: Stochastic Dice Roll`;
+                    let desc = `The model converted the transition scores into probabilities using Softmax and Temperature (T=${temperature.toFixed(1)}). The weighted dice roll resulted in <strong class='text-purple-700 font-semibold px-1.5 py-0.5 bg-purple-50 border border-purple-200 rounded inline-block'>'${picked ? picked.text : 'Unknown'}'</strong> (${(picked && picked.sampleProb ? picked.sampleProb*100 : 0).toFixed(1)}% chance).`;
+                    stepD.innerHTML = desc;
+                } else {
+                    stepT.innerHTML = `Step ${currentStep}: Expand & Prune`;
+                    const keptText = activeNodes.map(n => `'${n.text}' (${n.displayScore.toFixed(2)})`).join(', ');
+                    let desc = `Beam Search expanded ALL active branches from the previous step. It calculated scores for all candidates and kept the global top <strong>k=${beamWidth}</strong>: <strong class='text-blue-700 font-semibold'>${keptText}</strong>.`;
+                    if (currentStep === 2 && !activeNodes.some(n => n.id.startsWith('a_'))) {
+                        desc += "<br><br><span class='text-emerald-600 font-bold bg-emerald-50 border border-emerald-200 px-2 py-1 rounded inline-block'>✨ Trap Avoided!</span> The initially strong 'a' path was dropped because cumulative scores for 'the cat' and 'the dog' proved higher globally.";
+                    }
+                    stepD.innerHTML = desc;
+                }
+            }
+
+            btnPrev.disabled = currentStep === 0;
+            btnNext.disabled = currentStep === MAX_STEPS;
+
+            [...dotsC.children].forEach((d, i) => {
+                if (i <= currentStep) {
+                    d.className = `w-2.5 h-2.5 rounded-full transition-colors ${
+                        currentMode === 'greedy' ? 'bg-yellow-500' :
+                        currentMode === 'sampling' ? 'bg-purple-500' : 'bg-blue-600'
+                    }`;
+                } else {
+                    d.className = `w-2.5 h-2.5 rounded-full transition-colors bg-slate-300`;
+                }
+            });
+
+            if (currentStep === MAX_STEPS && isPlaying) {
+                togglePlay();
+            }
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            if (isPlaying) {
+                btnPlay.innerHTML = '⏸ Pause';
+                btnPlay.className = "w-full py-2.5 bg-rose-500 hover:bg-rose-600 text-white rounded-lg font-bold transition-all active:scale-95 flex justify-center shadow-sm";
+                if (currentStep === MAX_STEPS) currentStep = 0;
+                updateUIText();
+                playTimer = setInterval(() => {
+                    if (currentStep < MAX_STEPS) { currentStep++; updateUIText(); }
+                    else { togglePlay(); }
+                }, 1400);
+            } else {
+                btnPlay.innerHTML = '▶ Auto-Play';
+                btnPlay.className = "w-full py-2.5 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg font-bold transition-all active:scale-95 flex justify-center shadow-sm";
+                clearInterval(playTimer);
+            }
+        }
+
+        function setMode(mode) {
+            if (isPlaying) togglePlay();
+            currentMode = mode;
+
+            [btnGreedy, btnBeam, btnSampling].forEach(b => b.className = "px-2 py-2 rounded-lg font-medium text-xs xl:text-sm transition-all active:scale-95 text-slate-500 hover:text-slate-800 hover:bg-slate-200/50 flex flex-col items-center justify-center gap-1");
+            [greedyOpts, beamOpts, samplingOpts].forEach(o => { o.classList.add('hidden'); o.classList.remove('flex', 'flex-col'); });
+
+            if (mode === 'greedy') {
+                btnGreedy.className = "px-2 py-2 rounded-lg font-bold text-xs xl:text-sm transition-all active:scale-95 bg-white text-yellow-700 shadow-sm border border-yellow-200/50 flex flex-col items-center justify-center gap-1";
+                greedyOpts.classList.remove('hidden'); greedyOpts.classList.add('flex');
+            } else if (mode === 'beam') {
+                btnBeam.className = "px-2 py-2 rounded-lg font-bold text-xs xl:text-sm transition-all active:scale-95 bg-white text-blue-700 shadow-sm border border-blue-200/50 flex flex-col items-center justify-center gap-1";
+                beamOpts.classList.remove('hidden'); beamOpts.classList.add('flex', 'flex-col');
+            } else if (mode === 'sampling') {
+                btnSampling.className = "px-2 py-2 rounded-lg font-bold text-xs xl:text-sm transition-all active:scale-95 bg-white text-purple-700 shadow-sm border border-purple-200/50 flex flex-col items-center justify-center gap-1";
+                samplingOpts.classList.remove('hidden'); samplingOpts.classList.add('flex', 'flex-col');
+                sampledPaths = {};
+            }
+
+            currentStep = 0;
+            evaluateGraph();
+            updateUIText();
+        }
+
+        // --- Event Listeners ---
+        btnPlay.onclick = togglePlay;
+        btnGreedy.onclick = () => setMode('greedy');
+        btnBeam.onclick = () => setMode('beam');
+        btnSampling.onclick = () => setMode('sampling');
+
+        slider.oninput = (e) => {
+            beamWidth = parseInt(e.target.value);
+            kDisplay.textContent = beamWidth;
+            if (currentStep === 0) currentStep = MAX_STEPS; // Auto-show full path if at start
+            if (isPlaying) togglePlay();
+            evaluateGraph(); updateUIText();
+        };
+
+        lenNormToggle.onchange = (e) => {
+            lengthNorm = e.target.checked;
+            legendScore.innerHTML = lengthNorm ? "Length Normalized Score (Score &divide; tokens)" : "Cumulative Score (Raw sum)";
+            if (currentStep === 0) currentStep = MAX_STEPS;
+            evaluateGraph(); updateUIText();
+        };
+
+        tempSlider.oninput = (e) => {
+            temperature = parseFloat(e.target.value);
+            tempDisplay.textContent = temperature.toFixed(1);
+            sampledPaths = {}; // clear rolls on temp change
+            if (currentStep === 0) currentStep = MAX_STEPS;
+            if (isPlaying) togglePlay();
+            evaluateGraph(); updateUIText();
+        };
+
+        btnReroll.onclick = () => {
+            sampledPaths = {}; // clear previous dice rolls
+            if (currentStep === 0) currentStep = MAX_STEPS; // instantly show a full sequence
+            if (isPlaying) togglePlay();
+            evaluateGraph(); updateUIText(); // Updates the canvas immediately at the current step
+        };
+
+        btnReset.onclick = () => {
+            if (isPlaying) togglePlay();
+            currentStep = 0;
+            updateUIText();
+        };
+
+        btnPrev.onclick = () => { if (isPlaying) togglePlay(); if(currentStep > 0) { currentStep--; updateUIText(); } };
+        btnNext.onclick = () => { if (isPlaying) togglePlay(); if(currentStep < MAX_STEPS) { currentStep++; updateUIText(); } };
+
+        // Initialize
+        evaluateGraph();
+        updateUIText();
+        requestAnimationFrame(render);
+
+    </script>
+</body>
+</html>

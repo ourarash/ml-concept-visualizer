@@ -3,375 +3,679 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Transformer KV Cache Visualizer</title>
+    <title>KV Cache Explainer</title>
+
+    <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <style>
-        ::-webkit-scrollbar { width: 8px; }
-        ::-webkit-scrollbar-track { background: #f1f5f9; }
-        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
-        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
-        
-        .matrix-cell {
-            transition: all 0.3s ease;
-        }
-        .cached {
-            opacity: 0.6;
-            background-color: #f1f5f9;
-            border-style: dashed !important;
-        }
-        .computed {
-            animation: pulse 2s infinite;
-            z-index: 10;
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.4); }
-            50% { transform: scale(1.03); box-shadow: 0 0 0 10px rgba(59, 130, 246, 0); }
-            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
-        }
-        .write-animation {
-            animation: slideIn 0.5s ease-out;
-        }
-        @keyframes slideIn {
-            from { transform: translateY(-20px); opacity: 0; }
-            to { transform: translateY(0); opacity: 1; }
-        }
-    </style>
-    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    <!-- React and ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+
+    <!-- Babel for in-browser JSX compilation -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
 </head>
-<body class="bg-slate-100 text-slate-800 min-h-screen flex items-center justify-center p-4 lg:p-8">
+<body class="bg-gray-200 py-8 px-4 min-h-screen">
 
-    <div class="max-w-6xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col h-[90vh]">
-        
-        <!-- Header & Controls -->
-        <div class="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
-            <div>
-                <h1 class="text-xl font-bold text-slate-900">KV Cache Visualizer</h1>
-                <p class="text-xs text-slate-500 italic">"Don't calculate what you already know."</p>
-            </div>
-            
-            <div class="flex items-center gap-3">
-                <button id="reset-btn" class="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
-                    Reset
-                </button>
-                <div class="flex bg-white border border-slate-300 rounded-lg p-1 shadow-sm">
-                    <button id="prev-btn" class="p-2 hover:bg-slate-50 rounded disabled:opacity-30" disabled>
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
-                    </button>
-                    <div class="px-4 flex items-center font-mono font-bold text-blue-600">
-                        Step <span id="step-count" class="ml-1">1</span>
-                    </div>
-                    <button id="next-btn" class="p-2 hover:bg-slate-50 rounded">
-                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
-                    </button>
-                </div>
-            </div>
-        </div>
+    <div id="root"></div>
 
-        <div class="flex flex-col lg:flex-row flex-grow overflow-hidden">
-            <!-- Left Panel: The Visualization -->
-            <div class="flex-grow p-4 lg:p-6 flex flex-col gap-8 bg-white overflow-y-auto">
-                
-                <!-- SEQUENCE DISPLAY -->
-                <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 flex items-center gap-4 shadow-sm">
-                    <span class="text-xs font-bold text-slate-500 uppercase tracking-wider">Generated Text:</span>
-                    <div id="sequence-display" class="flex flex-wrap gap-2 font-mono text-sm">
-                        <!-- Tokens injected here -->
-                    </div>
-                </div>
+    <script type="text/babel">
+        const { useState } = React;
 
-                <!-- STAGE 1: Current Computation -->
-                <div class="border-2 border-blue-100 bg-blue-50/30 rounded-2xl p-6 relative">
-                    <div class="absolute -top-3 left-6 bg-blue-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">Current GPU Work</div>
-                    
-                    <div id="viz-container" class="relative w-full flex flex-col gap-10">
-                        
-                        <!-- Top Row: Q x K^T -->
-                        <div class="flex flex-wrap items-center justify-center gap-4">
-                            <div class="flex flex-col items-center gap-2">
-                                <span class="text-[10px] font-bold text-slate-400">QUERY</span>
-                                <div id="q-matrix" class="w-24 h-8 bg-yellow-400 rounded flex flex-col items-center justify-center text-[10px] font-bold text-yellow-900 border border-yellow-500 shadow-sm computed leading-tight">
-                                    <span>Q<sub><span class="current-step-num">1</span></sub></span>
-                                    <span id="q-token-label" class="text-[8px] font-normal opacity-80"></span>
-                                </div>
-                                <span class="text-[9px] font-mono text-slate-400">(1, d)</span>
-                            </div>
+        const KVCacheExplainer = () => {
+          const [currentToken, setCurrentToken] = useState(1);
+          const [hoveredOutput, setHoveredOutput] = useState(null);
+          const [hoveredScore, setHoveredScore] = useState(null);
+          const [showMinimap, setShowMinimap] = useState(false);
+          const maxTokens = 4;
 
-                            <span class="text-xl font-bold text-slate-300">×</span>
-
-                            <div class="flex flex-col items-center gap-2">
-                                <span class="text-[10px] font-bold text-slate-400">KEYS (\(K^T\))</span>
-                                <div id="k-matrix" class="flex gap-1 p-1 bg-emerald-50 border border-emerald-200 rounded-lg min-h-[40px]">
-                                    <!-- Dynamic content -->
-                                </div>
-                                <span class="text-[9px] font-mono text-slate-400" id="k-dim">(d, 1)</span>
-                            </div>
-
-                            <span class="text-xl font-bold text-slate-300">=</span>
-
-                            <div class="flex flex-col items-center gap-2">
-                                <span class="text-[10px] font-bold text-slate-400">ATTN SCORES</span>
-                                <div id="score-matrix" class="flex gap-1 p-1 bg-slate-50 border border-slate-200 rounded-lg min-h-[30px]">
-                                    <!-- Dynamic content -->
-                                </div>
-                            </div>
-                        </div>
-
-                        <!-- Bottom Row: Weights x V -->
-                        <div class="flex flex-wrap items-center justify-center gap-4">
-                            <div class="flex flex-col items-center gap-2">
-                                <span class="text-[10px] font-bold text-slate-400">SOFTMAX</span>
-                                <div id="score-matrix-copy" class="flex gap-1 p-1 bg-purple-50 border border-purple-200 rounded-lg">
-                                    <!-- Dynamic content -->
-                                </div>
-                            </div>
-
-                            <span class="text-xl font-bold text-slate-300">×</span>
-
-                            <div class="flex flex-col items-center gap-2">
-                                <span class="text-[10px] font-bold text-slate-400">VALUES</span>
-                                <div id="v-matrix" class="flex flex-col gap-1 p-1 bg-orange-50 border border-orange-200 rounded-lg min-w-[40px]">
-                                    <!-- Dynamic content -->
-                                </div>
-                            </div>
-
-                            <span class="text-xl font-bold text-slate-300">=</span>
-
-                            <div class="flex flex-col items-center gap-2">
-                                <span class="text-[10px] font-bold text-slate-400">OUTPUT</span>
-                                <div class="w-24 h-8 bg-blue-600 rounded flex items-center justify-center text-[10px] font-bold text-white shadow-lg">New Hidden</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <!-- STAGE 2: The Cache Bank -->
-                <div class="border-2 border-slate-200 bg-slate-50/50 rounded-2xl p-6 relative mt-4">
-                    <div class="absolute -top-3 left-6 bg-slate-500 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">KV Cache (RAM)</div>
-                    
-                    <div class="grid grid-cols-2 gap-8">
-                        <!-- Key Cache -->
-                        <div class="space-y-3">
-                            <div class="flex justify-between items-center">
-                                <span class="text-[10px] font-bold text-emerald-700">KEY BANK</span>
-                                <span class="text-[9px] text-slate-400 font-mono" id="k-cache-size">0 / 5 stored</span>
-                            </div>
-                            <div id="k-cache-bank" class="flex gap-2 p-3 bg-white border border-slate-200 rounded-xl min-h-[60px] items-center">
-                                <!-- Cached Keys -->
-                            </div>
-                        </div>
-
-                        <!-- Value Cache -->
-                        <div class="space-y-3">
-                            <div class="flex justify-between items-center">
-                                <span class="text-[10px] font-bold text-orange-700">VALUE BANK</span>
-                                <span class="text-[9px] text-slate-400 font-mono" id="v-cache-size">0 / 5 stored</span>
-                            </div>
-                            <div id="v-cache-bank" class="flex gap-2 p-3 bg-white border border-slate-200 rounded-xl min-h-[60px] items-center">
-                                <!-- Cached Values -->
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Right Panel: Info -->
-            <div class="w-full lg:w-4/12 bg-slate-50 p-6 border-l border-slate-200 flex flex-col gap-6 overflow-y-auto">
-                <div class="space-y-4">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">How it works</h3>
-                    
-                    <div class="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-3">
-                        <div id="step-desc" class="text-sm font-medium text-slate-800"></div>
-                        <p class="text-xs text-slate-500 leading-relaxed">
-                            Every time we generate a token, we compute its Key and Value. We then <b>save them</b> to the Cache Bank.
-                        </p>
-                        <p class="text-xs text-slate-500 leading-relaxed">
-                            For the <i>next</i> token, we don't re-calculate Token 1's K and V. We just fetch them from the bank.
-                        </p>
-                    </div>
-
-                    <div class="space-y-3">
-                        <h4 class="text-[10px] font-bold text-slate-500 uppercase">Step Details</h4>
-                        <div class="space-y-2">
-                            <div class="flex items-center gap-2 text-xs">
-                                <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
-                                <span><span class="font-bold text-emerald-600">Keys:</span> \((d, \text{pos})\) matrix</span>
-                            </div>
-                            <div class="flex items-center gap-2 text-xs">
-                                <div class="w-2 h-2 rounded-full bg-orange-400"></div>
-                                <span><span class="font-bold text-orange-600">Values:</span> \((\text{pos}, d)\) matrix</span>
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="p-4 bg-emerald-50 rounded-lg border border-emerald-100">
-                        <h4 class="text-[10px] font-bold text-emerald-700 uppercase mb-1">Efficiency Gain</h4>
-                        <p class="text-[11px] text-emerald-800">
-                            By reusing <span id="reuse-count" class="font-bold">0</span> vectors, we saved <b><span id="saved-ops">0</span></b> redundant matrix operations this step.
-                        </p>
-                    </div>
-
-                    <div class="p-4 bg-purple-50 rounded-lg border border-purple-100">
-                        <h4 class="text-[10px] font-bold text-purple-700 uppercase mb-1">RAM Cost (Footprint)</h4>
-                        <p class="text-[11px] text-purple-800">
-                            Cache size: <b id="ram-usage">0 KB</b>
-                        </p>
-                        <p class="text-[9px] text-purple-600 mt-1 leading-tight">
-                            (Grows linearly with sequence length: pos × layers × heads × d_head × 2 bytes)
-                        </p>
-                    </div>
-
-                    <!-- NEW: Mathematical explanation for not caching Q -->
-                    <div class="p-4 bg-yellow-50 rounded-lg border border-yellow-200 shadow-sm relative overflow-hidden">
-                        <div class="absolute -right-4 -top-4 text-yellow-100 opacity-50">
-                            <svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
-                        </div>
-                        <h4 class="text-[10px] font-bold text-yellow-800 uppercase mb-2 relative z-10">Why Not Cache Q? (The Math)</h4>
-                        <div class="overflow-x-auto text-center mb-2 text-xs relative z-10 py-1 font-semibold text-slate-800">
-                            \(\text{Out}_t = \text{softmax}(Q_t \cdot K_{\le t}^T) \cdot V_{\le t}\)
-                        </div>
-                        <p class="text-[10px] text-yellow-900 leading-relaxed relative z-10">
-                            Look at the formulation for generating step \(t\). It <b>only requires \(Q_t\)</b>. 
-                            The previous queries (\(Q_1 \dots Q_{t-1}\)) were consumed to generate previous words and are <b>mathematically never referenced again</b>. Storing them would just waste RAM!
-                        </p>
-                    </div>
-
-                </div>
-
-                <div class="mt-auto pt-4 text-center">
-                    <div class="text-[11px] font-mono text-slate-400">
-                        Attention Complexity: \(O(n^2)\) &rarr; \(O(n)\) per token
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <script>
-        let currentStep = 1;
-        const maxSteps = 5;
-        const tokens = ["The", "robot", "wrote", "a", "poem"]; // Concrete sequence
-
-        const nextBtn = document.getElementById('next-btn');
-        const prevBtn = document.getElementById('prev-btn');
-        const resetBtn = document.getElementById('reset-btn');
-        const stepCountText = document.getElementById('step-count');
-        const stepNumDisplays = document.querySelectorAll('.current-step-num');
-        const stepDesc = document.getElementById('step-desc');
-        
-        const kMatrix = document.getElementById('k-matrix');
-        const vMatrix = document.getElementById('v-matrix');
-        const scoreMatrix = document.getElementById('score-matrix');
-        const scoreMatrixCopy = document.getElementById('score-matrix-copy');
-        const kCacheBank = document.getElementById('k-cache-bank');
-        const vCacheBank = document.getElementById('v-cache-bank');
-        
-        const kDim = document.getElementById('k-dim');
-        const kCacheSize = document.getElementById('k-cache-size');
-        const vCacheSize = document.getElementById('v-cache-size');
-        const reuseCount = document.getElementById('reuse-count');
-        const savedOps = document.getElementById('saved-ops');
-        
-        const sequenceDisplay = document.getElementById('sequence-display');
-        const qTokenLabel = document.getElementById('q-token-label');
-        const ramUsage = document.getElementById('ram-usage');
-
-        function updateStep() {
-            stepCountText.innerText = currentStep;
-            stepNumDisplays.forEach(el => el.innerText = currentStep);
-            
-            prevBtn.disabled = currentStep === 1;
-            nextBtn.disabled = currentStep === maxSteps;
-
-            if (currentStep === 1) {
-                stepDesc.innerHTML = "Generating <b>Token 1</b>: Everything is new. We calculate <span class='text-emerald-600'>K1</span> and <span class='text-orange-600'>V1</span> for the first time.";
-            } else {
-                stepDesc.innerHTML = `Generating <b>Token ${currentStep}</b>: We fetch <span class='text-slate-400'>1 to ${currentStep-1}</span> from cache and only calculate <span class='text-emerald-600 font-bold'>Token ${currentStep}</span>.`;
+          const steps = [
+            {
+              title: "Token 1: Initial State",
+              desc: "For the first token, both methods are identical. We compute Q, K, and V for Token 1. The faint lines in Q, K, and V represent 'emb_size' (the embedding dimension). They are matrices, not just single numbers!"
+            },
+            {
+              title: "Token 2: Cache Begins",
+              desc: "To predict Token 2, 'Without Cache' recalculates everything. Notice the 🗑️ and 💾 icons! It recalculates Q1 and the old scores even though they are NEVER used again (🗑️). 'With Cache' smartly loads K1 and V1 (💾) and skips the garbage."
+            },
+            {
+              title: "Token 3: Computations Diverge",
+              desc: "Look at the faded out rows in 'Without Cache'. We are performing heavy matrix multiplications to generate Q1, Q2, and their scores, only to instantly throw them away. 'With Cache' only computes the active (fully opaque) row."
+            },
+            {
+              title: "Token 4: Massive Savings",
+              desc: "For Token 4, 'Without Cache' computes 16 attention scores, but 12 of them are instantly discarded (🗑️). 'With Cache' only computes the 4 active scores needed. It achieves this by retaining the Keys and Values in memory (💾)."
             }
+          ];
 
-            reuseCount.innerText = currentStep - 1;
-            savedOps.innerText = (currentStep - 1) * 2; // Rough approximation (1 for K, 1 for V)
+          const handleNext = () => setCurrentToken(prev => Math.min(prev + 1, maxTokens));
+          const handlePrev = () => setCurrentToken(prev => Math.max(prev - 1, 1));
+          const handleReset = () => setCurrentToken(1);
 
-            // Mock RAM calculation (e.g., 2 bytes per float16, 512 dim, 12 layers) -> arbitrary scalar for visualization
-            const mockKbPerToken = 12.5; 
-            ramUsage.innerText = `${((currentStep - 1) * mockKbPerToken).toFixed(1)} KB`;
+          const range = (n) => Array.from({ length: n }, (_, i) => i + 1);
 
-            render();
-        }
+          const colors = {
+            q: "bg-[#fde68a] border-[#d97706] text-amber-900",
+            kNew: "bg-[#bbf7d0] border-[#16a34a] text-green-900",
+            vNew: "bg-[#fed7aa] border-[#ea580c] text-orange-900",
+            cache: "bg-[#c4b5fd] border-[#7c3aed] text-purple-900",
+            attn: "bg-[#d9f99d] border-[#65a30d] text-lime-900",
+            score: "bg-[#bfdbfe] border-[#3b82f6] text-blue-900",
+          };
 
-        function render() {
-            // Render Sequence Text
-            sequenceDisplay.innerHTML = '';
-            for(let i=0; i<currentStep; i++) {
-                const t = document.createElement('span');
-                const isCurrent = i === currentStep - 1;
-                t.className = `px-2 py-1 rounded transition-all duration-300 ${isCurrent ? 'bg-blue-100 text-blue-700 font-bold border border-blue-300 shadow-sm scale-105' : 'bg-white border border-slate-200 text-slate-500'}`;
-                t.innerText = tokens[i];
-                sequenceDisplay.appendChild(t);
+          const gridCols = ['grid-cols-1', 'grid-cols-2', 'grid-cols-3', 'grid-cols-4'][currentToken - 1];
+
+          const isQHovered = (i, section) => {
+            if (hoveredOutput !== null) {
+              return hoveredOutput.section === section && hoveredOutput.r === i;
             }
-            
-            qTokenLabel.innerText = `("${tokens[currentStep - 1]}")`;
-
-            // Render Interaction Row
-            kMatrix.innerHTML = '';
-            vMatrix.innerHTML = '';
-            scoreMatrix.innerHTML = '';
-            scoreMatrixCopy.innerHTML = '';
-
-            for (let i = 1; i <= currentStep; i++) {
-                const isCached = i < currentStep;
-                const tokenWord = tokens[i-1];
-                
-                // K transpose entry
-                const kCol = document.createElement('div');
-                kCol.className = `w-8 h-24 rounded border flex items-center justify-center text-[9px] font-bold relative group ${isCached ? 'cached border-slate-300' : 'bg-emerald-400 text-emerald-900 border-emerald-600 computed write-animation'}`;
-                kCol.innerHTML = `
-                    <span class="rotate-90 whitespace-nowrap">K<sub>${i}</sub> <span class="font-normal opacity-70">(${tokenWord})</span></span>
-                `;
-                kMatrix.appendChild(kCol);
-
-                // V entry
-                const vRow = document.createElement('div');
-                vRow.className = `w-24 h-8 rounded border flex flex-col items-center justify-center text-[9px] font-bold leading-tight ${isCached ? 'cached border-slate-300' : 'bg-orange-400 text-orange-900 border-orange-600 computed write-animation'}`;
-                vRow.innerHTML = `<span>V<sub>${i}</sub></span><span class="font-normal opacity-70 text-[8px]">"${tokenWord}"</span>`;
-                vMatrix.appendChild(vRow);
-
-                // Score cells
-                const s = document.createElement('div');
-                s.className = `w-6 h-6 rounded border border-slate-200 bg-slate-100 flex items-center justify-center text-[8px]`;
-                s.innerText = `s${i}`;
-                scoreMatrix.appendChild(s);
-
-                const sc = s.cloneNode(true);
-                sc.className = `w-6 h-6 rounded border border-purple-400 bg-purple-200 text-purple-900 font-bold text-[8px]`;
-                scoreMatrixCopy.appendChild(sc);
+            if (hoveredScore !== null) {
+              return hoveredScore.section === section && hoveredScore.r === i;
             }
-            kDim.innerText = `(d, ${currentStep})`;
+            return false;
+          };
 
-            // Render Cache Bank
-            kCacheBank.innerHTML = '';
-            vCacheBank.innerHTML = '';
-            for (let i = 1; i < currentStep; i++) {
-                const tokenWord = tokens[i-1];
+          const isQDimmed = (i, section) => {
+            if (hoveredOutput === null && hoveredScore === null) return false;
+            return !isQHovered(i, section);
+          };
 
-                const kItem = document.createElement('div');
-                kItem.className = "w-12 h-12 rounded-lg bg-emerald-50 border border-emerald-200 flex flex-col items-center justify-center text-[10px] font-bold text-emerald-700 shadow-sm leading-tight";
-                kItem.innerHTML = `<span>K<sub>${i}</sub></span><span class="text-[8px] font-normal opacity-70">"${tokenWord}"</span>`;
-                kCacheBank.appendChild(kItem);
-
-                const vItem = document.createElement('div');
-                vItem.className = "w-12 h-12 rounded-lg bg-orange-50 border border-orange-200 flex flex-col items-center justify-center text-[10px] font-bold text-orange-700 shadow-sm leading-tight";
-                vItem.innerHTML = `<span>V<sub>${i}</sub></span><span class="text-[8px] font-normal opacity-70">"${tokenWord}"</span>`;
-                vCacheBank.appendChild(vItem);
+          const isKHovered = (i, section) => {
+            if (hoveredOutput !== null) {
+              return hoveredOutput.section === section;
             }
-            kCacheSize.innerText = `${currentStep-1} / ${maxSteps} tokens`;
-            vCacheSize.innerText = `${currentStep-1} / ${maxSteps} tokens`;
-        }
+            if (hoveredScore !== null) {
+              return hoveredScore.section === section && hoveredScore.c === i;
+            }
+            return false;
+          };
 
-        nextBtn.addEventListener('click', () => { if(currentStep < maxSteps) { currentStep++; updateStep(); } });
-        prevBtn.addEventListener('click', () => { if(currentStep > 1) { currentStep--; updateStep(); } });
-        resetBtn.addEventListener('click', () => { currentStep = 1; updateStep(); });
+          const isKDimmed = (i, section) => {
+            if (hoveredOutput === null && hoveredScore === null) return false;
+            return !isKHovered(i, section);
+          };
 
-        updateStep();
+          const isVHovered = (i, section) => {
+            if (hoveredScore !== null) return false;
+            if (hoveredOutput !== null) {
+              return hoveredOutput.section === section;
+            }
+            return false;
+          };
+
+          const isVDimmed = (i, section) => {
+            if (hoveredOutput === null && hoveredScore === null) return false;
+            return !isVHovered(i, section);
+          };
+
+          const getVHighlightedCol = (section) => {
+            if (hoveredOutput !== null && hoveredOutput.section === section) {
+              return hoveredOutput.c;
+            }
+            return null;
+          };
+
+          const isScoreHovered = (r, c, section) => {
+            if (hoveredOutput !== null) {
+              return hoveredOutput.section === section && hoveredOutput.r === r;
+            }
+            if (hoveredScore !== null) {
+              return hoveredScore.section === section && hoveredScore.r === r && hoveredScore.c === c;
+            }
+            return false;
+          };
+
+          const isScoreDimmed = (r, c, section) => {
+            if (hoveredOutput === null && hoveredScore === null) return false;
+            return !isScoreHovered(r, c, section);
+          };
+
+          const isOutputHovered = (i, section) => {
+            if (hoveredScore !== null) return false;
+            if (hoveredOutput !== null) {
+              return hoveredOutput.section === section && hoveredOutput.r === i;
+            }
+            return false;
+          };
+
+          const isOutputDimmed = (i, section) => {
+            if (hoveredOutput === null && hoveredScore === null) return false;
+            return !isOutputHovered(i, section);
+          };
+
+          const getOutputHighlightedCol = (r, section) => {
+            if (hoveredOutput !== null && hoveredOutput.section === section && hoveredOutput.r === r) {
+              return hoveredOutput.c;
+            }
+            return null;
+          };
+
+          const MathSymbol = ({ symbol }) => (
+            <div className="flex items-center justify-center px-2 sm:px-4 font-bold text-lg sm:text-2xl h-[140px] sm:h-[172px]">
+              {symbol}
+            </div>
+          );
+
+          const MatrixWrapper = ({ title, shape, highlight, children }) => (
+            <div className="flex flex-col items-center">
+              <div className="font-semibold mb-2 flex items-center gap-1.5">
+                {title}
+                {highlight && (
+                  <div className="relative flex h-2 w-2" title="Required Input">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                  </div>
+                )}
+              </div>
+              <div className={`flex flex-col w-full max-w-[120px] sm:max-w-[150px] transition-all duration-300 ${highlight ? 'ring-2 ring-blue-400 ring-offset-2 rounded-sm' : ''}`}>
+                {children}
+              </div>
+              <div className="text-xs sm:text-sm text-gray-500 mt-2">{shape}</div>
+            </div>
+          );
+
+          const CellRow = ({ text, colorClass, status, isHovered, isDimmed, onMouseEnterCol, onMouseLeaveCol, highlightedCol }) => {
+            const isDiscarded = status === 'discarded';
+            const isSaved = status === 'saved';
+
+            return (
+              <div
+                className={`relative h-8 sm:h-10 border flex overflow-hidden transition-all duration-300 ${colorClass} ${isDiscarded && !isHovered ? 'opacity-40' : ''} ${isHovered ? 'ring-2 ring-indigo-500 z-30 shadow-md font-bold brightness-105' : ''} ${isDimmed ? 'opacity-20 grayscale-[50%]' : ''}`}
+              >
+                <div className="absolute inset-0 flex">
+                  {[0, 1, 2, 3].map(colIndex => (
+                    <div
+                      key={colIndex}
+                      onMouseEnter={() => onMouseEnterCol && onMouseEnterCol(colIndex)}
+                      onMouseLeave={() => onMouseLeaveCol && onMouseLeaveCol(colIndex)}
+                      className={`flex-1 border-r border-black/10 transition-colors duration-200 ${onMouseEnterCol ? 'cursor-pointer hover:bg-white/40' : ''} ${highlightedCol === colIndex ? 'bg-indigo-600/50 backdrop-brightness-110' : ''}`}
+                    ></div>
+                  ))}
+                </div>
+
+                <div className="relative w-full h-full flex items-center justify-center text-[10px] sm:text-xs font-medium z-10 drop-shadow-sm pointer-events-none">
+                  {text}
+                </div>
+
+                {isDiscarded && <span className="absolute right-1 top-1 text-[10px] z-20 pointer-events-none" title="Calculated but never used again">🗑️</span>}
+                {isSaved && <span className="absolute right-1 top-1 text-[10px] z-20 pointer-events-none" title="Needed for future steps">💾</span>}
+              </div>
+            );
+          };
+
+          const CellCol = ({ text, colorClass, status, isHovered, isDimmed }) => {
+            const isDiscarded = status === 'discarded';
+            const isSaved = status === 'saved';
+
+            return (
+              <div className={`relative w-8 sm:w-10 h-full border flex flex-col overflow-hidden transition-all duration-300 ${colorClass} ${isDiscarded && !isHovered ? 'opacity-40' : ''} ${isHovered ? 'ring-2 ring-indigo-500 z-30 shadow-md font-bold brightness-105' : ''} ${isDimmed ? 'opacity-20 grayscale-[50%]' : ''}`}>
+                <div className="absolute inset-0 flex flex-col pointer-events-none">
+                  {[0, 1, 2, 3].map(rowIndex => (
+                    <div key={rowIndex} className="flex-1 border-b border-black/10"></div>
+                  ))}
+                </div>
+
+                <div className="relative w-full h-full flex items-center justify-center z-10 drop-shadow-sm">
+                  <div className="[writing-mode:vertical-rl] rotate-180 text-[10px] sm:text-xs font-medium">
+                    {text}
+                  </div>
+                </div>
+
+                {(isDiscarded || isSaved) && (
+                  <span className="absolute top-1 right-1 sm:right-2 text-[10px] z-20 pointer-events-none" title={isDiscarded ? "Never used again" : "Needed for future steps"}>
+                    {isDiscarded ? '🗑️' : '💾'}
+                  </span>
+                )}
+              </div>
+            );
+          };
+
+          return (
+            <div className="max-w-6xl mx-auto p-4 sm:p-6 bg-white rounded-xl shadow-lg font-sans text-gray-800">
+
+              <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-8 border-b pb-4 gap-4">
+                <div>
+                  <h1 className="text-3xl font-bold text-gray-900">Caching Key and Value</h1>
+                  <p className="text-gray-600 mt-1">Generating Token {showMinimap ? "50" : currentToken} (Interactive Breakdown)</p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => setShowMinimap(!showMinimap)}
+                    className={`px-4 py-2 rounded font-medium transition-colors shadow-sm ${showMinimap ? 'bg-indigo-600 hover:bg-indigo-700 text-white' : 'bg-indigo-100 hover:bg-indigo-200 text-indigo-700'}`}
+                  >
+                    {showMinimap ? 'Back to Step-by-Step ↩' : 'Jump to Token 50 🚀'}
+                  </button>
+
+                  {!showMinimap && (
+                    <React.Fragment>
+                      <button
+                        onClick={handleReset}
+                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded font-medium transition-colors text-gray-700"
+                      >
+                        Reset
+                      </button>
+                      <button
+                        onClick={handlePrev}
+                        disabled={currentToken === 1}
+                        className="px-4 py-2 bg-gray-100 hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed rounded font-medium transition-colors text-gray-700"
+                      >
+                        Back
+                      </button>
+                      <button
+                        onClick={handleNext}
+                        disabled={currentToken === maxTokens}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 disabled:cursor-not-allowed rounded font-medium transition-colors shadow-sm"
+                      >
+                        Next Token
+                      </button>
+                    </React.Fragment>
+                  )}
+                </div>
+              </div>
+
+              {showMinimap ? (
+                <div className="bg-indigo-50 border border-indigo-200 p-4 rounded-lg mb-8 shadow-sm">
+                  <h3 className="font-bold text-indigo-900 mb-1">Token 50: The Scale of the Problem</h3>
+                  <p className="text-indigo-800 text-sm sm:text-base">
+                    At Token 50, "Without Cache" performs a heavy Matrix Multiplication resulting in <b>2,500</b> individual vector dot products from scratch. "With Cache" computes only the <b>50</b> new active relationships, instantly reusing 49 past tokens (~784 KB). While 784 KB seems small, real models have dozens of layers and massive context windows, turning this cache into a severe memory bottleneck (see below!).
+                  </p>
+                </div>
+              ) : (
+                <div className="bg-blue-50 border border-blue-200 p-4 rounded-lg mb-4 min-h-[90px] shadow-sm">
+                  <h3 className="font-bold text-blue-900 mb-1">{steps[currentToken - 1].title}</h3>
+                  <p className="text-blue-800 text-sm sm:text-base">{steps[currentToken - 1].desc}</p>
+                </div>
+              )}
+
+              {!showMinimap && (
+                <div className="flex flex-col sm:flex-row gap-4 mb-8">
+                  <div className="flex-1 bg-white border border-gray-200 rounded-lg p-3 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-gray-400"></div>
+                    <h4 className="text-[10px] font-bold text-gray-500 uppercase tracking-wider mb-2 pl-2">Without Cache Stats</h4>
+                    <div className="flex justify-between items-center pl-2">
+                      <span className="text-sm text-gray-600 font-medium">Ops Required (Q × Kᵀ):</span>
+                      <span className="font-mono font-bold text-red-600 text-base">{currentToken * currentToken} ops</span>
+                    </div>
+                    <div className="flex justify-between items-center pl-2 mt-1">
+                      <span className="text-sm text-gray-600 font-medium">Memory Used:</span>
+                      <span className="font-mono font-bold text-gray-500 text-base">0 tokens</span>
+                    </div>
+                  </div>
+
+                  <div className="flex-1 bg-purple-50 border border-purple-200 rounded-lg p-3 shadow-sm relative overflow-hidden">
+                    <div className="absolute top-0 left-0 w-1 h-full bg-purple-500"></div>
+                    <h4 className="text-[10px] font-bold text-purple-600 uppercase tracking-wider mb-2 pl-2">With Cache Stats</h4>
+                    <div className="flex justify-between items-center pl-2">
+                      <span className="text-sm text-purple-800 font-medium">Ops Required (Q × Kᵀ):</span>
+                      <span className="font-mono font-bold text-green-600 text-base">{currentToken} ops</span>
+                    </div>
+                    <div className="flex justify-between items-center pl-2 mt-1">
+                      <span className="text-sm text-purple-800 font-medium">Memory Used:</span>
+                      <span className="font-mono font-bold text-purple-600 text-base flex items-center gap-1">
+                        {currentToken - 1} KV tokens <span className="text-xs">💾</span>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {!showMinimap && (
+                <div className="text-center text-sm font-medium text-indigo-600 mb-4 animate-pulse">
+                  ✨ Hover over INDIVIDUAL CELLS in the "Output (Z)" matrix or the "Attention Scores" to trace the math! ✨
+                </div>
+              )}
+
+              {showMinimap ? (
+                <div className="relative border-2 border-dashed border-indigo-200 rounded-xl p-4 sm:p-8 bg-indigo-50/30 flex flex-col items-center overflow-x-auto">
+                  <h3 className="text-lg sm:text-xl font-bold text-indigo-900 mb-8 uppercase tracking-widest border-b-2 border-indigo-200 pb-2">Attention Scores Matrix at Token 50</h3>
+
+                  <div className="flex flex-col md:flex-row gap-8 w-full max-w-4xl justify-around items-center md:items-start pb-8">
+
+                    <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-md border border-gray-200">
+                      <div className="font-bold mb-4 text-gray-700 text-lg">Without Cache</div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(50, 4px)', gap: '1px' }} className="mb-4 bg-gray-100 p-2 rounded border border-gray-200 shadow-inner">
+                        {Array.from({length: 2500}).map((_, i) => (
+                          <div
+                            key={i}
+                            className={`w-1 h-1 rounded-[1px] ${i >= 2450 ? 'bg-blue-500 shadow-[0_0_2px_rgba(59,130,246,0.8)]' : 'bg-gray-300'}`}
+                            title={i >= 2450 ? 'Active Computation (Needed)' : 'Discarded Computation 🗑️'}
+                          />
+                        ))}
+                      </div>
+
+                      <div className="flex flex-col items-center text-sm text-center">
+                          <div className="text-red-600 font-bold text-lg">2,500 Dot Products</div>
+                          <div className="text-gray-500 mt-1 font-medium bg-gray-100 px-3 py-1 rounded-full border border-gray-200">2,450 instantly discarded 🗑️</div>
+                          <div className="text-gray-400 mt-2 text-xs uppercase tracking-wide">0 Bytes Cache Memory</div>
+                      </div>
+                    </div>
+
+                    <div className="hidden md:flex flex-col items-center justify-center h-[300px]">
+                       <div className="w-px h-full bg-indigo-200 absolute"></div>
+                       <div className="bg-indigo-100 text-indigo-600 font-bold p-3 rounded-full z-10 border-2 border-indigo-200 shadow-sm">VS</div>
+                    </div>
+
+                    <div className="flex flex-col items-center bg-white p-6 rounded-xl shadow-md border-2 border-purple-300 ring-4 ring-purple-50">
+                      <div className="font-bold mb-4 text-purple-700 text-lg">With KV Cache</div>
+
+                      <div className="bg-gray-50 p-2 rounded border border-gray-200 shadow-inner flex flex-col w-full items-center mb-4 relative">
+                        <div style={{ height: '245px' }} className="w-full flex justify-center items-center">
+                          <span className="text-xs text-purple-400/50 font-bold tracking-widest rotate-[-90deg] whitespace-nowrap">Skipped 2,450 calculations!</span>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(50, 4px)', gap: '1px' }}>
+                          {Array.from({length: 50}).map((_, i) => (
+                            <div key={i} className="w-1 h-1 rounded-[1px] bg-blue-500 shadow-[0_0_2px_rgba(59,130,246,0.8)]" title="Active Computation (Needed)" />
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-col items-center text-sm text-center">
+                          <div className="text-green-600 font-bold text-lg">50 Dot Products</div>
+                          <div className="text-purple-700 mt-1 font-medium bg-purple-100 px-3 py-2 rounded-lg border border-purple-200 shadow-sm flex flex-col items-center">
+                            <span>Memory Loaded: 49 Tokens 💾</span>
+                            <span className="text-[10px] opacity-75 mt-0.5 font-mono">~784 KB (float16, 4096 dim)</span>
+                          </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div className="w-full max-w-4xl bg-red-50 border border-red-200 p-6 rounded-xl shadow-sm mt-4 md:mt-0">
+                    <h4 className="text-red-900 font-bold text-lg mb-2 flex items-center gap-2">
+                      <span className="text-2xl">⚠️</span> Why is KV Cache the ultimate memory bottleneck?
+                    </h4>
+                    <p className="text-red-800 text-sm mb-4">
+                      784 KB for 50 tokens is tiny because this diagram only shows <b>1 layer</b>. Real LLMs don't just process 50 tokens through 1 layer. They process <b>up to 100,000+ tokens</b> through <b>dozens of layers</b> for <b>multiple users simultaneously</b>. Here is the real math for a model like Llama-3:
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="bg-white p-3 rounded-lg border border-red-100 shadow-sm text-center flex flex-col justify-center">
+                        <div className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Single Token</div>
+                        <div className="text-lg font-bold text-gray-800">~512 KB</div>
+                        <div className="text-[10px] text-gray-500 mt-1 leading-tight">4096 dim × 2 (K+V) × 2 bytes (fp16)<br/><b>× 32 neural network layers</b></div>
+                      </div>
+                      <div className="bg-white p-3 rounded-lg border border-red-100 shadow-sm text-center flex flex-col justify-center">
+                        <div className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">100k Context Window</div>
+                        <div className="text-lg font-bold text-red-600">~51.2 GB</div>
+                        <div className="text-[10px] text-gray-500 mt-1 leading-tight">VRAM required for just <b>one user's</b> long conversation history.</div>
+                      </div>
+                      <div className="bg-white p-3 rounded-lg border border-red-100 shadow-sm text-center flex flex-col justify-center">
+                        <div className="text-xs text-gray-500 uppercase font-bold tracking-wider mb-1">Batch of 64 Users</div>
+                        <div className="text-lg font-bold text-red-700">&gt; 3.2 Terabytes</div>
+                        <div className="text-[10px] text-gray-500 mt-1 leading-tight">This is why AI companies need clusters of $40,000 GPUs just to hold the cache!</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              ) : (
+
+                <div className="relative border-2 border-dashed border-gray-200 rounded-xl p-4 sm:p-8 bg-gray-50 overflow-x-auto">
+
+                  <div className="flex flex-col relative min-w-[800px]">
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 sm:-translate-x-12 -rotate-90 origin-center font-bold text-gray-500 text-sm sm:text-base tracking-widest uppercase">
+                      Without Cache
+                    </div>
+
+                    <div className="flex items-start justify-center pl-8">
+                      <MatrixWrapper title="Q" shape={`(${currentToken}, emb_size)`} highlight={true}>
+                        <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-start">
+                          {range(currentToken).map(i => (
+                            <CellRow
+                              key={`q-${i}`}
+                              text={`Query Token ${i}`}
+                              colorClass={colors.q}
+                              status={i < currentToken ? 'discarded' : 'active'}
+                              isHovered={isQHovered(i, 'nocache')}
+                              isDimmed={isQDimmed(i, 'nocache')}
+                            />
+                          ))}
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="X" />
+
+                      <MatrixWrapper title="Kᵀ" shape={`(emb_size, ${currentToken})`} highlight={true}>
+                        <div className="flex gap-1 h-[140px] sm:h-[172px] justify-start">
+                          {range(currentToken).map(i => (
+                            <CellCol
+                              key={`k-${i}`}
+                              text={`Key Token ${i}`}
+                              colorClass={colors.kNew}
+                              status={i < currentToken ? 'saved' : 'active'}
+                              isHovered={isKHovered(i, 'nocache')}
+                              isDimmed={isKDimmed(i, 'nocache')}
+                            />
+                          ))}
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="=" />
+
+                      <MatrixWrapper title="Attention Scores" shape={`(${currentToken}, ${currentToken})`}>
+                        <div className="flex flex-col h-[140px] sm:h-[172px] justify-start">
+                          <div className={`grid ${gridCols} gap-1 w-full`}>
+                            {range(currentToken).map(r =>
+                              range(currentToken).map(c => {
+                                const isDiscarded = r < currentToken;
+                                const hovered = isScoreHovered(r, c, 'nocache');
+                                const dimmed = isScoreDimmed(r, c, 'nocache');
+
+                                return (
+                                  <div
+                                    key={`qk-${r}-${c}`}
+                                    onMouseEnter={() => setHoveredScore({ r, c, section: 'nocache' })}
+                                    onMouseLeave={() => setHoveredScore(null)}
+                                    className={`relative h-8 sm:h-10 border flex items-center justify-center text-[8px] sm:text-[10px] transition-all duration-300 cursor-pointer hover:brightness-110 ${colors.score} ${isDiscarded && !hovered ? 'opacity-40' : ''} ${hovered ? 'ring-2 ring-indigo-600 scale-[1.1] z-30 shadow-lg font-bold brightness-105' : ''} ${dimmed ? 'opacity-20 grayscale-[50%]' : ''}`}
+                                  >
+                                    Q{r}K{c}
+                                    {isDiscarded && <span className="absolute right-0.5 top-0.5 text-[8px]">🗑️</span>}
+                                  </div>
+                                )
+                              })
+                            )}
+                          </div>
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="X" />
+
+                      <MatrixWrapper title="V" shape={`(${currentToken}, emb_size)`} highlight={true}>
+                        <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-start">
+                          {range(currentToken).map(i => (
+                            <CellRow
+                              key={`v-${i}`}
+                              text={`Value Token ${i}`}
+                              colorClass={colors.vNew}
+                              status={i < currentToken ? 'saved' : 'active'}
+                              isHovered={isVHovered(i, 'nocache')}
+                              isDimmed={isVDimmed(i, 'nocache')}
+                              highlightedCol={getVHighlightedCol('nocache')}
+                            />
+                          ))}
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="=" />
+
+                      <MatrixWrapper title="Output (Z)" shape={`(${currentToken}, emb_size)`}>
+                        <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-start">
+                          {range(currentToken).map(i => (
+                            <CellRow
+                              key={`attn-${i}`}
+                              text={`Token ${i}`}
+                              colorClass={colors.attn}
+                              status={i < currentToken ? 'discarded' : 'active'}
+                              isHovered={isOutputHovered(i, 'nocache')}
+                              isDimmed={isOutputDimmed(i, 'nocache')}
+                              onMouseEnterCol={(col) => setHoveredOutput({ r: i, c: col, section: 'nocache' })}
+                              onMouseLeaveCol={() => setHoveredOutput(null)}
+                              highlightedCol={getOutputHighlightedCol(i, 'nocache')}
+                            />
+                          ))}
+                        </div>
+                      </MatrixWrapper>
+                    </div>
+                  </div>
+
+                  <div className="my-10 border-b-2 border-dashed border-gray-300 w-full min-w-[800px]"></div>
+
+                  <div className="flex flex-col relative min-w-[800px]">
+                    <div className="absolute left-0 top-1/2 -translate-y-1/2 -translate-x-6 sm:-translate-x-12 -rotate-90 origin-center font-bold text-purple-600 text-sm sm:text-base tracking-widest uppercase">
+                      With Cache
+                    </div>
+
+                    <div className="flex items-start justify-center pl-8">
+                      <MatrixWrapper title="Q" shape="(1, emb_size)" highlight={true}>
+                        <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-end">
+                          <CellRow
+                            text={`Query Token ${currentToken}`}
+                            colorClass={colors.q}
+                            status="active"
+                            isHovered={isQHovered(currentToken, 'cache')}
+                            isDimmed={isQDimmed(currentToken, 'cache')}
+                          />
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="X" />
+
+                      <MatrixWrapper title="Kᵀ" shape={`(emb_size, ${currentToken})`} highlight={true}>
+                        <div className="flex gap-1 h-[140px] sm:h-[172px] justify-start">
+                          {range(currentToken - 1).map(i => (
+                            <CellCol
+                              key={`k-cache-${i}`}
+                              text={`Key Token ${i}`}
+                              colorClass={colors.cache}
+                              status="saved"
+                              isHovered={isKHovered(i, 'cache')}
+                              isDimmed={isKDimmed(i, 'cache')}
+                            />
+                          ))}
+                          <CellCol
+                            text={`Key Token ${currentToken}`}
+                            colorClass={colors.kNew}
+                            status="active"
+                            isHovered={isKHovered(currentToken, 'cache')}
+                            isDimmed={isKDimmed(currentToken, 'cache')}
+                          />
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="=" />
+
+                      <MatrixWrapper title="Attention Scores" shape={`(1, ${currentToken})`}>
+                         <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-end">
+                            <div className={`grid ${gridCols} gap-1 w-full`}>
+                              {range(currentToken).map(c => {
+                                const hovered = isScoreHovered(currentToken, c, 'cache');
+                                const dimmed = isScoreDimmed(currentToken, c, 'cache');
+
+                                return (
+                                  <div
+                                    key={`qk-cache-${c}`}
+                                    onMouseEnter={() => setHoveredScore({ r: currentToken, c, section: 'cache' })}
+                                    onMouseLeave={() => setHoveredScore(null)}
+                                    className={`relative h-8 sm:h-10 border flex items-center justify-center text-[8px] sm:text-[10px] transition-all duration-300 cursor-pointer hover:brightness-110 ${colors.score} ${hovered ? 'ring-2 ring-indigo-600 scale-[1.1] z-30 shadow-lg font-bold brightness-105' : ''} ${dimmed ? 'opacity-20 grayscale-[50%]' : ''}`}
+                                  >
+                                    Q{currentToken}K{c}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                         </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="X" />
+
+                      <MatrixWrapper title="V" shape={`(${currentToken}, emb_size)`} highlight={true}>
+                        <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-end">
+                          {range(currentToken - 1).map(i => (
+                            <CellRow
+                              key={`v-cache-${i}`}
+                              text={`Value Token ${i}`}
+                              colorClass={colors.cache}
+                              status="saved"
+                              isHovered={isVHovered(i, 'cache')}
+                              isDimmed={isVDimmed(i, 'cache')}
+                              highlightedCol={getVHighlightedCol('cache')}
+                            />
+                          ))}
+                          <CellRow
+                            text={`Value Token ${currentToken}`}
+                            colorClass={colors.vNew}
+                            status="active"
+                            isHovered={isVHovered(currentToken, 'cache')}
+                            isDimmed={isVDimmed(currentToken, 'cache')}
+                            highlightedCol={getVHighlightedCol('cache')}
+                          />
+                        </div>
+                      </MatrixWrapper>
+
+                      <MathSymbol symbol="=" />
+
+                      <MatrixWrapper title="Output (Z)" shape="(1, emb_size)">
+                        <div className="flex flex-col gap-1 h-[140px] sm:h-[172px] justify-end">
+                          <CellRow
+                            text={`Token ${currentToken}`}
+                            colorClass={colors.attn}
+                            status="active"
+                            isHovered={isOutputHovered(currentToken, 'cache')}
+                            isDimmed={isOutputDimmed(currentToken, 'cache')}
+                            onMouseEnterCol={(col) => setHoveredOutput({ r: currentToken, c: col, section: 'cache' })}
+                            onMouseLeaveCol={() => setHoveredOutput(null)}
+                            highlightedCol={getOutputHighlightedCol(currentToken, 'cache')}
+                          />
+                        </div>
+                      </MatrixWrapper>
+                    </div>
+                  </div>
+
+                </div>
+              )}
+
+              {!showMinimap && (
+                <div className="mt-8 flex flex-col sm:flex-row justify-between items-start gap-4 text-sm text-gray-700">
+                  <div className="flex flex-col gap-2">
+                     <div className="flex items-center gap-2">
+                       <div className="w-4 h-4 border bg-[#c4b5fd] border-[#7c3aed]"></div>
+                       <span>Loaded from Cache</span>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <div className="relative flex h-2 w-2 ml-1">
+                          <span className="absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>
+                        </div>
+                        <span className="ml-1">Required Input Matrix</span>
+                     </div>
+                     <div className="flex items-center gap-2 mt-2">
+                        <span className="text-base">🗑️</span>
+                        <span className="opacity-60 font-medium">Discarded (Calculated, but NEVER used again)</span>
+                     </div>
+                     <div className="flex items-center gap-2">
+                        <span className="text-base">💾</span>
+                        <span className="font-medium text-gray-900">Saved (Kept because we NEED it again)</span>
+                     </div>
+                  </div>
+
+                  <div className="bg-gray-100 p-4 rounded-lg font-medium w-full sm:w-auto self-stretch flex flex-col justify-center">
+                    <div className="flex items-center gap-2 text-green-700">
+                      <span className="text-xl">+</span> Pro: Matrix multiplication is dramatically simpler.
+                    </div>
+                    <div className="flex items-center gap-2 text-red-700 mt-1">
+                      <span className="text-xl">-</span> Con: Requires extra GPU memory to store the purple tokens!
+                    </div>
+                  </div>
+                </div>
+              )}
+
+            </div>
+          );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<KVCacheExplainer />);
     </script>
 </body>
 </html>

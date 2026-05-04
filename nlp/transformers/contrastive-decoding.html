@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Contrastive Decoding Sandbox</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel for in-browser JSX compilation -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo } = React;
+
+    const App = () => {
+      const scenarios = {
+        obama: {
+          prompt: "[Start] Barack Obama was born in Honolulu, Hawaii. He was born in...",
+          tokens: [
+            { id: 1, word: "1961", expertProb: 0.100, amateurProb: 0.001 },
+            { id: 2, word: "Hawaii", expertProb: 0.320, amateurProb: 0.070 },
+            { id: 3, word: "the", expertProb: 0.180, amateurProb: 0.040 },
+            { id: 4, word: "Honolulu", expertProb: 0.160, amateurProb: 0.040 },
+            { id: 5, word: "Washington", expertProb: 0.020, amateurProb: 0.010 },
+          ]
+        },
+        cat: {
+          prompt: '"The cat sat on the..."',
+          tokens: [
+            { id: 1, word: "mat", expertProb: 0.818, amateurProb: 0.904 },
+            { id: 2, word: "roof", expertProb: 0.606, amateurProb: 1.000 },
+            { id: 3, word: "cat", expertProb: 0.904, amateurProb: 0.606 },
+          ]
+        }
+      };
+
+      const [activeScenario, setActiveScenario] = useState('obama');
+      const [tokens, setTokens] = useState(scenarios['obama'].tokens);
+      const [lambda, setLambda] = useState(1.0);
+
+      const handleScenarioChange = (key) => {
+        setActiveScenario(key);
+        setTokens(scenarios[key].tokens);
+      };
+
+      const resetDefaults = () => {
+        setTokens(scenarios[activeScenario].tokens);
+        setLambda(1.0);
+      };
+
+      const updateToken = (id, field, value) => {
+        const numValue = parseFloat(value);
+        const safeValue = Math.max(0.0001, Math.min(1.0, numValue));
+        setTokens(tokens.map(t => t.id === id ? { ...t, [field]: safeValue } : t));
+      };
+
+      const scoredTokens = useMemo(() => {
+        return tokens.map(t => {
+          const logP = Math.log(t.expertProb);
+          const logQ = Math.log(t.amateurProb);
+          const score = logP - (lambda * logQ);
+          return { ...t, logP, logQ, score };
+        }).sort((a, b) => b.score - a.score);
+      }, [tokens, lambda]);
+
+      const winner = scoredTokens[0];
+
+      const formatNum = (num) => Number(num).toFixed(3);
+      const formatScore = (num) => Number(num).toFixed(2);
+
+      return (
+        <div className="min-h-screen bg-slate-50 text-slate-800 p-6 font-sans">
+          <div className="max-w-6xl mx-auto space-y-6">
+
+            <header className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+              <h1 className="text-3xl font-bold text-slate-900 mb-2">Contrastive Decoding Interactive Sandbox</h1>
+              <p className="text-slate-600 mb-4">
+                Adjust the probabilities to see how the <strong>Expert Model</strong> (Relevance) and the <strong>Amateur Model</strong> (Degeneration Penalty) battle to pick the final token.
+              </p>
+
+              <div className="flex flex-wrap items-center gap-4 bg-slate-100 p-4 rounded-xl">
+                <div className="font-semibold">Select Example:</div>
+                <button
+                  onClick={() => handleScenarioChange('obama')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeScenario === 'obama' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  Barack Obama Prompt
+                </button>
+                <button
+                  onClick={() => handleScenarioChange('cat')}
+                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${activeScenario === 'cat' ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-700 hover:bg-slate-50'}`}
+                >
+                  Cat Prompt
+                </button>
+
+                <button
+                  onClick={resetDefaults}
+                  className="px-3 py-2 rounded-lg text-sm font-medium bg-slate-200 text-slate-700 hover:bg-slate-300 transition-colors border border-slate-300 ml-2"
+                  title="Reset to default probabilities"
+                >
+                  ↺ Reset
+                </button>
+
+                <div className="ml-auto flex flex-col gap-1 items-end">
+                  <div className="flex items-center gap-3">
+                    <label className="text-sm font-semibold text-slate-700">
+                      Penalty Multiplier (λ): <span className="text-indigo-600">{lambda.toFixed(1)}</span>
+                    </label>
+                    <input
+                      type="range"
+                      min="0" max="2" step="0.1"
+                      value={lambda}
+                      onChange={(e) => setLambda(parseFloat(e.target.value))}
+                      className="w-32 accent-indigo-600"
+                    />
+                  </div>
+                  <div className="text-[11px] text-slate-500 max-w-[220px] text-right leading-tight">
+                    <strong>λ = 0:</strong> Turns off penalty.<br/>
+                    <strong>High λ:</strong> Heavily punishes the Amateur's confident picks.
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+
+              <div className="lg:col-span-5 bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                <h2 className="text-lg font-bold mb-4">Context / Prompt</h2>
+                <div className="bg-amber-50 border-l-4 border-amber-400 p-3 rounded-r-lg mb-6 text-slate-700 italic font-medium">
+                  {scenarios[activeScenario].prompt}
+                </div>
+
+                <div className="flex items-center justify-between mb-4">
+                  <h2 className="text-lg font-bold">Candidate Tokens</h2>
+                </div>
+
+                <div className="mb-5 space-y-3">
+                  <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 text-sm text-slate-600">
+                    <strong className="text-slate-800">Why use Log (ln)?</strong> The math uses logarithms to calculate the <em>ratio</em> between the models. A tiny raw difference between 1% and 0.1% probability becomes a massive 10x multiplier in log space!
+                  </div>
+                  <div className="p-3 bg-emerald-50 rounded-lg border border-emerald-200 text-sm text-emerald-800">
+                    <strong className="text-emerald-900">🚀 What is a "Clueless Base"?</strong> When the smaller (amateur) model assigns a near-zero probability to a token (like 0.001 to "1961"), it has no idea that factual word should come next. The math heavily rewards tokens that the Expert knows, but the Base is "clueless" about!
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  {tokens.map((token) => (
+                    <div key={token.id} className="p-4 bg-slate-50 rounded-xl border border-slate-200">
+                      <div className="flex justify-between items-center mb-3">
+                        <div className="flex items-center gap-2">
+                          <span className="font-bold text-lg text-indigo-900 bg-indigo-100 px-2 py-0.5 rounded">"{token.word}"</span>
+                          {token.amateurProb >= 0.4 && (
+                            <span className="text-[10px] bg-rose-100 text-rose-700 px-2 py-0.5 rounded-full font-semibold border border-rose-200" title="Amateur is highly confident. It receives very little boost, penalizing its chances.">⚠️ Overconfident</span>
+                          )}
+                          {token.amateurProb <= 0.05 && (
+                            <span className="text-[10px] bg-emerald-100 text-emerald-700 px-2 py-0.5 rounded-full font-semibold border border-emerald-200" title="Amateur is clueless about this word. It will receive a massive mathematical boost!">🚀 Clueless Base</span>
+                          )}
+                          {token.expertProb <= 0.05 && (
+                            <span className="text-[10px] bg-slate-200 text-slate-600 px-2 py-0.5 rounded-full font-semibold border border-slate-300" title="Plausibility Constraint: The expert thinks this is garbage. In reality, the algorithm would filter this out entirely!">🗑️ Expert Rejects</span>
+                          )}
+                        </div>
+                      </div>
+
+                      <div className="space-y-3">
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="font-semibold text-emerald-700">Expert Prob (p)</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">ln(p): {Math.log(token.expertProb).toFixed(2)}</span>
+                              <span className="font-mono text-emerald-800 w-10 text-right">{formatNum(token.expertProb)}</span>
+                            </div>
+                          </div>
+                          <input
+                            type="range" min="0.001" max="1.0" step="0.001"
+                            value={token.expertProb}
+                            onChange={(e) => updateToken(token.id, 'expertProb', e.target.value)}
+                            className="w-full accent-emerald-500 h-1.5 bg-emerald-200 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex justify-between text-xs mb-1">
+                            <span className="font-semibold text-rose-700">Amateur Prob (q)</span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-[10px] font-mono text-rose-600 bg-rose-100 px-1.5 py-0.5 rounded">ln(q): {Math.log(token.amateurProb).toFixed(2)}</span>
+                              <span className="font-mono text-rose-800 w-10 text-right">{formatNum(token.amateurProb)}</span>
+                            </div>
+                          </div>
+                          <input
+                            type="range" min="0.001" max="1.0" step="0.001"
+                            value={token.amateurProb}
+                            onChange={(e) => updateToken(token.id, 'amateurProb', e.target.value)}
+                            className="w-full accent-rose-500 h-1.5 bg-rose-200 rounded-lg appearance-none cursor-pointer"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="lg:col-span-7 space-y-6">
+
+                <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-md">
+                  <h3 className="text-slate-400 text-sm font-semibold uppercase tracking-wider mb-2">The Formula</h3>
+                  <div className="text-xl md:text-2xl font-mono text-center py-4 bg-slate-800 rounded-xl border border-slate-700">
+                    Score = <span className="text-emerald-400">ln(p)</span> - <span className="text-rose-400">λ · ln(q)</span>
+                  </div>
+                  <p className="text-slate-400 text-sm text-center mt-4">
+                    We reward tokens the Expert likes, and <strong className="text-rose-300">penalize</strong> tokens the Amateur is overconfident about.
+                  </p>
+                </div>
+
+                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                  <h2 className="text-lg font-bold mb-4 flex items-center justify-between">
+                    <span>Score Breakdown Visualization</span>
+                    <span className="text-sm font-normal text-slate-500 bg-slate-100 px-2 py-1 rounded">Vector Addition: Base + Boost</span>
+                  </h2>
+
+                  <div className="mb-6 flex flex-wrap gap-4 text-sm justify-center bg-slate-50 p-3 rounded-lg border border-slate-100">
+                    <div className="flex items-center gap-2"><span className="w-4 h-2 bg-emerald-400 rounded-sm"></span> <span className="font-medium text-slate-700">Expert Base <span className="text-xs text-slate-500 font-mono">(← neg)</span></span></div>
+                    <div className="flex items-center gap-2"><span className="w-4 h-2 bg-rose-400 rounded-sm"></span> <span className="font-medium text-slate-700">Amateur Boost <span className="text-xs text-slate-500 font-mono">(→ pos)</span></span></div>
+                    <div className="flex items-center gap-2"><span className="w-1 h-3 bg-indigo-600"></span> <span className="font-medium text-slate-700">Final Score</span></div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <div className="relative h-6 w-full text-xs text-slate-400 border-b border-slate-200">
+                      {[ -10, -5, 0, 5, 10 ].map(val => (
+                        <div key={val} className="absolute -translate-x-1/2 bottom-1" style={{ left: `${((val + 10) / 20) * 100}%` }}>
+                          {val}
+                        </div>
+                      ))}
+                    </div>
+
+                    {scoredTokens.map((token, index) => {
+                      const mapX = (val) => Math.max(0, Math.min(100, ((val + 10) / 20) * 100));
+                      const zeroX = mapX(0);
+                      const pX = mapX(token.logP);
+                      const scoreX = mapX(token.score);
+
+                      const greenLeft = pX;
+                      const greenWidth = zeroX - pX;
+                      const redLeft = pX;
+                      const redWidth = scoreX - pX;
+
+                      return (
+                        <div key={token.id} className={`relative p-4 rounded-xl border ${index === 0 ? 'bg-indigo-50 border-indigo-200 shadow-sm' : 'bg-slate-50 border-slate-200'}`}>
+                          <div className="flex justify-between items-center mb-2">
+                            <div className="font-medium text-slate-900">
+                              {index === 0 && <span className="mr-2 text-xl" title="Winner">🏆</span>}
+                              "{token.word}"
+                            </div>
+                            <div className="text-sm font-mono font-bold text-indigo-700">
+                              {formatScore(token.score)}
+                            </div>
+                          </div>
+
+                          <div className="relative h-14 w-full mt-2">
+                             <div className="absolute top-0 bottom-0 border-l-2 border-dashed border-slate-300 z-0" style={{ left: `${zeroX}%` }}></div>
+
+                             {[ -10, -5, 5, 10 ].map(val => (
+                               <div key={`grid-${val}`} className="absolute top-0 bottom-0 border-l border-slate-100 z-0" style={{ left: `${mapX(val)}%` }}></div>
+                             ))}
+
+                             <div
+                               className="absolute h-2.5 bg-emerald-400 rounded-sm top-2 z-10 transition-all duration-300"
+                               style={{ left: `${greenLeft}%`, width: `${greenWidth}%` }}
+                               title={`Expert Base (ln p): ${formatScore(token.logP)}`}
+                             ></div>
+
+                             <div
+                               className="absolute h-2.5 bg-rose-400 rounded-sm top-7 z-10 transition-all duration-300 shadow-sm"
+                               style={{ left: `${redLeft}%`, width: `${redWidth}%` }}
+                               title={`Amateur Boost (-λ ln q): +${formatScore(Math.abs(lambda * token.logQ))}`}
+                             ></div>
+
+                             <div
+                               className="absolute w-1 h-full bg-indigo-600 top-0 z-20 transition-all duration-300 shadow-md"
+                               style={{ left: `${scoreX}%` }}
+                             ></div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="bg-indigo-600 text-white p-6 rounded-2xl shadow-md flex flex-col sm:flex-row items-start sm:items-center gap-6">
+                  <div className="text-5xl">✨</div>
+                  <div className="flex-1">
+                    <h3 className="text-indigo-200 text-sm font-semibold uppercase tracking-wider mb-1">The Model Generates</h3>
+                    <div className="text-2xl font-bold mb-3">
+                      {scenarios[activeScenario].prompt} <span className="bg-white text-indigo-900 px-2 py-0.5 rounded ml-1 underline decoration-indigo-400 decoration-4 underline-offset-4"> {winner.word} </span>
+                    </div>
+
+                    <div className="text-sm text-indigo-100 bg-indigo-700/50 p-3 rounded-lg inline-block border border-indigo-500 w-full md:w-auto">
+                      <div className="text-[11px] text-indigo-300 uppercase tracking-widest font-bold mb-1">Winning Math Breakdown</div>
+                      <span className="font-mono">
+                        ln({formatNum(winner.expertProb)}) - ({lambda.toFixed(1)} × ln({formatNum(winner.amateurProb)})) = <strong className="text-white text-base">{formatScore(winner.score)}</strong>
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>

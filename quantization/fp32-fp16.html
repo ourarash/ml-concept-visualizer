@@ -1,0 +1,986 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floating-Point Format Visualizer</title>
+
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Load React, ReactDOM, and Babel for in-browser JSX compilation -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <style>
+        .animate-pulse-slow {
+            animation: pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: .7; }
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 font-sans">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        // --- Configuration & Presets ---
+        const FORMATS = {
+          fp32: {
+            id: 'fp32',
+            name: 'Single Precision (FP32)',
+            tabName: 'FP32',
+            totalBits: 32,
+            expBits: 8,
+            mantissaBits: 23,
+            bias: 127,
+            denormExp: -126,
+            supportsInfinity: true,
+            supportsNaN: true,
+            summary: 'IEEE single precision: wide range and high precision, common for accumulation, CPU math, and general GPU compute.'
+          },
+          fp16: {
+            id: 'fp16',
+            name: 'Half Precision (FP16)',
+            tabName: 'FP16',
+            totalBits: 16,
+            expBits: 5,
+            mantissaBits: 10,
+            bias: 15,
+            denormExp: -14,
+            supportsInfinity: true,
+            supportsNaN: true,
+            summary: 'IEEE half precision: 10 fraction bits and a much smaller range, widely used for neural network training/inference.'
+          },
+          e4m3: {
+            id: 'e4m3',
+            name: 'FP8 E4M3',
+            tabName: 'FP8 E4M3',
+            totalBits: 8,
+            expBits: 4,
+            mantissaBits: 3,
+            bias: 7,
+            denormExp: -6,
+            supportsInfinity: false,
+            supportsNaN: true,
+            nanMantissaOnly: true,
+            summary: 'FP8 E4M3 spends more bits on precision. It has no Infinity encoding; the top finite magnitude is 448 and only the all-ones mantissa at the top exponent is NaN.'
+          },
+          e5m2: {
+            id: 'e5m2',
+            name: 'FP8 E5M2',
+            tabName: 'FP8 E5M2',
+            totalBits: 8,
+            expBits: 5,
+            mantissaBits: 2,
+            bias: 15,
+            denormExp: -14,
+            supportsInfinity: true,
+            supportsNaN: true,
+            summary: 'FP8 E5M2 spends more bits on exponent range. It reaches much larger magnitudes than E4M3, but each binade has only four significand steps.'
+          },
+          fp4: {
+            id: 'fp4',
+            name: 'FP4 E2M1',
+            tabName: 'FP4 E2M1',
+            totalBits: 4,
+            expBits: 2,
+            mantissaBits: 1,
+            bias: 1,
+            denormExp: 0,
+            supportsInfinity: false,
+            supportsNaN: false,
+            summary: 'FP4 E2M1 keeps only one explicit fraction bit. By itself it represents tiny codebook values; production systems usually pair it with block scales.'
+          }
+        };
+
+        const PRESETS = {
+          fp32: [
+          { name: '+Zero', bits: '00000000000000000000000000000000' },
+          { name: '-Zero', bits: '10000000000000000000000000000000' },
+          { name: '1.0', bits: '00111111100000000000000000000000' },
+          { name: '1.4 (Rounded)', bits: '00111111101100110011001100110011' },
+          { name: '1.5 (Exact)', bits: '00111111110000000000000000000000' },
+          { name: '10.5 (Exact)', bits: '01000001001010000000000000000000' },
+          { name: 'Pi (approx)', bits: '01000000010010010000111111011011' },
+          { name: '+Infinity', bits: '01111111100000000000000000000000' },
+          { name: '-Infinity', bits: '11111111100000000000000000000000' },
+          { name: 'NaN', bits: '01111111110000000000000000000000' },
+          { name: 'Max Normal', bits: '01111111011111111111111111111111' },
+          { name: 'Min +Normal', bits: '00000000100000000000000000000000' },
+          { name: 'Max Denormal', bits: '00000000011111111111111111111111' },
+          { name: 'Min +Denormal', bits: '00000000000000000000000000000001' }
+          ],
+
+          fp16: [
+          { name: '+Zero', bits: '0000000000000000' },
+          { name: '-Zero', bits: '1000000000000000' },
+          { name: '1.0', bits: '0011110000000000' },
+          { name: '1.4 (Rounded)', bits: '0011110110011010' },
+          { name: '1.5 (Exact)', bits: '0011111000000000' },
+          { name: '10.5 (Exact)', bits: '0100100101000000' },
+          { name: 'Pi (approx)', bits: '0100001001001000' },
+          { name: '+Infinity', bits: '0111110000000000' },
+          { name: '-Infinity', bits: '1111110000000000' },
+          { name: 'NaN', bits: '0111111000000000' },
+          { name: 'Max Normal', bits: '0111101111111111' },
+          { name: 'Min +Normal', bits: '0000010000000000' },
+          { name: 'Max Denormal', bits: '0000001111111111' },
+          { name: 'Min +Denormal', bits: '0000000000000001' }
+          ],
+
+          e4m3: [
+            { name: '+Zero', bits: '00000000' },
+            { name: '-Zero', bits: '10000000' },
+            { name: '0.015625 Min Normal', bits: '00001000' },
+            { name: '0.013671875 Max Subnormal', bits: '00000111' },
+            { name: '1.0', bits: '00111000' },
+            { name: '1.5', bits: '00111100' },
+            { name: 'Pi (coarse)', bits: '01000101' },
+            { name: '10.0', bits: '01010010' },
+            { name: '448 Max Finite', bits: '01111110' },
+            { name: '-448 Max Finite', bits: '11111110' },
+            { name: 'NaN', bits: '01111111' }
+          ],
+
+          e5m2: [
+            { name: '+Zero', bits: '00000000' },
+            { name: '-Zero', bits: '10000000' },
+            { name: 'Min +Normal', bits: '00000100' },
+            { name: 'Max Denormal', bits: '00000011' },
+            { name: '1.0', bits: '00111100' },
+            { name: '1.5', bits: '00111110' },
+            { name: 'Pi (coarse)', bits: '01000010' },
+            { name: '10.0', bits: '01001001' },
+            { name: 'Max Normal', bits: '01111011' },
+            { name: '+Infinity', bits: '01111100' },
+            { name: '-Infinity', bits: '11111100' },
+            { name: 'NaN', bits: '01111101' }
+          ],
+
+          fp4: [
+            { name: '+Zero', bits: '0000' },
+            { name: '-Zero', bits: '1000' },
+            { name: '0.5 Subnormal', bits: '0001' },
+            { name: '1.0 Min Normal', bits: '0010' },
+            { name: '1.5', bits: '0011' },
+            { name: '2.0', bits: '0100' },
+            { name: '3.0', bits: '0101' },
+            { name: '4.0', bits: '0110' },
+            { name: '6.0 Max Finite', bits: '0111' },
+            { name: '-6.0 Max Finite', bits: '1111' }
+          ]
+        };
+
+        const FORMAT_ORDER = ['fp32', 'fp16', 'e4m3', 'e5m2', 'fp4'];
+
+        // --- Utility Functions ---
+        function maxFiniteBits(format) {
+          const config = FORMATS[format];
+          const sign = '0';
+          const allExp = '1'.repeat(config.expBits);
+          const allMant = '1'.repeat(config.mantissaBits);
+          const maxNormalExp = config.supportsInfinity
+            ? ((1 << config.expBits) - 2).toString(2).padStart(config.expBits, '0')
+            : allExp;
+          const maxMant = config.nanMantissaOnly ? allMant.slice(0, -1) + '0' : allMant;
+          return sign + maxNormalExp + maxMant;
+        }
+
+        function nanBits(format) {
+          const config = FORMATS[format];
+          if (!config.supportsNaN) return '0'.repeat(config.totalBits);
+          return '0' + '1'.repeat(config.expBits) + '1'.repeat(config.mantissaBits);
+        }
+
+        function isNanEncoding(storedExp, mant, config) {
+          const maxExpVal = (1 << config.expBits) - 1;
+          const maxMantVal = (1 << config.mantissaBits) - 1;
+          if (!config.supportsNaN) return false;
+          if (config.nanMantissaOnly) return storedExp === maxExpVal && mant === maxMantVal;
+          return storedExp === maxExpVal && mant !== 0;
+        }
+
+        function getBitsFromFloat(num, format) {
+          if (format === 'fp32') {
+            const buffer = new ArrayBuffer(4);
+            new Float32Array(buffer)[0] = num;
+            const intVal = new Uint32Array(buffer)[0];
+            return intVal.toString(2).padStart(32, '0');
+          }
+
+          const config = FORMATS[format];
+          const signPrefix = num < 0 || Object.is(num, -0) ? '1' : '0';
+          if (isNaN(num)) return nanBits(format);
+          if (num === Infinity || num === -Infinity) {
+            if (config.supportsInfinity) {
+              return signPrefix + '1'.repeat(config.expBits) + '0'.repeat(config.mantissaBits);
+            }
+            return signPrefix + maxFiniteBits(format).slice(1);
+          }
+          if (num === 0) return signPrefix + '0'.repeat(config.totalBits - 1);
+
+          const maxCode = Math.pow(2, config.totalBits - 1);
+          let bestBits = signPrefix + '0'.repeat(config.totalBits - 1);
+          let bestDistance = Infinity;
+
+          for (let code = 0; code < maxCode; code++) {
+            const candidateBits = signPrefix + code.toString(2).padStart(config.totalBits - 1, '0');
+            const candidate = getFloatFromBits(candidateBits, format);
+            if (!Number.isFinite(candidate)) continue;
+            const distance = Math.abs(candidate - num);
+            if (distance < bestDistance) {
+              bestDistance = distance;
+              bestBits = candidateBits;
+            }
+          }
+
+          return bestBits;
+        }
+
+        function getFloatFromBits(bitString, format) {
+          if (format === 'fp32') {
+            const intVal = parseInt(bitString, 2);
+            const buffer = new ArrayBuffer(4);
+            new Uint32Array(buffer)[0] = intVal;
+            return new Float32Array(buffer)[0];
+          }
+
+          const config = FORMATS[format];
+          const sign = bitString[0] === '1' ? -1 : 1;
+          const exp = parseInt(bitString.slice(1, 1 + config.expBits), 2);
+          const mant = parseInt(bitString.slice(1 + config.expBits), 2);
+          const maxExpVal = (1 << config.expBits) - 1;
+          const mantScale = Math.pow(2, config.mantissaBits);
+
+          if (isNanEncoding(exp, mant, config)) return NaN;
+          if (config.supportsInfinity && exp === maxExpVal && mant === 0) return sign * Infinity;
+          if (exp === 0) return sign * (mant / mantScale) * Math.pow(2, config.denormExp);
+          return sign * (1 + mant / mantScale) * Math.pow(2, exp - config.bias);
+        }
+
+        // --- Main Component ---
+        function App() {
+          const [format, setFormat] = useState('fp32');
+          const [bits, setBits] = useState(PRESETS.fp32[5].bits); // Default to Pi (fp32)
+          const [inputValue, setInputValue] = useState('');
+
+          const config = FORMATS[format];
+          const currentPresets = PRESETS[format];
+          const minNormalPreset = currentPresets.find((preset) => preset.name.includes('Min +Normal') || preset.name.includes('Min Normal'));
+
+          const signBit = bits[0];
+          const expBits = bits.slice(1, 1 + config.expBits);
+          const mantissaBits = bits.slice(1 + config.expBits, config.totalBits);
+
+          const floatVal = getFloatFromBits(bits, format);
+
+          // Calculate hex value
+          const hexVal = '0x' + parseInt(bits, 2).toString(16).toUpperCase().padStart(config.totalBits / 4, '0');
+
+          // Calculate breakdown
+          const signMultiplier = signBit === '1' ? -1 : 1;
+          const storedExp = parseInt(expBits, 2);
+          const maxExpVal = (1 << config.expBits) - 1;
+
+          let fraction = 0;
+          let fractionParts = [];
+          for (let i = 0; i < config.mantissaBits; i++) {
+            if (mantissaBits[i] === '1') {
+              fraction += Math.pow(2, -(i + 1));
+              fractionParts.push(`1/${Math.pow(2, i + 1)}`);
+            }
+          }
+          const fractionFormula = fractionParts.length > 0 ? fractionParts.join(' + ') : '0';
+
+          // Determine type
+          let type = 'Normal';
+          let actualExp = storedExp - config.bias;
+          let significand = 1 + fraction;
+
+          if (storedExp === 0 && fraction === 0) {
+            type = 'Zero';
+            actualExp = 0;
+            significand = 0;
+          } else if (storedExp === 0 && fraction !== 0) {
+            type = 'Denormal (Subnormal)';
+            actualExp = config.denormExp;
+            significand = fraction;
+          } else if (config.supportsInfinity && storedExp === maxExpVal && fraction === 0) {
+            type = 'Infinity';
+            actualExp = null;
+            significand = null;
+          } else if (isNanEncoding(storedExp, parseInt(mantissaBits || '0', 2), config)) {
+            type = 'NaN (Not a Number)';
+            actualExp = null;
+            significand = null;
+          }
+
+          const exponentSummary = (() => {
+            if (type === 'Infinity' || type === 'NaN (Not a Number)') {
+              return {
+                raw: storedExp,
+                unbiased: 'special',
+                description: `${expBits}₂ = ${storedExp}₁₀; reserved for ${type === 'Infinity' ? 'Infinity' : 'NaN'}`
+              };
+            }
+            if (type === 'Zero') {
+              return {
+                raw: storedExp,
+                unbiased: 'zero',
+                description: `${expBits}₂ = 0₁₀; zero has no effective exponent`
+              };
+            }
+            if (type === 'Denormal (Subnormal)') {
+              return {
+                raw: storedExp,
+                unbiased: config.denormExp,
+                description: `${expBits}₂ = 0₁₀; subnormal effective exponent is ${config.denormExp}`
+              };
+            }
+            return {
+              raw: storedExp,
+              unbiased: actualExp,
+              description: `${expBits}₂ = ${storedExp}₁₀; ${storedExp} - bias ${config.bias} = ${actualExp}`
+            };
+          })();
+
+          // Visual distinction styling for the "Case"
+          const typeStyles = {
+            'Normal': 'bg-blue-100 text-blue-700 border border-blue-200',
+            'Denormal (Subnormal)': 'bg-amber-100 text-amber-800 border border-amber-300 font-bold animate-pulse-slow',
+            'Zero': 'bg-slate-200 text-slate-700 border border-slate-300',
+            'Infinity': 'bg-red-100 text-red-700 border border-red-200',
+            'NaN (Not a Number)': 'bg-red-100 text-red-700 border border-red-200',
+          };
+
+          useEffect(() => {
+            if (Object.is(floatVal, -0)) {
+              setInputValue('-0');
+            } else {
+              setInputValue(floatVal.toString());
+            }
+          }, [floatVal]);
+
+          const toggleFormat = (newFormat) => {
+            setFormat(newFormat);
+            const preferredPreset = PRESETS[newFormat].find((preset) => preset.name.includes('Pi')) || PRESETS[newFormat].find((preset) => preset.name.includes('1.0')) || PRESETS[newFormat][0];
+            setBits(preferredPreset.bits);
+          };
+
+          const toggleBit = (index) => {
+            const newBits = bits.substring(0, index) + (bits[index] === '0' ? '1' : '0') + bits.substring(index + 1);
+            setBits(newBits);
+          };
+
+          const stepBits = (offset) => {
+            let intVal = parseInt(bits, 2);
+            intVal += offset;
+            const maxVal = Math.pow(2, config.totalBits) - 1;
+            if (intVal < 0) intVal = maxVal;
+            if (intVal > maxVal) intVal = 0;
+            setBits(intVal.toString(2).padStart(config.totalBits, '0'));
+          };
+
+          const handleInputChange = (e) => {
+            const val = e.target.value;
+            setInputValue(val);
+            if (val.trim() === '') return;
+            const parsed = Number(val);
+            if (!isNaN(parsed) || val.toLowerCase() === 'nan') {
+               const newBits = getBitsFromFloat(parsed, format);
+               setBits(newBits);
+            }
+          };
+
+          // --- Slider Logic ---
+          const sliderMax = Math.pow(2, config.mantissaBits) * 2;
+          const currentUnsignedVal = parseInt(bits.slice(1), 2);
+          const sliderValue = Math.min(currentUnsignedVal, sliderMax);
+
+          const handleSliderChange = (e) => {
+            const val = parseInt(e.target.value, 10);
+            const signPrefix = bits[0];
+            const newRestBits = val.toString(2).padStart(config.totalBits - 1, '0');
+            setBits(signPrefix + newRestBits);
+          };
+
+          const isDenseBitLayout = config.totalBits > 16;
+          const bitGroupGapClass = isDenseBitLayout ? 'space-x-px sm:space-x-0.5' : 'space-x-1';
+          const bitCellWidthClass = isDenseBitLayout ? 'w-4 sm:w-4 xl:w-5' : 'w-6 sm:w-8';
+          const bitButtonClass = isDenseBitLayout
+            ? `${bitCellWidthClass} h-7 sm:h-8 xl:h-9 text-[10px] sm:text-xs`
+            : `${bitCellWidthClass} h-8 sm:h-10 text-lg`;
+          const bitRowGapClass = isDenseBitLayout ? 'space-x-1' : 'space-x-2 sm:space-x-4';
+          const impliedBitClass = isDenseBitLayout
+            ? 'w-7 h-7 sm:w-8 sm:h-8 xl:w-9 xl:h-9 text-sm sm:text-base'
+            : 'w-8 h-8 sm:w-10 sm:h-10 text-lg';
+
+          const shouldShowBitIndex = (localIndex, groupLength) => {
+            if (!isDenseBitLayout) return true;
+            return localIndex === 0 || localIndex === groupLength - 1;
+          };
+
+          const fp4Codebook = [0, 0.5, 1, 1.5, 2, 3, 4, 6];
+          const int4Codebook = [0, 1, 2, 3, 4, 5, 6, 7];
+
+          const BitGroup = ({ bitsString, startIndex, colorClass, label }) => (
+            <div className="flex flex-col items-center">
+              <div className={`flex ${bitGroupGapClass} mb-1`}>
+                {bitsString.split('').map((b, i) => (
+                  <button
+                    key={startIndex + i}
+                    onClick={() => toggleBit(startIndex + i)}
+                    className={`${bitButtonClass} rounded shadow-sm text-white font-mono font-bold flex items-center justify-center transition-transform hover:-translate-y-1 active:translate-y-0 ${
+                      b === '1' ? colorClass : `${colorClass} bg-opacity-40`
+                    }`}
+                    title={`Toggle Bit ${config.totalBits - 1 - (startIndex + i)}`}
+                  >
+                    {b}
+                  </button>
+                ))}
+              </div>
+              <div className={`flex ${bitGroupGapClass} mb-1 text-[9px] sm:text-[10px] text-slate-400 font-mono`}>
+                {bitsString.split('').map((_, i) => {
+                  const absoluteIndex = config.totalBits - 1 - (startIndex + i);
+                  return (
+                    <span
+                      key={`idx-${startIndex + i}`}
+                      className={`${bitCellWidthClass} flex items-center justify-center`}
+                    >
+                      {shouldShowBitIndex(i, bitsString.length) ? absoluteIndex : ''}
+                    </span>
+                  );
+                })}
+              </div>
+              <span className="text-xs font-semibold text-gray-500 uppercase tracking-wider">{label}</span>
+            </div>
+          );
+
+          return (
+            <div className="min-h-screen p-4 sm:p-8">
+              <div className="max-w-6xl mx-auto space-y-8">
+
+                <header className="text-center space-y-4">
+                  <h1 className="text-3xl sm:text-4xl font-extrabold text-slate-900 tracking-tight">Floating-Point Format Visualizer</h1>
+
+                  <div className="inline-flex flex-wrap justify-center gap-1 bg-slate-200 p-1 rounded-xl">
+                    {FORMAT_ORDER.map((formatId) => (
+                      <button
+                        key={formatId}
+                        onClick={() => toggleFormat(formatId)}
+                        className={`px-4 sm:px-5 py-2 rounded-lg text-sm font-bold transition-colors ${format === formatId ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}
+                      >
+                        {FORMATS[formatId].tabName}
+                      </button>
+                    ))}
+                  </div>
+                </header>
+
+                {/* Floating Point Value Input */}
+                <div className={`bg-white p-6 rounded-2xl shadow-sm border text-center transition-colors duration-300 ${type === 'Denormal (Subnormal)' ? 'border-amber-300 shadow-amber-100' : 'border-slate-200'}`}>
+                  <label className="block text-sm font-bold text-slate-500 uppercase tracking-wide mb-2">Decimal Value</label>
+                  <input
+                    type="text"
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    className="text-3xl sm:text-4xl font-mono text-center w-full max-w-lg bg-transparent border-b-2 border-slate-300 focus:border-blue-500 outline-none pb-2 transition-colors text-slate-800"
+                    placeholder="Enter a number..."
+                  />
+
+                  {/* Binary & Hex Representation Display */}
+                  <div className="mt-4 flex flex-col items-center space-y-2">
+                    <div className="text-sm sm:text-base font-mono flex justify-center space-x-1 sm:space-x-2 tracking-widest break-all px-2">
+                      <span className="text-blue-600 font-bold" title="Sign Bit">{signBit}</span>
+                      <span className="text-red-500 font-bold" title="Exponent Bits">{expBits}</span>
+                      <span className="text-emerald-500 font-bold" title="Mantissa Bits">{mantissaBits}</span>
+                    </div>
+                    {/* Hex View */}
+                    <div className="text-xs font-mono font-bold text-slate-600 bg-slate-100 border border-slate-200 px-3 py-1 rounded-md" title="Hexadecimal representation in memory">
+                      HEX: <span className="text-slate-800">{hexVal}</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-lg text-left">
+                      <div className="rounded-lg border border-red-100 bg-red-50 px-3 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-red-500">Stored Exponent</div>
+                        <div className="font-mono text-sm text-slate-800">{expBits}<span className="text-slate-400">₂</span> = {exponentSummary.raw}<span className="text-slate-400">₁₀</span></div>
+                      </div>
+                      <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-[10px] font-bold uppercase tracking-wide text-slate-500">After Bias</div>
+                        <div className="font-mono text-sm text-slate-800">Exponent = {exponentSummary.unbiased}</div>
+                      </div>
+                    </div>
+                    <div className="text-xs text-slate-500 max-w-lg px-2">
+                      {exponentSummary.description}
+                    </div>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-center space-x-2">
+                    <div className={`text-sm px-3 py-1 inline-block rounded-full ${typeStyles[type]}`}>
+                      {type === 'Denormal (Subnormal)' && '⚠️ '}
+                      Case: <span>{type}</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Interactive Bits Array */}
+                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200 overflow-x-auto">
+                  <div className="min-w-max flex flex-col items-center">
+                    <div className={`flex ${bitRowGapClass} justify-center items-end`}>
+                      <BitGroup bitsString={signBit} startIndex={0} colorClass="bg-blue-600" label="Sign (1)" />
+                      <BitGroup bitsString={expBits} startIndex={1} colorClass="bg-red-500" label={`Exponent (${config.expBits})`} />
+
+                      <div className="flex flex-col items-center justify-start ml-2 mr-1 animate-fade-in">
+                        <div
+                          className={`${impliedBitClass} rounded-lg border-2 border-dashed flex items-center justify-center font-mono font-bold transition-all duration-500 ${
+                            type === 'Denormal (Subnormal)' || type === 'Zero'
+                              ? 'border-amber-400 text-amber-600 bg-amber-50 scale-110'
+                              : 'border-emerald-400 text-emerald-600 bg-emerald-50'
+                          }`}
+                          title="Implied Leading Bit (Not stored in memory, dynamically assigned)"
+                        >
+                          {type === 'Denormal (Subnormal)' || type === 'Zero' ? '0.' : '1.'}
+                        </div>
+                        <div className="h-3 mb-1" aria-hidden="true"></div>
+                        <span className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider mt-1 text-center leading-tight w-16">
+                          Implied<br/>Bit
+                        </span>
+                      </div>
+
+                      <BitGroup bitsString={mantissaBits} startIndex={1 + config.expBits} colorClass="bg-emerald-500" label={`Mantissa (${config.mantissaBits})`} />
+                    </div>
+
+                  </div>
+
+                  {/* ULP Stepper Controls */}
+                  <div className="mt-8 pt-6 border-t border-slate-200 flex flex-col items-center">
+                    <div className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3">Bit-Level Stepping (ULP)</div>
+                    <div className="flex space-x-3">
+                      <button
+                        onClick={() => stepBits(-1)}
+                        className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95 border border-slate-200"
+                      >
+                        &larr; -1 Bit
+                      </button>
+                      <button
+                        onClick={() => stepBits(1)}
+                        className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-sm font-bold transition-all shadow-sm active:scale-95 border border-slate-200"
+                      >
+                        +1 Bit &rarr;
+                      </button>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-3 text-center max-w-sm">
+                      <strong>Tip:</strong> Load <strong>{minNormalPreset ? minNormalPreset.name : 'the smallest normal value'}</strong> and click <strong>-1 Bit</strong> to see how it drops into subnormal space.
+                    </p>
+
+                    {/* Boundary Slider */}
+                    <div className="w-full max-w-md mt-6 pt-6 border-t border-slate-100">
+                      <div className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-3 text-center">Boundary Slider</div>
+                      <div className="flex justify-between text-[10px] font-bold text-slate-500 uppercase mb-2 px-1">
+                        <span className="text-amber-500 w-1/2 text-left">Denormal Range</span>
+                        <span className="text-emerald-500 w-1/2 text-right">Normal Range</span>
+                      </div>
+                      <div className="relative flex items-center h-6">
+                        <div
+                          className="absolute h-6 w-0.5 bg-slate-400 z-0 pointer-events-none"
+                          style={{ left: '50%' }}
+                          title="Exact Boundary (Min Normal)"
+                        />
+                        <input
+                          type="range"
+                          min="0"
+                          max={sliderMax}
+                          value={sliderValue}
+                          onChange={handleSliderChange}
+                          className="w-full h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer relative z-10 accent-blue-600"
+                        />
+                      </div>
+                      <div className="flex justify-between mt-2 text-[10px] text-slate-400 font-mono px-1">
+                        <span>Int: {currentUnsignedVal > sliderMax ? `> ${sliderMax} (Out of range)` : currentUnsignedVal}</span>
+                        <span>Boundary: {Math.pow(2, config.mantissaBits)}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {/* Mathematical Breakdown */}
+                  <div className={`bg-white p-6 rounded-2xl shadow-sm border transition-colors duration-300 ${type === 'Denormal (Subnormal)' ? 'border-amber-200 bg-amber-50/30' : 'border-slate-200'}`}>
+                    <h2 className="text-lg font-bold text-slate-800 border-b pb-2 mb-4">Calculation Breakdown</h2>
+
+                    <div className="space-y-4">
+                      {/* Formula */}
+                      <div className="text-center bg-slate-50 p-4 rounded-xl border border-slate-100 font-serif text-2xl">
+                        <span className="text-blue-600 font-bold">±</span>
+                        <span className="text-emerald-600 italic font-bold">a</span>
+                        <span> × 2</span>
+                        <sup className="text-red-500 font-bold italic">n - {config.bias}</sup>
+
+                        <div className="text-xs font-sans text-slate-500 mt-4 normal-case tracking-wide flex flex-col space-y-2 text-left sm:text-center sm:items-center">
+                          <div>
+                            <strong className="text-emerald-600 italic font-serif text-sm mr-1">a</strong>
+                            is the <strong>Significand</strong> (Implied Bit + Fraction)
+                          </div>
+                          <div className="bg-white p-2 rounded border border-slate-200 shadow-sm max-w-sm inline-block text-left">
+                            <strong className="text-red-500 italic font-serif text-sm mr-1">bias</strong>
+                            is a fixed offset (<strong>{config.bias}</strong>). It is subtracted from the stored exponent so the computer can represent negative exponents without needing a dedicated sign bit!
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 mt-6">
+                        <div className="w-4 h-4 mt-1 rounded bg-blue-600 flex-shrink-0"></div>
+                        <div>
+                          <div className="font-bold">Sign = {signBit}</div>
+                          <div className="text-sm text-slate-600">
+                            {(-1)}<sup>{signBit}</sup> = <span className="font-mono bg-slate-100 px-1 rounded">{signMultiplier > 0 ? '+' : '-'}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3">
+                        <div className="w-4 h-4 mt-1 rounded bg-red-500 flex-shrink-0"></div>
+                        <div>
+                          <div className="font-bold">Exponent = {storedExp}</div>
+                          <div className="text-sm text-slate-600">
+                            {type === 'Denormal (Subnormal)' || type === 'Zero' ? (
+                              <span className={type === 'Denormal (Subnormal)' ? 'text-amber-800 font-medium' : ''}>
+                                Special case (Exponent is 0): Actual exponent is fixed at <strong>{config.denormExp}</strong>.
+                              </span>
+                            ) : type === 'Infinity' || type === 'NaN (Not a Number)' ? (
+                              <span>Special case (Exponent is {maxExpVal}): Used for {config.supportsInfinity ? 'Infinity or ' : ''}NaN.</span>
+                            ) : !config.supportsInfinity && storedExp === maxExpVal ? (
+                              <span>
+                                Top exponent is still finite in {config.tabName}: Actual Exponent = Stored ({storedExp}) - Bias ({config.bias}) = <span className="font-mono bg-slate-100 px-1 rounded">{actualExp}</span>
+                              </span>
+                            ) : (
+                              <span>Actual Exponent = Stored ({storedExp}) - Bias ({config.bias}) = <span className="font-mono bg-slate-100 px-1 rounded">{actualExp}</span></span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-start gap-3 w-full">
+                        <div className="w-4 h-4 mt-1 rounded bg-emerald-500 flex-shrink-0"></div>
+                        <div className="min-w-0 w-full pr-2">
+                          <div className="font-bold">Mantissa / Fraction = {fraction.toPrecision(6)}...</div>
+
+                          {/* Fraction Summation Visualizer */}
+                          {type !== 'NaN (Not a Number)' && type !== 'Infinity' && fraction > 0 && (
+                             <div className="mt-1 mb-2">
+                               <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-1">Active Fractions:</div>
+                               <div
+                                 className="font-mono text-xs text-slate-600 bg-slate-100 p-2 rounded-lg border border-slate-200 overflow-x-auto scrollbar-hide flex whitespace-nowrap"
+                                 title="Scroll to see full mathematical series"
+                               >
+                                 {fractionFormula}
+                               </div>
+                             </div>
+                          )}
+
+                          <div className="text-sm text-slate-600 mt-1">
+                            {type === 'Denormal (Subnormal)' || type === 'Zero' ? (
+                              <span className={type === 'Denormal (Subnormal)' ? 'text-amber-800 font-medium' : ''}>
+                                Implied leading bit is <strong>0</strong>. Significand (a) = <span className="font-mono bg-amber-100 px-1 rounded">0 + {fraction.toPrecision(4)}</span>
+                              </span>
+                            ) : type === 'Infinity' || type === 'NaN (Not a Number)' ? (
+                              <span>Fraction determines if Infinity (0) or NaN (≠0). Here fraction is {fraction}.</span>
+                            ) : (
+                              <span>Implied leading bit is <strong>1</strong>. Significand (a) = <span className="font-mono bg-slate-100 px-1 rounded">1 + {fraction.toPrecision(4)} = {significand}</span></span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Final Result */}
+                      <div className="mt-6 pt-4 border-t border-slate-200">
+                        <div className="font-bold text-slate-700 mb-1">Final Evaluation:</div>
+                        <div className={`font-mono text-sm break-all p-3 rounded-lg shadow-inner ${type === 'Denormal (Subnormal)' ? 'bg-amber-900 text-amber-400' : 'bg-slate-800 text-green-400'}`}>
+                          {type === 'NaN (Not a Number)' ? 'NaN' :
+                           type === 'Infinity' ? `${signMultiplier > 0 ? '+' : '-'}Infinity` :
+                           `${signMultiplier} × ${significand} × 2^(${actualExp}) = ${Object.is(floatVal, -0) ? '-0' : floatVal}`}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Examples / Presets */}
+                  <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                    <div className="flex justify-between items-center border-b pb-2 mb-4">
+                      <h2 className="text-lg font-bold text-slate-800">Examples & Edge Cases</h2>
+                      <span className="text-xs font-bold text-slate-400 uppercase bg-slate-100 px-2 py-1 rounded">{format}</span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-2 sm:gap-3">
+                      {currentPresets.map((preset) => {
+                        const isSubnormalPreset = preset.name.includes('Denormal') || preset.name.includes('Subnormal');
+                        return (
+                        <button
+                          key={preset.name}
+                          onClick={() => setBits(preset.bits)}
+                          className={`px-3 py-2 text-sm text-left bg-slate-50 hover:bg-blue-50 border hover:border-blue-300 rounded-lg transition-colors flex flex-col group ${isSubnormalPreset ? 'border-amber-200' : 'border-slate-200'}`}
+                        >
+                          <span className={`font-bold transition-colors ${isSubnormalPreset ? 'text-amber-700 group-hover:text-amber-800' : 'text-slate-700 group-hover:text-blue-700'}`}>
+                            {preset.name}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400 mt-1 truncate">
+                            {preset.bits.substring(0,1)} {preset.bits.substring(1, 1 + config.expBits)} {preset.bits.substring(1 + config.expBits, config.totalBits)}
+                          </span>
+                        </button>
+                      )})}
+                    </div>
+
+                    <div className="mt-6 p-4 bg-slate-50 border border-slate-200 rounded-xl">
+                      <h3 className="text-sm font-bold text-slate-700 mb-1">{config.name} Notes:</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed mb-3">{config.summary}</p>
+                      <ul className="text-xs text-slate-600 space-y-2 list-disc pl-4">
+                        <li><strong>Layout:</strong> 1 sign bit, {config.expBits} exponent bits, {config.mantissaBits} explicit mantissa bits.</li>
+                        <li><strong>Bias:</strong> stored exponent values are shifted by {config.bias}; subnormals use exponent {config.denormExp}.</li>
+                        <li><strong>Special values:</strong> {config.supportsInfinity ? 'supports ±Infinity' : 'no Infinity encoding'}; {config.supportsNaN ? 'supports NaN' : 'no NaN encoding'}.</li>
+                      </ul>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200">
+                  <h2 className="text-xl font-bold text-slate-800 border-b pb-3 mb-6">Low-Precision ML Formats</h2>
+                  <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+                    <div className="lg:col-span-2 overflow-x-auto">
+                      <table className="w-full text-sm border-collapse">
+                        <thead>
+                          <tr className="text-left text-xs uppercase tracking-wide text-slate-500 border-b border-slate-200">
+                            <th className="py-2 pr-4">Format</th>
+                            <th className="py-2 pr-4">Bits</th>
+                            <th className="py-2 pr-4">Bias</th>
+                            <th className="py-2 pr-4">Largest finite</th>
+                            <th className="py-2">What it buys</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-slate-700">
+                          <tr>
+                            <td className="py-3 pr-4 font-bold">E4M3</td>
+                            <td className="py-3 pr-4 font-mono">1-4-3</td>
+                            <td className="py-3 pr-4 font-mono">7</td>
+                            <td className="py-3 pr-4 font-mono">448</td>
+                            <td className="py-3">More local precision than E5M2; common for FP8 weights/activations when range is controlled.</td>
+                          </tr>
+                          <tr>
+                            <td className="py-3 pr-4 font-bold">E5M2</td>
+                            <td className="py-3 pr-4 font-mono">1-5-2</td>
+                            <td className="py-3 pr-4 font-mono">15</td>
+                            <td className="py-3 pr-4 font-mono">57344</td>
+                            <td className="py-3">Much wider range; useful for gradients or tensors with larger outliers.</td>
+                          </tr>
+                          <tr className={format === 'fp4' ? 'bg-indigo-50/70' : ''}>
+                            <td className="py-3 pr-4 font-bold">FP4 E2M1</td>
+                            <td className="py-3 pr-4 font-mono">1-2-1</td>
+                            <td className="py-3 pr-4 font-mono">1</td>
+                            <td className="py-3 pr-4 font-mono">6</td>
+                            <td className="py-3">Tiny value codebook; needs scaling to cover real tensor ranges.</td>
+                          </tr>
+                        </tbody>
+                      </table>
+                    </div>
+
+                    <div className="bg-indigo-50 border border-indigo-200 rounded-xl p-5">
+                      <h3 className="text-sm font-bold text-indigo-900 uppercase tracking-wide mb-3">FP4 Deep Dive</h3>
+                      <div className="space-y-3 text-sm text-slate-700 leading-relaxed">
+                        <p>
+                          FP4 E2M1 has only sixteen bit patterns total. With one sign bit, the positive magnitudes are:
+                        </p>
+                        <div className="font-mono text-xs bg-white border border-indigo-100 rounded-lg p-3 text-indigo-900">
+                          0, 0.5, 1, 1.5, 2, 3, 4, 6
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          {[
+                            ['0000', '+0'],
+                            ['0001', '+0.5 subnormal'],
+                            ['0010', '+1'],
+                            ['0011', '+1.5'],
+                            ['0100', '+2'],
+                            ['0101', '+3'],
+                            ['0110', '+4'],
+                            ['0111', '+6']
+                          ].map(([code, value]) => (
+                            <div key={code} className="flex justify-between gap-3 bg-white border border-indigo-100 rounded-md px-2 py-1">
+                              <span className="font-mono text-indigo-800">{code}</span>
+                              <span className="text-slate-600">{value}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <p>
+                          Notice the spacing grows as the exponent increases: the gap is 0.5 near 1, then 1, then 2. That is the core trade-off: FP4 preserves rough scale, but not fine detail.
+                        </p>
+                        <p>
+                          Negative values reuse the same magnitude codes with the sign bit set to 1, so <span className="font-mono bg-white px-1 rounded border border-indigo-100">1111</span> means -6.
+                        </p>
+                        <p>
+                          In ML systems, FP4 values are usually stored with per-block scales. The 4-bit code carries the local shape; the shared scale stretches that small codebook over the tensor block.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="mt-6 border-t border-slate-200 pt-6">
+                    <h3 className="text-sm font-bold text-slate-800 uppercase tracking-wide mb-4">Why not just INT4?</h3>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <div className="text-sm font-bold text-indigo-800">FP4 E2M1</div>
+                            <div className="text-xs text-slate-500">Non-uniform floating codebook</div>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold bg-indigo-100 text-indigo-800 px-2 py-1 rounded">1-2-1</span>
+                        </div>
+                        <div className="relative h-16 mx-2">
+                          <div className="absolute left-0 right-0 top-7 h-1 rounded-full bg-gradient-to-r from-indigo-300 via-emerald-300 to-amber-300"></div>
+                          {fp4Codebook.map((value) => (
+                            <div
+                              key={`fp4-${value}`}
+                              className="absolute top-4 -translate-x-1/2"
+                              style={{ left: `${(value / 6) * 100}%` }}
+                            >
+                              <div className="w-2.5 h-2.5 rounded-full bg-indigo-700 ring-2 ring-white"></div>
+                              <div className="mt-2 text-[10px] font-mono text-slate-600">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed mt-2">
+                          FP4 spends two bits on exponent, so nearby-small values get finer steps while larger values jump by bigger amounts.
+                        </p>
+                      </div>
+
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <div>
+                            <div className="text-sm font-bold text-slate-800">INT4</div>
+                            <div className="text-xs text-slate-500">Uniform integer grid</div>
+                          </div>
+                          <span className="text-[10px] font-mono font-bold bg-slate-200 text-slate-700 px-2 py-1 rounded">scale × int</span>
+                        </div>
+                        <div className="relative h-16 mx-2">
+                          <div className="absolute left-0 right-0 top-7 h-1 rounded-full bg-slate-300"></div>
+                          {int4Codebook.map((value) => (
+                            <div
+                              key={`int4-${value}`}
+                              className="absolute top-4 -translate-x-1/2"
+                              style={{ left: `${(value / 7) * 100}%` }}
+                            >
+                              <div className="w-2.5 h-2.5 rounded-full bg-slate-700 ring-2 ring-white"></div>
+                              <div className="mt-2 text-[10px] font-mono text-slate-600">{value}</div>
+                            </div>
+                          ))}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed mt-2">
+                          INT4 is simple and useful, but every adjacent code is one equal step before scaling. Small values can disappear when the scale is set by large outliers.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                      <div className="bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                        <div className="font-bold text-indigo-800 mb-1">FP4 alone is tiny</div>
+                        <div className="text-slate-600">The raw positive codebook only reaches 6, so production systems stretch it with a shared scale.</div>
+                      </div>
+                      <div className="bg-emerald-50 border border-emerald-100 rounded-lg p-3">
+                        <div className="font-bold text-emerald-800 mb-1">Block-scaled use</div>
+                        <div className="font-mono text-slate-700">real value = block scale × FP4 code</div>
+                      </div>
+                      <div className="bg-amber-50 border border-amber-100 rounded-lg p-3">
+                        <div className="font-bold text-amber-800 mb-1">Trade-off</div>
+                        <div className="text-slate-600">FP4 gives more range shape; INT4 gives uniform steps. The better choice depends on the tensor and hardware.</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Conceptual Explanation Panel */}
+                <div className="bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200">
+                  <h2 className="text-xl font-bold text-slate-800 border-b pb-3 mb-6">Concept: The "Underflow Gap"</h2>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-8 items-center">
+                    <div className="space-y-4 text-sm text-slate-600 leading-relaxed">
+                      <p>
+                        In standard scientific notation (like <span className="font-mono bg-slate-100 px-1 rounded">1.23 × 10⁴</span>), we always ensure there is exactly one non-zero digit before the decimal.
+                        In binary, the only non-zero digit is <strong>1</strong>. Therefore, a "Normal" binary number always starts with <span className="font-mono bg-slate-100 px-1 rounded text-emerald-600">1.xxxxx</span>.
+                      </p>
+                      <p>
+                        Because this leading <strong>1</strong> is a mathematical certainty, computer engineers decided <em>not to store it</em>. It is completely "implied", giving us an extra bit of precision for free!
+                      </p>
+                      <p>
+                        <strong>The Problem:</strong> What happens when we reach the smallest possible exponent? The smallest "Normal" number still has that implied <span className="font-mono bg-slate-100 px-1 rounded text-emerald-600">1.0</span>. If we wanted to go smaller, we'd have to drop immediately to <span className="font-mono bg-slate-100 px-1 rounded">0.0</span>, leaving a massive mathematical gap.
+                      </p>
+                      <p>
+                        <strong>The Solution (Denormals):</strong> When the exponent hits absolute zero, IEEE 754 changes the rules. The implied leading bit automatically flips from <span className="font-mono bg-slate-100 px-1 rounded text-emerald-600">1.</span> to <span className="font-mono bg-amber-100 px-1 rounded text-amber-700">0.</span>. This allows the mantissa fraction to represent values smaller than 1.0, filling the gap and allowing the number to gracefully step down to zero (called <em>gradual underflow</em>).
+                      </p>
+                    </div>
+
+                    <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 relative overflow-hidden">
+                      <div className="text-center font-bold text-slate-700 mb-5 uppercase tracking-wider text-xs">Gradual Underflow Near Zero</div>
+
+                      <div className="relative h-48">
+                        <div className="absolute left-0 right-0 top-20 h-0.5 bg-slate-300"></div>
+                        <div className="absolute left-0 top-20 h-1.5 w-[78%] -translate-y-1/2 rounded-full bg-amber-400"></div>
+                        <div className="absolute left-[78%] right-0 top-20 h-1.5 -translate-y-1/2 rounded-full bg-emerald-500"></div>
+
+                        <div className="absolute left-0 top-11 h-14 w-px bg-slate-500"></div>
+                        <div className="absolute left-0 top-4 -translate-x-1/2 text-xs font-mono font-bold text-slate-600">0</div>
+
+                        <div className="absolute left-[14%] top-16 h-8 w-px bg-amber-500"></div>
+                        <div className="absolute left-[14%] top-1 -translate-x-1/2 text-center text-[10px] font-bold text-amber-700 leading-tight">
+                          Min<br/>Subnormal
+                        </div>
+
+                        <div className="absolute left-[34%] top-[68px] h-6 w-px bg-amber-500"></div>
+                        <div className="absolute left-[56%] top-[68px] h-6 w-px bg-amber-500"></div>
+
+                        <div className="absolute left-[72%] top-16 h-8 w-px bg-amber-600"></div>
+                        <div className="absolute left-[72%] top-[96px] -translate-x-1/2 text-center text-[10px] font-bold text-amber-700 leading-tight">
+                          Max<br/>Subnormal
+                        </div>
+
+                        <div className="absolute left-[78%] top-8 h-24 w-0.5 bg-emerald-600"></div>
+                        <div className="absolute left-[78%] top-0 -translate-x-1/2 text-center text-xs font-bold text-emerald-700 leading-tight">
+                          Min +Normal<br/>
+                          <span className="text-[10px] font-semibold text-slate-500">Implied 1.</span>
+                        </div>
+
+                        <div className="absolute right-0 top-[72px] h-4 w-px bg-emerald-500"></div>
+                        <div className="absolute right-0 top-9 text-[10px] font-bold text-emerald-700">Normal values</div>
+
+                        <div className="absolute left-[7%] right-[24%] bottom-[52px] border-x border-b border-amber-400 h-5"></div>
+                        <div className="absolute left-[8%] right-[25%] bottom-4 text-center">
+                          <div className="text-xs font-bold text-amber-700">Subnormals fill the underflow gap</div>
+                          <div className="text-[10px] font-semibold text-slate-500 mt-1">Exponent bits = 0, implied bit = 0.</div>
+                        </div>
+
+                        <div className="absolute left-[80%] right-0 bottom-4 text-center">
+                          <div className="text-xs font-bold text-emerald-700">Normal range</div>
+                          <div className="text-[10px] font-semibold text-slate-500 mt-1">Exponent bits &gt; 0, implied bit = 1.</div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

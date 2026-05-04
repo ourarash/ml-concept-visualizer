@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Speculative Decoding Sandbox</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- React & ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <!-- Babel -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    /* Custom animations for the 'Race' */
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .token-animate { animation: slideIn 0.3s ease-out forwards; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans selection:bg-indigo-200 selection:text-indigo-900 pb-20">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useMemo, useEffect } = React;
+
+    const App = () => {
+      // --- DATA SCENARIOS ---
+      const scenarios = {
+        fall: {
+          name: "Fall Leaves",
+          prompt: "My favorite thing about fall is the change in color. I love",
+          drafts: [
+            { id: 1, word: "seeing", isCorrect: true, correction: "watching" },
+            { id: 2, word: "the", isCorrect: true, correction: "autumn" },
+            { id: 3, word: "leaves", isCorrect: true, correction: "trees" },
+            { id: 4, word: "changes", isCorrect: false, correction: "change" },
+          ]
+        },
+        moon: {
+          name: "The Moon",
+          prompt: "The moon is",
+          drafts: [
+            { id: 1, word: "bright", isCorrect: true, correction: "beautiful" },
+            { id: 2, word: "and", isCorrect: true, correction: "," },
+            { id: 3, word: "cold", isCorrect: false, correction: "silent" },
+            { id: 4, word: "tonight", isCorrect: true, correction: "outside" },
+          ]
+        },
+        obama: {
+          name: "Barack Obama",
+          prompt: "[Start] Barack Obama was born",
+          drafts: [
+            { id: 1, word: "on", isCorrect: false, correction: "in" },
+            { id: 2, word: "Hawaii", isCorrect: true, correction: "Honolulu" },
+            { id: 3, word: "August", isCorrect: true, correction: "the" },
+            { id: 4, word: "4th", isCorrect: true, correction: "4" },
+          ]
+        }
+      };
+
+      // --- STATE ---
+      const [activeKey, setActiveKey] = useState('fall');
+      // Create a deep copy to prevent mutation bugs between scenario swaps
+      const [currentDrafts, setCurrentDrafts] = useState(scenarios['fall'].drafts.map(d => ({...d})));
+      const [hasRunPass, setHasRunPass] = useState(false);
+
+      const scenario = scenarios[activeKey];
+
+      // --- LOGIC ---
+      const handleScenarioChange = (key) => {
+        setActiveKey(key);
+        setCurrentDrafts(scenarios[key].drafts.map(d => ({...d})));
+        setHasRunPass(false); // Reset the race
+      };
+
+      const setDraftCorrectness = (index, isCorrect) => {
+        if (hasRunPass) return; // Prevent toggling after the race runs
+
+        // Correct immutable state update
+        const newDrafts = currentDrafts.map((draft, i) => {
+          if (i === index) {
+            return { ...draft, isCorrect: isCorrect };
+          }
+          return draft;
+        });
+        setCurrentDrafts(newDrafts);
+      };
+
+      // Calculate the "Discard Cascade"
+      const firstErrorIndex = currentDrafts.findIndex(d => !d.isCorrect);
+
+      // Calculate Final Output Tokens
+      const standardOutput = [currentDrafts[0].correction];
+
+      const speculativeOutput = [];
+      for (let i = 0; i < currentDrafts.length; i++) {
+        if (currentDrafts[i].isCorrect) {
+          speculativeOutput.push({ word: currentDrafts[i].word, type: 'accepted' });
+        } else {
+          // Hit an error! Add the correction, and STOP processing.
+          speculativeOutput.push({ word: currentDrafts[i].correction, type: 'corrected' });
+          break;
+        }
+      }
+
+      // If ALL drafts were perfectly correct, the Expert still does 1 more prediction for free
+      if (firstErrorIndex === -1) {
+        speculativeOutput.push({ word: "(bonus token)", type: 'bonus' });
+      }
+
+      const speedup = speculativeOutput.length;
+
+      // Inline SVG Spinner for visual effects
+      const LoadingSpinner = () => (
+        <svg className="animate-spin h-5 w-5 text-slate-300" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+        </svg>
+      );
+
+      return (
+        <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
+
+          {/* HEADER */}
+          <div className="text-center space-y-3">
+            <h1 className="text-4xl font-extrabold text-slate-900 tracking-tight">The Speculative Decoding "Assembly Line"</h1>
+            <p className="text-lg text-slate-600 max-w-2xl mx-auto">
+              Large AI models have a severe speed limit: they can only verify <strong>one chunk of text per compute cycle</strong>.
+              Let's see how a tiny "Draft" model breaks this speed limit.
+            </p>
+
+            <div className="flex flex-wrap justify-center gap-2 mt-6">
+              {Object.keys(scenarios).map(key => (
+                <button
+                  key={key}
+                  onClick={() => handleScenarioChange(key)}
+                  className={`px-4 py-2 rounded-full text-sm font-bold transition-all ${activeKey === key ? 'bg-indigo-600 text-white shadow-md' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}
+                >
+                  {scenarios[key].name}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* MAIN INTERACTIVE AREA */}
+          <div className="bg-white rounded-3xl shadow-xl border border-slate-200 overflow-hidden">
+
+            {/* Context Header */}
+            <div className="bg-slate-900 text-slate-300 p-6 flex flex-col md:flex-row items-center gap-4">
+              <div className="bg-slate-800 p-3 rounded-xl border border-slate-700 w-full md:w-auto font-mono text-sm shadow-inner whitespace-normal">
+                <span className="text-slate-500 opacity-60">Prompt: </span>
+                <span className="text-slate-200">{scenario.prompt}</span>
+                <span className="animate-pulse text-indigo-400 font-bold ml-1">_</span>
+              </div>
+            </div>
+
+            {/* Step 1 & 2: The Assembly Line */}
+            <div className="p-8 border-b border-slate-100 bg-slate-50 relative">
+
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-8 relative z-10">
+
+                {/* Left side: Instructions */}
+                <div className="md:col-span-4 space-y-4">
+                  <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                    <span>📝</span> The Intern's Draft
+                  </h2>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    A tiny, lightning-fast "Intern" model drafts 4 words instantly. <br/><br/>
+                    <strong>Your Job:</strong> Act as the massive "Expert" model. Review the draft below. Click a toggle to simulate finding an error.
+                  </p>
+                </div>
+
+                {/* Right side: The Interactive Drafts */}
+                <div className="md:col-span-8 flex flex-col sm:flex-row gap-3 items-center justify-between">
+                  {currentDrafts.map((draft, idx) => {
+                    // Logic for the Discard Cascade
+                    const isDiscarded = firstErrorIndex !== -1 && idx > firstErrorIndex;
+                    const isError = firstErrorIndex === idx;
+
+                    return (
+                      <div key={idx} className="relative flex flex-col items-center w-full">
+
+                        {/* Connecting Line */}
+                        {idx !== 0 && (
+                          <div className={`hidden sm:block absolute right-full top-1/2 -translate-y-1/2 w-full h-1 z-0 ${isDiscarded ? 'bg-slate-200' : 'bg-emerald-200'}`}></div>
+                        )}
+
+                        {/* The Token Box */}
+                        <div className={`relative z-10 w-full p-4 rounded-2xl border-2 flex flex-col items-center gap-3 transition-all duration-300 ${
+                          isDiscarded ? 'bg-slate-100 border-slate-200 opacity-50 grayscale' :
+                          isError ? 'bg-rose-50 border-rose-400 shadow-md' :
+                          'bg-emerald-50 border-emerald-400 shadow-md'
+                        }`}>
+                          <span className={`font-mono text-lg font-bold ${isDiscarded ? 'text-slate-400 line-through decoration-2' : isError ? 'text-rose-700' : 'text-emerald-700'}`}>
+                            {draft.word}
+                          </span>
+
+                          {/* Controls & Labels */}
+                          <div className="h-8 flex items-center justify-center w-full">
+                            {isDiscarded ? (
+                              <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider text-center leading-tight">
+                                Premise Invalid<br/>(Discarded)
+                              </span>
+                            ) : (
+                              <div className="flex w-full bg-white rounded-lg shadow-inner border border-slate-200 overflow-hidden">
+                                <button
+                                  onClick={() => setDraftCorrectness(idx, true)}
+                                  disabled={hasRunPass}
+                                  className={`flex-1 py-1.5 text-xs font-bold transition-all flex justify-center items-center gap-1 ${
+                                    hasRunPass ? 'cursor-not-allowed opacity-80' : 'hover:bg-emerald-50'
+                                  } ${
+                                    draft.isCorrect ? 'bg-emerald-500 text-white hover:bg-emerald-500' : 'text-slate-400'
+                                  }`}
+                                >
+                                  <span>✓</span> Accept
+                                </button>
+                                <button
+                                  onClick={() => setDraftCorrectness(idx, false)}
+                                  disabled={hasRunPass}
+                                  className={`flex-1 py-1.5 text-xs font-bold transition-all flex justify-center items-center gap-1 ${
+                                    hasRunPass ? 'cursor-not-allowed opacity-80' : 'hover:bg-rose-50'
+                                  } ${
+                                    !draft.isCorrect ? 'bg-rose-500 text-white hover:bg-rose-500' : 'text-slate-400'
+                                  }`}
+                                >
+                                  <span>✕</span> Reject
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+
+                        {/* Expert Correction pop-up if error */}
+                        {isError && (
+                          <div className="absolute -bottom-10 bg-indigo-600 text-white text-xs font-bold px-3 py-1.5 rounded-lg shadow-lg whitespace-nowrap z-20 flex flex-col items-center">
+                            <div className="w-3 h-3 bg-indigo-600 rotate-45 absolute -top-1"></div>
+                            <span className="relative">Expert Fixes: "{draft.correction}"</span>
+                          </div>
+                        )}
+
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* THE BIG BUTTON */}
+            <div className="bg-white p-8 flex flex-col items-center justify-center border-b border-slate-100">
+              <button
+                onClick={() => setHasRunPass(true)}
+                disabled={hasRunPass}
+                className={`relative overflow-hidden group px-8 py-4 rounded-2xl font-black text-xl tracking-wide transition-all ${
+                  hasRunPass
+                  ? 'bg-slate-200 text-slate-400 cursor-not-allowed border-2 border-slate-300'
+                  : 'bg-gradient-to-r from-indigo-600 to-purple-600 text-white shadow-[0_10px_40px_-10px_rgba(79,70,229,0.5)] hover:shadow-[0_10px_40px_-5px_rgba(79,70,229,0.7)] hover:-translate-y-1 active:translate-y-0 border-2 border-transparent'
+                }`}
+              >
+                {hasRunPass ? (
+                  <span className="flex items-center gap-2">✅ Compute Cycle Used</span>
+                ) : (
+                  <span className="flex items-center gap-2">⚡ Run 1 Compute Cycle!</span>
+                )}
+              </button>
+
+              {!hasRunPass && (
+                <p className="text-slate-500 text-sm mt-4 font-medium flex items-center gap-2">
+                  <span>ℹ️</span> Click to lock in the batch and see the final speedup.
+                </p>
+              )}
+            </div>
+
+            {/* THE RACE RESULTS (Only visible after clicking the button) */}
+            <div className={`transition-all duration-700 ease-in-out ${hasRunPass ? 'opacity-100 max-h-[800px]' : 'opacity-0 max-h-0 overflow-hidden'}`}>
+              <div className="p-8 bg-slate-50 space-y-8">
+
+                <h2 className="text-xl font-bold text-slate-900 text-center mb-6">Result of exactly 1 Compute Cycle:</h2>
+
+                {/* Track 1: Standard */}
+                <div className="bg-white p-6 rounded-2xl shadow-sm border-2 border-slate-200">
+                  <div className="flex justify-between items-center mb-4">
+                    <h3 className="font-bold text-slate-600 flex items-center gap-2 uppercase tracking-wide text-sm">
+                      <span>⏳</span> Standard Model (No Intern)
+                    </h3>
+                    <span className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-xs font-bold">1 Token Total</span>
+                  </div>
+
+                  <div className="flex gap-2 min-h-[48px]">
+                    <span className="px-4 py-2 bg-indigo-50 text-indigo-800 border-2 border-indigo-200 rounded-xl font-mono font-bold token-animate shadow-sm">
+                      {standardOutput[0]}
+                    </span>
+                    <span className="px-4 py-2 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center">
+                      <LoadingSpinner />
+                    </span>
+                    <span className="px-4 py-2 border-2 border-dashed border-slate-300 rounded-xl flex items-center justify-center">
+                      <LoadingSpinner />
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-3 italic">The massive model had to start from scratch. In 1 cycle, it only generated 1 word.</p>
+                </div>
+
+                {/* Track 2: Speculative */}
+                <div className="bg-white p-6 rounded-2xl shadow-md border-2 border-emerald-400 relative overflow-hidden">
+                  {/* Subtle background glow */}
+                  <div className="absolute -top-20 -right-20 w-64 h-64 bg-emerald-400/10 blur-3xl rounded-full pointer-events-none"></div>
+
+                  <div className="flex justify-between items-center mb-4 relative z-10">
+                    <h3 className="font-bold text-emerald-700 flex items-center gap-2 uppercase tracking-wide text-sm">
+                      <span>🚀</span> Speculative Decoding
+                    </h3>
+                    <span className="bg-emerald-500 text-white px-3 py-1 rounded-full text-xs font-bold shadow-md animate-pulse">
+                      {speedup} Tokens Total!
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap gap-2 min-h-[48px] relative z-10">
+                    {speculativeOutput.map((token, i) => (
+                      <span key={i} className={`px-4 py-2 border-2 rounded-xl font-mono font-bold token-animate shadow-sm ${
+                        token.type === 'accepted' ? 'bg-emerald-50 text-emerald-800 border-emerald-300' :
+                        token.type === 'corrected' ? 'bg-indigo-600 text-white border-indigo-700 shadow-indigo-200 shadow-lg' :
+                        'bg-amber-100 text-amber-800 border-amber-300' // Bonus
+                      }`} style={{ animationDelay: `${i * 0.15}s` }}>
+                        {token.word}
+                      </span>
+                    ))}
+                  </div>
+
+                  <div className="mt-4 text-xs text-slate-600 bg-emerald-50 p-3 rounded-lg border border-emerald-100 relative z-10">
+                    Because the small model drafted ahead, the massive model verified them all <strong>simultaneously</strong>.
+                    {firstErrorIndex !== -1
+                      ? " It accepted the good drafts, instantly corrected the error, and threw away the rest."
+                      : " Every draft was perfect, so it accepted them all and generated a bonus token!"}
+                  </div>
+                </div>
+
+                {/* Try Again Button */}
+                <div className="text-center pt-4">
+                  <button
+                    onClick={() => setHasRunPass(false)}
+                    className="text-indigo-600 font-bold text-sm hover:underline flex items-center justify-center gap-1 mx-auto"
+                  >
+                    <span>🔄</span> Reset & Try a Different Rejection
+                  </button>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+
+          {/* Educational Footnote */}
+          <div className="flex items-start gap-4 p-6 bg-indigo-50 text-indigo-900 rounded-2xl border border-indigo-100">
+             <span className="text-3xl shrink-0">💡</span>
+             <div>
+               <h4 className="font-bold mb-1">The "Ah-ha!" Moment</h4>
+               <p className="text-sm opacity-90 leading-relaxed">
+                 Notice how rejecting a word (like "trees") instantly trashes the word after it ("change"). This is because language is <em>autoregressive</em>. "change" was drafted assuming the previous word was "trees". Once the Expert changes "trees" to "leaves", the context has changed, meaning the intern's future drafts are no longer mathematically valid and must be thrown away!
+               </p>
+             </div>
+          </div>
+
+          {/* NEW DEEP DIVE SECTION: How Parallel Verification Works */}
+          <div className="bg-slate-900 text-white rounded-3xl shadow-xl overflow-hidden mt-8">
+             <div className="p-8 border-b border-slate-800">
+                <h2 className="text-2xl font-bold flex items-center gap-3">
+                   <span className="text-3xl">🔍</span> Deep Dive: How is Parallel Verification Possible?
+                </h2>
+                <p className="text-slate-400 mt-2">
+                   You might be wondering: <em>"If a Transformer only generates one word at a time, how can it verify 4 words in a single step?"</em> It comes down to the difference between generating new text versus evaluating existing text.
+                </p>
+             </div>
+
+             {/* FLEX WRAPPER FOR 2-COLUMN SECTION */}
+             <div className="flex flex-col bg-slate-800 gap-px">
+
+                {/* 2-COLUMN GRID (Generation vs Matrix) */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-px">
+
+                  {/* Panel 1: Generation */}
+                  <div className="bg-slate-900 p-8">
+                     <h3 className="text-lg font-bold text-indigo-400 mb-4 uppercase tracking-wider text-sm flex items-center gap-2">
+                        <span>⏳</span> 1. Generating (Autoregressive Vector)
+                     </h3>
+                     <p className="text-sm text-slate-400 mb-6">When <strong>writing</strong> new text, the model is blind to the future. It processes a <strong className="text-indigo-300 bg-indigo-900/50 px-1 rounded">1D Vector</strong> representing the current sequence. It must compute the 1st word before it can append it and begin computing the 2nd word.</p>
+
+                     <div className="space-y-4 font-mono text-xs">
+                        {/* CYCLE 1 */}
+                        <div className="flex items-center gap-3 opacity-50">
+                          <div className="flex gap-0.5 shrink-0" title="1D Vector length: 1">
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-slate-700/50 border border-slate-700 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-slate-700/50 border border-slate-700 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-slate-700/50 border border-slate-700 rounded-sm"></div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-1"><div className="bg-slate-800 p-2 rounded flex-1">Prompt</div> <span className="text-indigo-400 shrink-0">→ Cycle 1 →</span> <div className="bg-indigo-900 border border-indigo-500 p-2 rounded">seeing</div></div>
+                        </div>
+
+                        {/* CYCLE 2 */}
+                        <div className="flex items-center gap-3 opacity-70">
+                          <div className="flex gap-0.5 shrink-0" title="1D Vector length: 2">
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-slate-700/50 border border-slate-700 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-slate-700/50 border border-slate-700 rounded-sm"></div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-1"><div className="bg-slate-800 p-2 rounded flex-1 truncate">P + seeing</div> <span className="text-indigo-400 shrink-0">→ Cycle 2 →</span> <div className="bg-indigo-900 border border-indigo-500 p-2 rounded">the</div></div>
+                        </div>
+
+                        {/* CYCLE 3 */}
+                        <div className="flex items-center gap-3 opacity-85">
+                          <div className="flex gap-0.5 shrink-0" title="1D Vector length: 3">
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm"></div>
+                            <div className="w-4 h-4 bg-slate-700/50 border border-slate-700 rounded-sm"></div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-1"><div className="bg-slate-800 p-2 rounded flex-1 truncate">P + seeing the</div> <span className="text-indigo-400 shrink-0">→ Cycle 3 →</span> <div className="bg-indigo-900 border border-indigo-500 p-2 rounded">leaves</div></div>
+                        </div>
+
+                        {/* CYCLE 4 */}
+                        <div className="flex items-center gap-3">
+                          <div className="flex gap-0.5 shrink-0" title="1D Vector length: 4">
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm shadow-[0_0_8px_rgba(99,102,241,0.5)]"></div>
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm shadow-[0_0_8px_rgba(99,102,241,0.5)]"></div>
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm shadow-[0_0_8px_rgba(99,102,241,0.5)]"></div>
+                            <div className="w-4 h-4 bg-indigo-500 rounded-sm shadow-[0_0_8px_rgba(99,102,241,0.5)]"></div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-1"><div className="bg-slate-800 p-2 rounded flex-1 truncate">P + seeing the leaves</div> <span className="text-indigo-400 shrink-0">→ Cycle 4 →</span> <div className="bg-indigo-900 border border-indigo-500 p-2 rounded">change</div></div>
+                        </div>
+                     </div>
+                     <div className="mt-4 text-center text-[10px] text-slate-500 uppercase tracking-widest font-bold">Total: 4 Separate Compute Cycles</div>
+                  </div>
+
+                  {/* Panel 2: Evaluation */}
+                  <div className="bg-slate-900 p-8 border-l border-slate-800 overflow-hidden">
+                     <h3 className="text-lg font-bold text-emerald-400 mb-4 uppercase tracking-wider text-sm flex items-center gap-2">
+                        <span>🚀</span> 2. Verifying (Parallel Matrix)
+                     </h3>
+                     <p className="text-sm text-slate-400 mb-4">
+                        <strong>The Secret:</strong> Transformers don't output one token at a time. They output a prediction for <em>every single input token simultaneously</em>! During standard generation, we just throw away all but the last one.
+                     </p>
+                     <p className="text-sm text-slate-400 mb-6">
+                        By feeding the entire drafted sequence as a <strong className="text-emerald-300 bg-emerald-900/50 px-1 rounded">2D Matrix</strong>, the GPU calculates the prediction for every position at once.
+                     </p>
+
+                     {/* 2D Matrix Visualization */}
+                     <div className="flex items-center gap-6 mb-8 bg-slate-800/50 p-5 rounded-xl border border-slate-700/50">
+                       <div className="flex flex-col gap-1 shrink-0">
+                         <div className="flex gap-1">
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-slate-700/30 border border-slate-700/50 rounded-sm"></div>
+                           <div className="w-6 h-6 bg-slate-700/30 border border-slate-700/50 rounded-sm"></div>
+                           <div className="w-6 h-6 bg-slate-700/30 border border-slate-700/50 rounded-sm"></div>
+                         </div>
+                         <div className="flex gap-1">
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-slate-700/30 border border-slate-700/50 rounded-sm"></div>
+                           <div className="w-6 h-6 bg-slate-700/30 border border-slate-700/50 rounded-sm"></div>
+                         </div>
+                         <div className="flex gap-1">
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-slate-700/30 border border-slate-700/50 rounded-sm"></div>
+                         </div>
+                         <div className="flex gap-1">
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                           <div className="w-6 h-6 bg-emerald-500 rounded-sm shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+                         </div>
+                       </div>
+                       <div className="text-xs text-slate-400">
+                         <strong className="text-emerald-400 block mb-1 text-sm">Causal Attention Matrix</strong>
+                         The 2D triangular shape forms because each token calculates relationships with itself and all previous tokens at the exact same time. Computed in 1 cycle!
+                       </div>
+                     </div>
+                  </div>
+                </div>
+
+                {/* FULL WIDTH PANEL: Alignment Visualization */}
+                <div className="bg-slate-900 p-8 border-t border-slate-800">
+                   <div className="max-w-4xl mx-auto">
+                     <h3 className="text-lg font-bold text-indigo-400 mb-4 uppercase tracking-wider text-sm flex items-center justify-center gap-2">
+                        <span>🎯</span> 3. The Result: Shifting Alignment
+                     </h3>
+                     <p className="text-sm text-slate-400 mb-8 text-center max-w-2xl mx-auto">
+                        To verify the drafts, we simply match the Expert's massive parallel output at position <code className="text-indigo-300">i</code> against the Intern's draft at <code className="text-indigo-300">i+1</code>.
+                     </p>
+
+                     {/* Shifting Alignment Visualization */}
+                     <div className="bg-slate-800 rounded-2xl border border-slate-700 relative mt-6 mb-4">
+                        <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-emerald-600 text-white text-sm font-bold px-6 py-2 rounded-full uppercase tracking-widest shadow-md whitespace-nowrap z-10">
+                          1 Input Token = 1 Output Prediction
+                        </div>
+
+                        {/* Generous padding ensures the absolutely positioned tooltips inside have room to breathe */}
+                        <div className="overflow-x-auto p-8 pt-12 pb-16 w-full">
+                          <div className="min-w-[500px]">
+
+                            {/* Inputs */}
+                            <div className="flex w-full items-center mb-4">
+                               <div className="w-24 text-right pr-6 text-sm text-slate-400 font-bold uppercase leading-tight">Input<br/>Tokens</div>
+                               <div className="flex-1 flex gap-4">
+                                 <div className="bg-slate-700 text-slate-300 py-4 px-2 rounded-xl flex-1 text-center text-sm font-mono shadow-inner border border-slate-600">Prompt</div>
+                                 <div className="bg-slate-700 text-slate-300 py-4 px-2 rounded-xl flex-1 text-center text-sm font-mono shadow-inner border border-slate-600">seeing</div>
+                                 <div className="bg-slate-700 text-slate-300 py-4 px-2 rounded-xl flex-1 text-center text-sm font-mono shadow-inner border border-slate-600">the</div>
+                                 <div className="bg-slate-700 text-slate-300 py-4 px-2 rounded-xl flex-1 text-center text-sm font-mono shadow-inner border border-slate-600">trees</div>
+                               </div>
+                            </div>
+
+                            {/* Arrows */}
+                            <div className="flex w-full items-center mb-4">
+                               <div className="w-24"></div>
+                               <div className="flex-1 flex gap-4 text-emerald-400 text-center text-2xl font-bold">
+                                 <div className="flex-1">↓</div><div className="flex-1">↓</div><div className="flex-1">↓</div><div className="flex-1">↓</div>
+                               </div>
+                            </div>
+
+                            {/* Outputs */}
+                            <div className="flex w-full items-center mb-8">
+                               <div className="w-24 text-right pr-6 text-sm text-emerald-400 font-bold uppercase leading-tight">Expert<br/>Predicts</div>
+                               <div className="flex-1 flex gap-4">
+                                 <div className="bg-emerald-900/50 border border-emerald-500 text-emerald-300 p-4 rounded-xl flex-1 text-center flex flex-col items-center shadow-lg relative">
+                                   <span className="font-mono text-sm mt-0.5">"seeing"</span>
+                                   <span className="text-[11px] font-bold mt-2.5 bg-emerald-500/20 px-2 py-1 rounded text-emerald-200">p: 95%</span>
+                                 </div>
+                                 <div className="bg-emerald-900/50 border border-emerald-500 text-emerald-300 p-4 rounded-xl flex-1 text-center flex flex-col items-center shadow-lg relative">
+                                   <span className="font-mono text-sm mt-0.5">"the"</span>
+                                   <span className="text-[11px] font-bold mt-2.5 bg-emerald-500/20 px-2 py-1 rounded text-emerald-200">p: 99%</span>
+                                 </div>
+                                 <div className="bg-rose-900/50 border border-rose-500 text-rose-300 p-4 rounded-xl flex-1 text-center flex flex-col items-center shadow-lg relative">
+                                   <span className="font-mono text-sm mt-0.5 line-through">"trees"</span>
+                                   <span className="text-[11px] font-bold mt-2.5 bg-rose-500/20 px-2 py-1 rounded text-rose-200">p: 15%</span>
+                                 </div>
+                                 <div className="bg-slate-800 border border-slate-600 text-slate-500 p-4 rounded-xl flex-1 text-center flex flex-col items-center opacity-40 shadow-none">
+                                   <span className="font-mono text-sm mt-0.5">"changes"</span>
+                                   <span className="text-[11px] font-bold mt-2.5 bg-slate-500/20 px-2 py-1 rounded text-slate-400">Ignored</span>
+                                 </div>
+                               </div>
+                            </div>
+
+                            {/* Verification matching */}
+                            <div className="flex w-full items-center mt-10 pt-8 border-t border-slate-700/50">
+                               <div className="w-24 text-right pr-6 text-sm text-slate-400 font-bold uppercase leading-tight">Result</div>
+                               <div className="flex-1 flex gap-4">
+                                 <div className="text-emerald-400 text-sm font-bold text-center flex-1 bg-emerald-500/10 py-3 rounded-xl border border-emerald-500/20">Matches Draft 1 ✅</div>
+                                 <div className="text-emerald-400 text-sm font-bold text-center flex-1 bg-emerald-500/10 py-3 rounded-xl border border-emerald-500/20">Matches Draft 2 ✅</div>
+                                 <div className="text-rose-400 text-sm font-bold text-center flex-1 relative group bg-rose-500/10 py-3 rounded-xl border border-rose-500/20">
+                                    Fails Draft 3 ❌
+                                    <div className="absolute top-12 left-1/2 -translate-x-1/2 w-max bg-indigo-600 text-white px-4 py-2 rounded-lg text-xs z-20 shadow-[0_0_15px_rgba(79,70,229,0.5)]">Expert Fixes: "leaves"</div>
+                                 </div>
+                                 <div className="text-slate-500 text-sm font-bold text-center flex-1 opacity-40 py-3 border border-dashed border-slate-600 rounded-xl">Cascade Discard</div>
+                               </div>
+                            </div>
+
+                          </div>
+                        </div>
+
+                     </div>
+                   </div>
+                </div>
+             </div>
+
+             <div className="bg-slate-800 p-6 text-sm text-slate-300 border-t border-slate-700 flex flex-col gap-4">
+                <div className="flex items-start gap-4">
+                  <span className="text-2xl shrink-0">⚖️</span>
+                  <p className="leading-relaxed text-slate-400">
+                    <strong>How does it Reject? (The Math):</strong> The Expert compares its own calculated probability <strong>p(x)</strong> against the Intern's probability <strong>q(x)</strong>.
+                    If <code>p(x) &gt; q(x)</code>, the token is accepted. If the Intern was vastly overconfident (like "trees" above where <code>p(x) &lt; q(x)</code>), the Expert rejects the Intern's draft and uses its own output instead!
+                  </p>
+                </div>
+             </div>
+          </div>
+
+        </div>
+      );
+    };
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
