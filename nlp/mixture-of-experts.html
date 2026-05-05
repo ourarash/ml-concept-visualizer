@@ -1,0 +1,1438 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Mixture of Experts (MoE) — Interactive Visualizer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap');
+
+:root {
+  --bg:#0a0e1a; --surface:#111827; --surface2:#1a2236;
+  --border:#1e2d4a; --accent:#38bdf8; --accent2:#818cf8;
+  --accent3:#34d399; --warn:#fb923c; --text:#e2e8f0; --muted:#64748b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+/* ── HEADER ── */
+header{
+  padding:2.5rem 2rem 1.8rem;border-bottom:1px solid var(--border);
+  background:linear-gradient(180deg,#0d1526 0%,var(--bg) 100%);
+  position:relative;overflow:hidden;
+}
+header::before{
+  content:'';position:absolute;inset:0;pointer-events:none;
+  background:radial-gradient(ellipse 60% 120% at 70% -20%,rgba(56,189,248,.08) 0%,transparent 70%);
+}
+.header-inner{max-width:1100px;margin:0 auto;position:relative}
+.kicker{
+  font-family:'JetBrains Mono',monospace;font-size:.72rem;
+  letter-spacing:.18em;color:var(--accent);text-transform:uppercase;margin-bottom:.6rem;
+}
+h1{font-size:clamp(1.8rem,4vw,2.8rem);font-weight:800;line-height:1.1}
+h1 span{color:var(--accent)}
+.subtitle{color:var(--muted);font-size:1rem;margin-top:.5rem;max-width:680px;line-height:1.6}
+
+/* ── TABS ── */
+.tab-nav{
+  display:flex;gap:.25rem;flex-wrap:wrap;
+  max-width:1100px;margin:0 auto;padding:1.2rem 2rem 0;
+}
+.tab-btn{
+  font-family:'Syne',sans-serif;font-size:.85rem;font-weight:600;
+  padding:.45rem 1.1rem;border-radius:6px;border:1px solid transparent;
+  background:transparent;color:var(--muted);cursor:pointer;transition:all .18s;
+}
+.tab-btn:hover{color:var(--text);border-color:var(--border);background:var(--surface)}
+.tab-btn.active{background:var(--accent);color:#0a0e1a;border-color:var(--accent)}
+
+/* ── MAIN ── */
+main{max-width:1100px;margin:0 auto;padding:2rem}
+.section{display:none;animation:fadeIn .3s ease}
+.section.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+/* ── CARDS ── */
+.card{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:12px;padding:1.5rem;margin-bottom:1.5rem;
+}
+.card-title{
+  font-size:.7rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;
+  color:var(--accent);margin-bottom:1rem;font-family:'JetBrains Mono',monospace;
+}
+
+/* ── CONTROLS ── */
+.controls{display:flex;flex-wrap:wrap;gap:1.2rem;align-items:flex-end;margin-bottom:1.5rem}
+.ctrl-group{display:flex;flex-direction:column;gap:.3rem}
+.ctrl-label{font-size:.75rem;color:var(--muted);font-family:'JetBrains Mono',monospace;letter-spacing:.04em}
+.ctrl-val{font-size:.95rem;font-weight:700;color:var(--text)}
+input[type=range]{
+  -webkit-appearance:none;appearance:none;
+  width:130px;height:4px;border-radius:2px;
+  background:var(--border);outline:none;cursor:pointer;
+}
+input[type=range]::-webkit-slider-thumb{
+  -webkit-appearance:none;width:14px;height:14px;
+  border-radius:50%;background:var(--accent);cursor:pointer;
+  box-shadow:0 0 0 3px rgba(56,189,248,.2);
+}
+input[type=range]::-moz-range-thumb{
+  width:14px;height:14px;border-radius:50%;background:var(--accent);
+  border:none;cursor:pointer;
+}
+select{
+  font-family:'Syne',sans-serif;font-size:.85rem;
+  background:var(--surface2);color:var(--text);
+  border:1px solid var(--border);border-radius:6px;
+  padding:.4rem .8rem;cursor:pointer;outline:none;
+}
+.btn{
+  font-family:'Syne',sans-serif;font-size:.85rem;font-weight:700;
+  padding:.5rem 1.2rem;border-radius:8px;border:none;cursor:pointer;transition:all .18s;
+  white-space:nowrap;
+}
+.btn-primary{background:var(--accent);color:#0a0e1a}
+.btn-primary:hover{filter:brightness(1.15)}
+.btn-primary:disabled{opacity:.45;cursor:not-allowed;filter:none}
+.btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── CANVAS ── */
+.canvas-wrap{
+  border-radius:10px;overflow:hidden;background:var(--surface2);
+  border:1px solid var(--border);position:relative;
+}
+canvas{display:block;width:100%;height:auto}
+
+/* ── LOG ── */
+#token-log{
+  font-family:'JetBrains Mono',monospace;font-size:.76rem;
+  background:#060a14;border:1px solid var(--border);
+  border-radius:8px;padding:1rem;max-height:160px;
+  overflow-y:auto;color:var(--accent3);line-height:1.9;margin-top:1rem;
+}
+
+/* ── ANNOTATION ── */
+.annotation{
+  font-family:'JetBrains Mono',monospace;font-size:.78rem;
+  background:var(--surface2);border-left:3px solid var(--accent);
+  padding:.8rem 1rem;border-radius:0 8px 8px 0;
+  color:var(--text);margin-top:1rem;line-height:1.7;
+}
+.annotation b{color:var(--accent)}
+
+/* ── CONCEPT GRID ── */
+.concept-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem}
+.concept-card{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:10px;padding:1.2rem;
+}
+.concept-card h3{font-size:.92rem;font-weight:700;margin-bottom:.5rem}
+.concept-card p{font-size:.81rem;color:var(--muted);line-height:1.6}
+.badge{
+  display:inline-block;font-size:.68rem;font-weight:700;
+  padding:.15rem .5rem;border-radius:4px;margin-bottom:.4rem;
+  font-family:'JetBrains Mono',monospace;letter-spacing:.05em;
+}
+
+/* ── STATS ── */
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:.8rem;margin-bottom:1.5rem}
+.stat-box{
+  background:var(--surface2);border:1px solid var(--border);
+  border-radius:8px;padding:.9rem;text-align:center;
+}
+.stat-val{font-size:1.4rem;font-weight:800;color:var(--accent);font-family:'JetBrains Mono',monospace}
+.stat-label{font-size:.68rem;color:var(--muted);margin-top:.25rem;font-family:'JetBrains Mono',monospace}
+
+/* ── TABLE ── */
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.82rem;min-width:520px}
+th{text-align:left;padding:.6rem .8rem;color:var(--muted);border-bottom:1px solid var(--border);
+   font-family:'JetBrains Mono',monospace;font-size:.7rem;letter-spacing:.08em}
+td{padding:.6rem .8rem;border-bottom:1px solid #131c2e;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.good{color:#34d399}.bad{color:#f87171}.med{color:#fb923c}
+
+/* ── LEGEND ── */
+.legend{display:flex;flex-wrap:wrap;gap:.6rem 1.2rem;margin-top:.8rem}
+.legend-item{display:flex;align-items:center;gap:.4rem;font-size:.78rem;color:var(--muted)}
+.legend-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+
+/* ── MOBILE ── */
+@media(max-width:640px){
+  main{padding:1rem}
+  .controls{gap:.8rem}
+  input[type=range]{width:100px}
+  .tab-nav{padding:1rem 1rem 0}
+}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <p class="kicker">EE508 · Systems for ML · Interactive Visualizer</p>
+    <h1>Mixture of <span>Experts</span></h1>
+    <p class="subtitle">Explore sparse activation, token routing, load balancing, and hardware implications of MoE — the architecture behind GPT-4, Mixtral, Gemini, and every frontier model today.</p>
+  </div>
+</header>
+
+<div class="tab-nav" id="tab-nav">
+  <button class="tab-btn active" onclick="showTab('overview',this)">① Overview</button>
+  <button class="tab-btn" onclick="showTab('routing',this)">② Router &amp; Gating</button>
+  <button class="tab-btn" onclick="showTab('loadbalance',this)">③ Load Balancing</button>
+  <button class="tab-btn" onclick="showTab('hardware',this)">④ Hardware Costs</button>
+  <button class="tab-btn" onclick="showTab('compare',this)">⑤ Dense vs Sparse</button>
+</div>
+
+<main>
+
+<!-- ══════════════ SECTION 1: OVERVIEW ══════════════ -->
+<div class="section active" id="sec-overview">
+  <div class="card">
+    <p class="card-title">Core Idea</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(56,189,248,.15);color:var(--accent)">Dense FFN</span>
+        <h3>Traditional Transformer FFN</h3>
+        <p>Every token passes through <em>one</em> large FFN. All parameters active on all tokens. Compute scales linearly with model size.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(52,211,153,.15);color:var(--accent3)">Sparse MoE</span>
+        <h3>Mixture of Experts FFN</h3>
+        <p>The FFN is split into N <strong>Expert</strong> sub-networks. Each token activates only <strong>top-k experts</strong>. Parameters ↑ but FLOPs/token stays constant.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(129,140,248,.15);color:var(--accent2)">Router</span>
+        <h3>Gating Network</h3>
+        <p>A learned linear router maps token embeddings → expert scores. Softmax + top-k selection decides which experts process each token.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(251,146,60,.15);color:var(--warn)">Key Insight</span>
+        <h3>Parameter Efficiency</h3>
+        <p>Mixtral 8×7B: 46.7B total params, only 12.9B active per token — yet beats Llama-2 70B on most benchmarks at 6× less compute.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Architecture — Click "Animate Token" to watch a forward pass</p>
+    <div class="controls">
+      <div class="ctrl-group">
+        <span class="ctrl-label">Experts (N)</span>
+        <span class="ctrl-val" id="lbl-n">8</span>
+        <input type="range" min="2" max="8" value="8" id="sl-n" oninput="onOvSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Top-k</span>
+        <span class="ctrl-val" id="lbl-k">2</span>
+        <input type="range" min="1" max="4" value="2" id="sl-k" oninput="onOvSlider()">
+      </div>
+      <button class="btn btn-primary" id="btn-animate" onclick="animateToken()">▶ Animate Token</button>
+      <button class="btn btn-ghost" onclick="resetOverview()">↺ Reset</button>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cv-overview"></canvas>
+    </div>
+    <div id="token-log">&gt; Ready — click <strong style="color:var(--accent)">"Animate Token"</strong> to watch a token route through the MoE layer.</div>
+  </div>
+</div>
+
+<!-- ══════════════ SECTION 2: ROUTING ══════════════ -->
+<div class="section" id="sec-routing">
+  <div class="card">
+    <p class="card-title">Gating Mechanism — Step by Step</p>
+    <div class="controls">
+      <div class="ctrl-group">
+        <span class="ctrl-label">Experts (N)</span>
+        <span class="ctrl-val" id="r-lbl-n">6</span>
+        <input type="range" min="2" max="8" value="6" id="r-sl-n" oninput="onRoutingSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Top-k</span>
+        <span class="ctrl-val" id="r-lbl-k">2</span>
+        <input type="range" min="1" max="4" value="2" id="r-sl-k" oninput="onRoutingSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Temperature τ</span>
+        <span class="ctrl-val" id="r-lbl-t">1.0</span>
+        <input type="range" min="1" max="40" value="10" id="r-sl-t" oninput="onRoutingSlider()">
+      </div>
+      <button class="btn btn-primary" onclick="rerouteToken()">🎲 New Token</button>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cv-routing"></canvas>
+    </div>
+    <div class="annotation" id="routing-annotation">Click <b>New Token</b> to generate a fresh routing example.</div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Router Math</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <h3>Step 1 — Linear Projection</h3>
+        <p style="font-family:'JetBrains Mono',monospace;color:var(--accent);margin:.4rem 0">g(x) = W_g · x</p>
+        <p>Token embedding <em>x</em> projected to N logits — one per expert. W_g is small: d_model × N.</p>
+      </div>
+      <div class="concept-card">
+        <h3>Step 2 — Softmax</h3>
+        <p style="font-family:'JetBrains Mono',monospace;color:var(--accent);margin:.4rem 0">p = Softmax(g(x) / τ)</p>
+        <p>Temperature τ controls sharpness. Low τ → near one-hot. High τ → flat uniform. Training uses τ=1.</p>
+      </div>
+      <div class="concept-card">
+        <h3>Step 3 — Top-k Select</h3>
+        <p style="font-family:'JetBrains Mono',monospace;color:var(--accent);margin:.4rem 0">S = TopK(p, k)</p>
+        <p>Pick k highest-probability experts. Only these run forward pass. All others are skipped entirely.</p>
+      </div>
+      <div class="concept-card">
+        <h3>Step 4 — Weighted Sum</h3>
+        <p style="font-family:'JetBrains Mono',monospace;color:var(--accent);margin:.4rem 0">y = Σᵢ∈S p̃ᵢ · Eᵢ(x)</p>
+        <p>Selected expert outputs combined by renormalized routing weights p̃ᵢ = pᵢ / Σⱼ∈S pⱼ.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SECTION 3: LOAD BALANCE ══════════════ -->
+<div class="section" id="sec-loadbalance">
+  <div class="card">
+    <p class="card-title">Load Balancing — The Core Training Challenge</p>
+    <div class="controls">
+      <div class="ctrl-group">
+        <span class="ctrl-label">Experts (N)</span>
+        <span class="ctrl-val" id="lb-lbl-n">8</span>
+        <input type="range" min="2" max="8" value="8" id="lb-sl-n" oninput="onLBSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Tokens/batch</span>
+        <span class="ctrl-val" id="lb-lbl-t">64</span>
+        <input type="range" min="16" max="128" step="8" value="64" id="lb-sl-t" oninput="onLBSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Collapse bias</span>
+        <span class="ctrl-val" id="lb-lbl-c">5</span>
+        <input type="range" min="1" max="10" value="5" id="lb-sl-c" oninput="onLBSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Mode</span>
+        <select id="lb-mode" onchange="onLBSlider()">
+          <option value="collapse">Expert Collapse (no aux loss)</option>
+          <option value="balanced">Balanced (with aux loss)</option>
+          <option value="random">Random baseline</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="runLBSim()">▶ Re-sample</button>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cv-lb"></canvas>
+    </div>
+    <div class="annotation" id="lb-annotation">Select a mode and click <b>Re-sample</b> to simulate routing distributions.</div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Why Balance Matters</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <h3>Expert Collapse</h3>
+        <p>Without regularization the router converges to always picking the same 1–2 experts. 6 of 8 experts receive ~0 tokens — their parameters are wasted.</p>
+      </div>
+      <div class="concept-card">
+        <h3>Auxiliary Loss (Switch)</h3>
+        <p style="font-family:'JetBrains Mono',monospace;color:var(--accent);margin:.4rem 0">L_aux = α·N · Σᵢ fᵢ·Pᵢ</p>
+        <p>f_i = fraction of tokens routed to expert i. P_i = mean router probability. Penalizes imbalance differentiably.</p>
+      </div>
+      <div class="concept-card">
+        <h3>Expert Capacity</h3>
+        <p>Buffer size: capacity = ⌊tokens/N⌋ × C. Tokens beyond capacity are <em>dropped</em> (residual bypass). C=1.0–1.25 is typical.</p>
+      </div>
+      <div class="concept-card">
+        <h3>Real-World Variants</h3>
+        <p>Mixtral: top-2, no dropping. Switch: top-1, capacity=1.25. DeepSeek-V3: 256 experts, top-8 fine-grained routing.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SECTION 4: HARDWARE ══════════════ -->
+<div class="section" id="sec-hardware">
+  <div class="card">
+    <p class="card-title">Hardware Implications — Why MoE is Hard to Deploy</p>
+    <div class="stats-row">
+      <div class="stat-box"><div class="stat-val" id="hw-params">—</div><div class="stat-label">Total Params</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-active">—</div><div class="stat-label">Active Params/Token</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-ratio">—</div><div class="stat-label">Sparsity Ratio</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-mem">—</div><div class="stat-label">Memory (bf16)</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-flops">—</div><div class="stat-label">FLOPs/Token</div></div>
+    </div>
+    <div class="controls">
+      <div class="ctrl-group">
+        <span class="ctrl-label">Experts (N)</span>
+        <span class="ctrl-val" id="hw-lbl-n">8</span>
+        <input type="range" min="2" max="64" value="8" id="hw-sl-n" oninput="onHWSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Top-k</span>
+        <span class="ctrl-val" id="hw-lbl-k">2</span>
+        <input type="range" min="1" max="8" value="2" id="hw-sl-k" oninput="onHWSlider()">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-label">Expert FFN dim</span>
+        <span class="ctrl-val" id="hw-lbl-d">4096</span>
+        <input type="range" min="512" max="16384" step="512" value="4096" id="hw-sl-d" oninput="onHWSlider()">
+      </div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cv-hw"></canvas>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">All-to-All Communication Pattern</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <h3 style="color:var(--accent)">Expert Parallelism</h3>
+        <p>Experts spread across GPUs. Each holds N/D experts. Tokens must be dispatched to the right device — requires an <strong>All-to-All collective</strong> per MoE layer.</p>
+      </div>
+      <div class="concept-card">
+        <h3 style="color:var(--warn)">Communication Bottleneck</h3>
+        <p>All-to-All = O(B × d_model) bytes per device pair. Doesn't overlap with compute — hard synchronization barrier at every layer boundary.</p>
+      </div>
+      <div class="concept-card">
+        <h3 style="color:var(--accent3)">Memory vs Compute</h3>
+        <p>Dense 70B: 140GB, high FLOPs. MoE 8×7B: 94GB, low FLOPs. You pay in memory, not arithmetic — often memory-bandwidth bound on A100/H100.</p>
+      </div>
+      <div class="concept-card">
+        <h3 style="color:var(--accent2)">Token Dropping</h3>
+        <p>When an expert buffer overflows, tokens skip expert computation entirely (residual stream passthrough). Introduces approximation but maintains throughput SLA.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ SECTION 5: COMPARE ══════════════ -->
+<div class="section" id="sec-compare">
+  <div class="card">
+    <p class="card-title">Dense vs Sparse MoE — Tradeoffs</p>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr><th>Dimension</th><th>Dense Transformer</th><th>Sparse MoE</th><th>Verdict</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Parameter count</td><td>70B</td><td>8×13B = 104B total, 13B active</td><td class="good">MoE — more capacity</td></tr>
+        <tr><td>FLOPs per token</td><td>~140T (70B model)</td><td>~26T (top-2 of 8)</td><td class="good">MoE — 5× cheaper</td></tr>
+        <tr><td>Memory required</td><td>140 GB (bf16)</td><td>208 GB (all experts)</td><td class="bad">Dense — fits fewer GPUs</td></tr>
+        <tr><td>Inference throughput</td><td>~1× baseline</td><td>~4–6× baseline</td><td class="good">MoE — less compute/token</td></tr>
+        <tr><td>Training stability</td><td>High</td><td>Moderate (collapse risk)</td><td class="bad">Dense</td></tr>
+        <tr><td>Communication cost</td><td>Low</td><td>High (All-to-All per layer)</td><td class="bad">Dense</td></tr>
+        <tr><td>Quality at same FLOPs</td><td>Baseline</td><td>+20–40% better loss</td><td class="good">MoE</td></tr>
+        <tr><td>Serving complexity</td><td>Simple</td><td>Complex (capacity, routing)</td><td class="bad">Dense</td></tr>
+        <tr><td>Expert specialization</td><td>N/A</td><td>Emergent domain experts</td><td class="good">MoE — interpretability</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Notable MoE Models</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(56,189,248,.15);color:var(--accent)">2017</span>
+        <h3>Sparsely-Gated MoE</h3>
+        <p>Shazeer et al. — First large-scale MoE in LM. 137B params, top-2. Proved sparse routing can match dense quality at fraction of FLOPs.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(52,211,153,.15);color:var(--accent3)">2021</span>
+        <h3>Switch Transformer</h3>
+        <p>Google — Top-1 routing, 1.6T params. First to stabilize MoE at trillion-parameter scale with the auxiliary balancing loss.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(129,140,248,.15);color:var(--accent2)">2023</span>
+        <h3>Mixtral 8×7B</h3>
+        <p>Mistral AI — Open-weight, 46.7B total / 12.9B active. Beats Llama-2 70B on most benchmarks with 6× less inference compute.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(251,146,60,.15);color:var(--warn)">2024</span>
+        <h3>DeepSeek-V3 / MoE</h3>
+        <p>256 experts, top-8 fine-grained routing. Auxiliary-loss-free load balancing. State of the art open-source as of 2024.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title">Quality vs Compute Budget (Scaling Law Explorer)</p>
+    <div class="controls">
+      <div class="ctrl-group">
+        <span class="ctrl-label">Compute budget (TFLOPs/token)</span>
+        <span class="ctrl-val" id="cmp-lbl-c">20</span>
+        <input type="range" min="5" max="200" value="20" id="cmp-sl-c" oninput="onCmpSlider()">
+      </div>
+    </div>
+    <div class="canvas-wrap">
+      <canvas id="cv-cmp"></canvas>
+    </div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#38bdf8"></span>Dense model</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#34d399"></span>Sparse MoE</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#fb923c"></span>Your compute budget</div>
+    </div>
+    <div class="annotation" id="cmp-annotation">Drag the slider to explore the quality gap at different compute budgets.</div>
+  </div>
+</div>
+
+</main>
+
+<script>
+'use strict';
+// ══════════════════════════════════════════════════
+// CONSTANTS
+// ══════════════════════════════════════════════════
+const EC = ['#38bdf8','#818cf8','#34d399','#fb923c','#f472b6','#facc15','#a78bfa','#60a5fa'];
+
+// ══════════════════════════════════════════════════
+// GLOBAL ANIMATION STATE — single rAF handle
+// ══════════════════════════════════════════════════
+let _rafHandle = null;
+let _timeoutHandles = [];
+
+function cancelAll() {
+  if (_rafHandle !== null) { cancelAnimationFrame(_rafHandle); _rafHandle = null; }
+  _timeoutHandles.forEach(h => clearTimeout(h));
+  _timeoutHandles = [];
+}
+
+function laterTimeout(fn, ms) {
+  const h = setTimeout(fn, ms);
+  _timeoutHandles.push(h);
+  return h;
+}
+
+// ══════════════════════════════════════════════════
+// MATH UTILS
+// ══════════════════════════════════════════════════
+function softmax(arr, tau) {
+  tau = tau || 1;
+  // Subtract max for numerical stability
+  const mx = Math.max(...arr);
+  const ex = arr.map(v => Math.exp((v - mx) / tau));
+  const s = ex.reduce((a, b) => a + b, 0);
+  return ex.map(v => v / s);
+}
+
+function topKIdx(arr, k) {
+  return arr
+    .map((v, i) => [v, i])
+    .sort((a, b) => b[0] - a[0])
+    .slice(0, k)
+    .map(p => p[1]);
+}
+
+function randNormal() {
+  let u, v;
+  do { u = Math.random(); } while (u === 0);
+  do { v = Math.random(); } while (v === 0);
+  return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+}
+
+function easeInOut(t) { return t < 0.5 ? 2*t*t : -1 + (4-2*t)*t; }
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+// ══════════════════════════════════════════════════
+// CANVAS HELPERS — NO DPR ACCUMULATION
+// ══════════════════════════════════════════════════
+const _canvasCtx = {};   // cache ctx per canvas id
+
+function getCtx(id) {
+  if (!_canvasCtx[id]) _canvasCtx[id] = document.getElementById(id).getContext('2d');
+  return _canvasCtx[id];
+}
+
+// Sets canvas physical pixels to match CSS pixels × dpr, returns [cssW, cssH, ctx]
+function setSize(id, cssH) {
+  const canvas = document.getElementById(id);
+  const dpr = window.devicePixelRatio || 1;
+  const cssW = canvas.parentElement.clientWidth;
+  // Only resize if something actually changed
+  const wantW = Math.round(cssW * dpr);
+  const wantH = Math.round(cssH * dpr);
+  if (canvas.width !== wantW || canvas.height !== wantH) {
+    canvas.width = wantW;
+    canvas.height = wantH;
+    canvas.style.height = cssH + 'px';
+    // Canvas resize resets transform — re-scale
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    _canvasCtx[id] = ctx;
+  }
+  const ctx = _canvasCtx[id] || canvas.getContext('2d');
+  _canvasCtx[id] = ctx;
+  return [cssW, cssH, ctx];
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  if (w < 2 * r) r = w / 2;
+  if (h < 2 * r) r = h / 2;
+  r = Math.max(0, r);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y); ctx.arcTo(x+w, y, x+w, y+r, r);
+  ctx.lineTo(x + w, y + h - r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
+  ctx.lineTo(x + r, y + h); ctx.arcTo(x, y+h, x, y+h-r, r);
+  ctx.lineTo(x, y + r); ctx.arcTo(x, y, x+r, y, r);
+  ctx.closePath();
+}
+
+function arrow(ctx, x, y, color) {
+  ctx.save();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.moveTo(x - 8, y - 4);
+  ctx.lineTo(x, y);
+  ctx.lineTo(x - 8, y + 4);
+  ctx.fill();
+  ctx.restore();
+}
+
+// ══════════════════════════════════════════════════
+// TAB SWITCHING
+// ══════════════════════════════════════════════════
+function showTab(id, btn) {
+  cancelAll();
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('sec-' + id).classList.add('active');
+  btn.classList.add('active');
+
+  // Re-render the newly active section
+  if (id === 'overview') { onOvSlider(); }
+  if (id === 'routing')  { rerouteToken(); }
+  if (id === 'loadbalance') { runLBSim(); }
+  if (id === 'hardware') { onHWSlider(); }
+  if (id === 'compare')  { onCmpSlider(); }
+}
+
+// ══════════════════════════════════════════════════
+// SECTION 1: OVERVIEW
+// ══════════════════════════════════════════════════
+let ovSelected = [];
+
+function onOvSlider() {
+  const n = +document.getElementById('sl-n').value;
+  const k = clamp(+document.getElementById('sl-k').value, 1, n);
+  document.getElementById('lbl-n').textContent = n;
+  document.getElementById('lbl-k').textContent = k;
+  ovSelected = [];
+  drawOverview(n, k, [], null);
+}
+
+function resetOverview() {
+  cancelAll();
+  document.getElementById('btn-animate').disabled = false;
+  const log = document.getElementById('token-log');
+  log.innerHTML = '&gt; Ready — click <strong style="color:var(--accent)">"Animate Token"</strong> to watch a token route through the MoE layer.';
+  onOvSlider();
+}
+
+function drawOverview(n, k, selected, tokenProgress) {
+  // tokenProgress: null = at start, 0.0–1.0 = moving, 'done' = at gate
+  const CSS_H = Math.max(300, Math.min(420, n * 46 + 60));
+  const [W, H, ctx] = setSize('cv-overview', CSS_H);
+  ctx.clearRect(0, 0, W, H);
+
+  // ── Layout math (all in CSS pixels) ──
+  const PAD = 16;
+  const tokR = 22;
+  const gW = 88, gH = 42;
+  const expR = Math.min(24, (H - PAD*2) / (n * 2.2));
+
+  const tokCX = PAD + tokR + 4;
+  const tokCY = H / 2;
+  const gCX = tokCX + tokR + 52 + gW / 2;
+  const gCY = H / 2;
+
+  // Experts column: centered between gate right edge and output
+  const expX = gCX + gW/2 + 70 + expR;
+  const outCX = W - PAD - 24;
+  const outCY = H / 2;
+
+  // Expert Y positions — evenly spaced
+  const eYs = Array.from({length:n}, (_,i) =>
+    PAD + expR + (H - PAD*2 - expR*2) * (n > 1 ? i/(n-1) : 0.5)
+  );
+
+  // ── Draw gate → expert lines ──
+  for (let i = 0; i < n; i++) {
+    const active = selected.includes(i);
+    ctx.save();
+    ctx.beginPath();
+    const mx = gCX + gW/2 + 30;
+    ctx.moveTo(gCX + gW/2, gCY);
+    ctx.bezierCurveTo(mx, gCY, mx, eYs[i], expX - expR, eYs[i]);
+    ctx.strokeStyle = active ? EC[i % EC.length] : 'rgba(30,45,74,0.5)';
+    ctx.lineWidth = active ? 2.5 : 1;
+    ctx.setLineDash(active ? [] : [4, 4]);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Expert → output lines (only for selected) ──
+  for (const i of selected) {
+    ctx.save();
+    ctx.beginPath();
+    const mx = outCX - 40;
+    ctx.moveTo(expX + expR, eYs[i]);
+    ctx.bezierCurveTo(mx, eYs[i], mx, outCY, outCX - 18, outCY);
+    ctx.strokeStyle = EC[i % EC.length] + 'bb';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // ── Draw experts ──
+  for (let i = 0; i < n; i++) {
+    const active = selected.includes(i);
+    const col = EC[i % EC.length];
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(expX, eYs[i], expR, 0, Math.PI*2);
+    ctx.fillStyle = active ? col + '33' : '#111827cc';
+    ctx.fill();
+    ctx.strokeStyle = active ? col : '#1e2d4a';
+    ctx.lineWidth = active ? 2.5 : 1;
+    ctx.stroke();
+    ctx.fillStyle = active ? col : '#475569';
+    ctx.font = `bold ${Math.min(expR * 0.58, 13)}px 'JetBrains Mono', monospace`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('E' + i, expX, eYs[i]);
+    ctx.restore();
+  }
+
+  // ── Gate box ──
+  ctx.save();
+  roundRect(ctx, gCX - gW/2, gCY - gH/2, gW, gH, 8);
+  ctx.fillStyle = '#1a2236';
+  ctx.fill();
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 11px Syne, sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('ROUTER', gCX, gCY - 7);
+  ctx.fillStyle = '#64748b';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.fillText('top-' + k + ' of ' + n, gCX, gCY + 8);
+  ctx.restore();
+
+  // ── Token → gate arrow ──
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(tokCX + tokR, tokCY);
+  ctx.lineTo(gCX - gW/2, tokCY);
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  arrow(ctx, gCX - gW/2, tokCY, '#38bdf8');
+  ctx.restore();
+
+  // ── Output node ──
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(outCX, outCY, 20, 0, Math.PI*2);
+  ctx.fillStyle = selected.length > 0 ? 'rgba(52,211,153,0.18)' : '#111827';
+  ctx.fill();
+  ctx.strokeStyle = selected.length > 0 ? '#34d399' : '#1e2d4a';
+  ctx.lineWidth = 1.5;
+  ctx.stroke();
+  ctx.fillStyle = selected.length > 0 ? '#34d399' : '#475569';
+  ctx.font = 'bold 9px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('OUT', outCX, outCY);
+  ctx.restore();
+
+  // ── Animated token circle ──
+  let tx;
+  if (tokenProgress === null) {
+    tx = tokCX;
+  } else if (tokenProgress === 'done') {
+    tx = gCX - gW/2 - tokR - 4;
+  } else {
+    const target = gCX - gW/2 - tokR - 4;
+    tx = tokCX + (target - tokCX) * tokenProgress;
+  }
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(tx, tokCY, tokR, 0, Math.PI*2);
+  ctx.fillStyle = 'rgba(56,189,248,0.18)';
+  ctx.fill();
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.fillStyle = '#38bdf8';
+  ctx.font = 'bold 9px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('TOKEN', tx, tokCY);
+  ctx.restore();
+
+  // ── Labels ──
+  ctx.save();
+  ctx.fillStyle = '#334155';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('input', tokCX, H - 8);
+  ctx.fillText('router', gCX, H - 8);
+  ctx.fillText('experts', expX, H - 8);
+  ctx.fillText('output', outCX, H - 8);
+  ctx.restore();
+}
+
+function logLine(html) {
+  const el = document.getElementById('token-log');
+  el.innerHTML += '<br>' + html;
+  el.scrollTop = el.scrollHeight;
+}
+
+function animateToken() {
+  cancelAll();
+  const btn = document.getElementById('btn-animate');
+  btn.disabled = true;
+
+  const n = +document.getElementById('sl-n').value;
+  const k = clamp(+document.getElementById('sl-k').value, 1, n);
+
+  const logits = Array.from({length:n}, () => randNormal() * 2.5);
+  const probs  = softmax(logits);
+  const sel    = topKIdx(probs, k);
+
+  logLine('<span style="color:#334155">───────────────────────</span>');
+  logLine('<span style="color:#38bdf8">▶ New token</span> — routing top-' + k + ' of ' + n + ' experts');
+  logLine('  Logits: [' + logits.map(v => v.toFixed(2)).join(', ') + ']');
+  logLine('  Probs:  [' + probs.map(v => (v*100).toFixed(1)+'%').join(', ') + ']');
+
+  // Phase 1: token moves to gate (60 frames)
+  let frame = 0;
+  const FRAMES = 50;
+  function phase1() {
+    const t = easeInOut(clamp(frame / FRAMES, 0, 1));
+    drawOverview(n, k, [], t);
+    frame++;
+    if (frame <= FRAMES) {
+      _rafHandle = requestAnimationFrame(phase1);
+    } else {
+      _rafHandle = null;
+      logLine('  Token at <span style="color:#38bdf8">Router</span> — selecting top-' + k + '...');
+      _timeoutHandles.push(setTimeout(phase2, 250));
+    }
+  }
+
+  // Phase 2: highlight selected experts
+  function phase2() {
+    drawOverview(n, k, sel, 'done');
+    const selStr = sel.map(i =>
+      `<span style="color:${EC[i%EC.length]}">E${i} (${(probs[i]*100).toFixed(1)}%)</span>`
+    ).join(', ');
+    logLine('  <span style="color:#38bdf8">Selected:</span> ' + selStr);
+    _timeoutHandles.push(setTimeout(phase3, 600));
+  }
+
+  // Phase 3: show output
+  function phase3() {
+    ovSelected = sel;
+    drawOverview(n, k, sel, null);
+    logLine('  <span style="color:#34d399">✓ Output computed</span> — weighted sum of ' + k + ' expert outputs');
+    btn.disabled = false;
+  }
+
+  _rafHandle = requestAnimationFrame(phase1);
+}
+
+// ══════════════════════════════════════════════════
+// SECTION 2: ROUTING
+// ══════════════════════════════════════════════════
+let _routingLogits = [];
+
+function onRoutingSlider() {
+  const n = +document.getElementById('r-sl-n').value;
+  const k = clamp(+document.getElementById('r-sl-k').value, 1, n);
+  const tau = +document.getElementById('r-sl-t').value / 10;
+  document.getElementById('r-lbl-n').textContent = n;
+  document.getElementById('r-lbl-k').textContent = k;
+  document.getElementById('r-lbl-t').textContent = tau.toFixed(1);
+  // Regenerate logits if expert count changed, else re-render with new params
+  if (_routingLogits.length !== n) {
+    _routingLogits = Array.from({length:n}, () => randNormal() * 3);
+  }
+  drawRouting(n, k, tau, _routingLogits);
+}
+
+function rerouteToken() {
+  const n = +document.getElementById('r-sl-n').value;
+  const k = clamp(+document.getElementById('r-sl-k').value, 1, n);
+  const tau = +document.getElementById('r-sl-t').value / 10;
+  document.getElementById('r-lbl-n').textContent = n;
+  document.getElementById('r-lbl-k').textContent = k;
+  document.getElementById('r-lbl-t').textContent = tau.toFixed(1);
+  _routingLogits = Array.from({length:n}, () => randNormal() * 3);
+  drawRouting(n, k, tau, _routingLogits);
+}
+
+function drawRouting(n, k, tau, logits) {
+  const probs = softmax(logits, tau);
+  const sel   = topKIdx(probs, k);
+
+  const ROW_H  = Math.min(38, Math.max(24, 280 / n));
+  const CSS_H  = Math.max(180, n * (ROW_H + 8) + 70);
+  const [W, H, ctx] = setSize('cv-routing', CSS_H);
+  ctx.clearRect(0, 0, W, H);
+
+  // Fixed widths
+  const LEFT_LABEL = Math.min(90, W * 0.18);
+  const LOGIT_W    = Math.min(55, W * 0.1);
+  const CHECK_W    = 28;
+  const PCT_W      = 52;
+  const BAR_START  = LEFT_LABEL + LOGIT_W + 12;
+  const BAR_END    = W - CHECK_W - PCT_W - 12;
+  const BAR_MAX_W  = Math.max(20, BAR_END - BAR_START);
+
+  const TOP_PAD = 28;
+
+  // Header
+  ctx.save();
+  ctx.fillStyle = '#334155';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('Expert', 4, 16);
+  ctx.fillText('Logit', LEFT_LABEL, 16);
+  ctx.fillText('Routing Probability', BAR_START, 16);
+  ctx.fillText('Selected', BAR_END + PCT_W - 8, 16);
+  ctx.restore();
+
+  for (let i = 0; i < n; i++) {
+    const col   = EC[i % EC.length];
+    const isSel = sel.includes(i);
+    const y     = TOP_PAD + i * (ROW_H + 7);
+    const midY  = y + ROW_H * 0.6;
+    const fillW = clamp(probs[i] * BAR_MAX_W, 0, BAR_MAX_W);
+
+    // Expert label
+    ctx.save();
+    ctx.fillStyle = isSel ? col : '#475569';
+    ctx.font = `bold ${Math.min(ROW_H*0.42, 12)}px Syne, sans-serif`;
+    ctx.textAlign = 'left';
+    ctx.fillText('Expert ' + i, 4, midY);
+    ctx.restore();
+
+    // Logit
+    ctx.save();
+    ctx.fillStyle = '#64748b';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText(logits[i].toFixed(2), LEFT_LABEL + LOGIT_W, midY);
+    ctx.restore();
+
+    // Bar track
+    ctx.save();
+    roundRect(ctx, BAR_START, y + 2, BAR_MAX_W, ROW_H - 4, 4);
+    ctx.fillStyle = '#0d1526';
+    ctx.fill();
+    ctx.restore();
+
+    // Bar fill
+    if (fillW > 1) {
+      ctx.save();
+      roundRect(ctx, BAR_START, y + 2, fillW, ROW_H - 4, 4);
+      ctx.fillStyle = isSel ? col + 'cc' : col + '30';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Bar border (selected only)
+    if (isSel) {
+      ctx.save();
+      roundRect(ctx, BAR_START, y + 2, BAR_MAX_W, ROW_H - 4, 4);
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 1.8;
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Percent label — always inside/right of bar, never overflow
+    const pctText = (probs[i]*100).toFixed(1) + '%';
+    const pctX = clamp(BAR_START + fillW + 5, BAR_START + 4, BAR_END - 2);
+    ctx.save();
+    ctx.fillStyle = isSel ? col : '#64748b';
+    ctx.font = 'bold 9px JetBrains Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(pctText, pctX, midY);
+    ctx.restore();
+
+    // Checkmark
+    if (isSel) {
+      ctx.save();
+      ctx.fillStyle = col;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText('✓', W - CHECK_W / 2, y + ROW_H / 2);
+      ctx.restore();
+    }
+  }
+
+  // Annotation
+  const selStr = sel.map(i => 'Expert ' + i + ' (' + (probs[i]*100).toFixed(1) + '%)').join(' + ');
+  let hint = '';
+  if (tau < 0.5) hint = 'Very low τ: near-deterministic routing (one-hot). Efficient but less flexible.';
+  else if (tau > 3) hint = 'High τ: near-uniform routing. Poor specialization — all experts get similar load.';
+  else hint = 'Moderate τ: balanced routing with clear winner.';
+  document.getElementById('routing-annotation').innerHTML =
+    '<b>Result:</b> τ=' + tau.toFixed(1) + ' → <b>' + selStr + '</b><br>' + hint;
+}
+
+// ══════════════════════════════════════════════════
+// SECTION 3: LOAD BALANCING
+// ══════════════════════════════════════════════════
+function onLBSlider() {
+  const n = +document.getElementById('lb-sl-n').value;
+  const t = +document.getElementById('lb-sl-t').value;
+  const c = +document.getElementById('lb-sl-c').value;
+  document.getElementById('lb-lbl-n').textContent = n;
+  document.getElementById('lb-lbl-t').textContent = t;
+  document.getElementById('lb-lbl-c').textContent = c;
+  runLBSim();
+}
+
+function runLBSim() {
+  const n = +document.getElementById('lb-sl-n').value;
+  const T = +document.getElementById('lb-sl-t').value;
+  const collapse = +document.getElementById('lb-sl-c').value;
+  const mode = document.getElementById('lb-mode').value;
+
+  const counts = new Array(n).fill(0);
+
+  if (mode === 'collapse') {
+    // Power-law bias toward expert 0
+    const bias = Array.from({length:n}, (_, i) => Math.pow(collapse, n - 1 - i));
+    const total = bias.reduce((a, b) => a + b, 0);
+    for (let t = 0; t < T; t++) {
+      let r = Math.random() * total;
+      let chosen = n - 1;
+      for (let i = 0; i < n; i++) {
+        r -= bias[i];
+        if (r <= 0) { chosen = i; break; }
+      }
+      counts[chosen]++;
+    }
+  } else if (mode === 'balanced') {
+    // Simulate aux-loss balanced routing: each token chooses top-1 from near-uniform logits
+    for (let t = 0; t < T; t++) {
+      const logits = Array.from({length:n}, () => randNormal() * 0.4);
+      const idx = topKIdx(softmax(logits), 1)[0];
+      counts[idx]++;
+    }
+  } else {
+    // Pure random top-1
+    for (let t = 0; t < T; t++) {
+      counts[Math.floor(Math.random() * n)]++;
+    }
+  }
+
+  drawLoadBalance(n, counts, T, mode);
+}
+
+function drawLoadBalance(n, counts, T, mode) {
+  const [W, H, ctx] = setSize('cv-lb', 300);
+  ctx.clearRect(0, 0, W, H);
+
+  const PAD_L = 8, PAD_R = 40, PAD_T = 30, PAD_B = 44;
+  const chartW = W - PAD_L - PAD_R;
+  const chartH = H - PAD_T - PAD_B;
+
+  const gap = 6;
+  const barW = clamp((chartW - gap*(n-1)) / n, 8, 80);
+  const totalBarW = barW * n + gap * (n-1);
+  const barStartX = PAD_L + (chartW - totalBarW) / 2;
+
+  const maxC = Math.max(...counts, 1);
+  const ideal = T / n;
+
+  // Ideal line
+  const idealY = PAD_T + chartH * (1 - ideal / maxC);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(PAD_L, idealY);
+  ctx.lineTo(W - PAD_R, idealY);
+  ctx.strokeStyle = '#34d39955';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 4]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#34d399';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('ideal=' + Math.round(ideal), W - PAD_R + 3, idealY + 4);
+  ctx.restore();
+
+  for (let i = 0; i < n; i++) {
+    const bx   = barStartX + i * (barW + gap);
+    const frac = counts[i] / maxC;
+    const bh   = frac * chartH;
+    const by   = PAD_T + chartH - bh;
+    const over = counts[i] > ideal * 1.6;
+    const col  = over ? '#f87171' : EC[i % EC.length];
+
+    // Bar fill
+    ctx.save();
+    roundRect(ctx, bx, by, barW, bh, 3);
+    ctx.fillStyle = col + '44';
+    ctx.fill();
+    ctx.strokeStyle = col;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Count above bar
+    ctx.save();
+    ctx.fillStyle = col;
+    ctx.font = 'bold 9px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(counts[i], bx + barW/2, Math.max(by - 4, PAD_T + 10));
+    ctx.restore();
+
+    // Expert label below
+    ctx.save();
+    ctx.fillStyle = '#475569';
+    ctx.font = '9px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('E' + i, bx + barW/2, H - PAD_B + 16);
+    ctx.restore();
+  }
+
+  // X axis line
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(PAD_L, PAD_T + chartH);
+  ctx.lineTo(W - PAD_R, PAD_T + chartH);
+  ctx.strokeStyle = '#1e2d4a';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+  ctx.restore();
+
+  // CV metric
+  const mean = counts.reduce((a,b) => a+b, 0) / counts.length;
+  const cv = mean > 0
+    ? Math.sqrt(counts.reduce((a,b) => a + (b-mean)**2, 0) / counts.length) / mean
+    : 0;
+
+  const msgs = {
+    collapse: '<b>Expert Collapse:</b> CV=' + cv.toFixed(2) + ' — expert 0 dominates. Wasted capacity (' + (n-1) + ' starved experts).',
+    balanced: '<b>Aux-Loss Balanced:</b> CV=' + cv.toFixed(2) + ' — near-uniform distribution. Full parameter utilization.',
+    random:   '<b>Random Baseline:</b> CV=' + cv.toFixed(2) + ' — uniform random top-1. Expected ' + ideal.toFixed(0) + ' tokens/expert.'
+  };
+  document.getElementById('lb-annotation').innerHTML = msgs[mode];
+}
+
+// ══════════════════════════════════════════════════
+// SECTION 4: HARDWARE
+// ══════════════════════════════════════════════════
+function onHWSlider() {
+  const n = +document.getElementById('hw-sl-n').value;
+  const k = clamp(+document.getElementById('hw-sl-k').value, 1, n);
+  const d = +document.getElementById('hw-sl-d').value;
+  document.getElementById('hw-lbl-n').textContent = n;
+  document.getElementById('hw-lbl-k').textContent = k;
+  document.getElementById('hw-lbl-d').textContent = d.toLocaleString();
+
+  // FFN expert params: input proj + output proj = d * 4d + 4d * d = 8d² params
+  const expertParamsB = (8 * d * d) / 1e9;
+  const totalParamsB  = n * expertParamsB + 7; // +7B for attention layers
+  const activeParamsB = k * expertParamsB + 7;
+  const sparsity      = activeParamsB / totalParamsB;
+  const memGB         = totalParamsB * 2; // bf16 = 2 bytes/param
+  const flopsT        = activeParamsB * 2; // ~2 FLOPs per param per token
+
+  document.getElementById('hw-params').textContent = totalParamsB.toFixed(1) + 'B';
+  document.getElementById('hw-active').textContent = activeParamsB.toFixed(1) + 'B';
+  document.getElementById('hw-ratio').textContent  = (sparsity * 100).toFixed(0) + '%';
+  document.getElementById('hw-mem').textContent    = memGB.toFixed(0) + ' GB';
+  document.getElementById('hw-flops').textContent  = flopsT.toFixed(0) + 'T';
+
+  drawHW(n, k, totalParamsB, activeParamsB, memGB, flopsT);
+}
+
+function drawHW(n, k, totalP, activeP, memGB, flopsT) {
+  const [W, H, ctx] = setSize('cv-hw', 280);
+  ctx.clearRect(0, 0, W, H);
+
+  const LABEL_W = Math.min(130, W * 0.28);
+  const VAL_W   = 80;
+  const PAD_X   = 12;
+  const PAD_Y   = 16;
+  const BAR_MAX = W - PAD_X - LABEL_W - VAL_W - PAD_X;
+
+  // Compute sensible maxes
+  const maxParams = Math.max(totalP * 1.1, 50);
+  const maxMem    = Math.max(memGB * 1.1, 100);
+  const maxFlops  = Math.max(flopsT * 1.1, 100);
+
+  const rows = [
+    { label:'Total Params',  val:totalP,  max:maxParams, unit:'B',  color:'#818cf8' },
+    { label:'Active Params', val:activeP, max:maxParams, unit:'B',  color:'#38bdf8' },
+    { label:'Memory (bf16)', val:memGB,   max:maxMem,    unit:'GB', color:'#fb923c' },
+    { label:'FLOPs/token',   val:flopsT,  max:maxFlops,  unit:'T',  color:'#34d399' },
+  ];
+
+  const rowH = (H - PAD_Y * 2) / rows.length - 8;
+
+  rows.forEach((r, i) => {
+    const y     = PAD_Y + i * (rowH + 8);
+    const midY  = y + rowH * 0.62;
+    const fillW = clamp((r.val / r.max) * BAR_MAX, 0, BAR_MAX);
+
+    // Label
+    ctx.save();
+    ctx.fillStyle = '#64748b';
+    ctx.font = '11px Syne, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(r.label, PAD_X, midY);
+    ctx.restore();
+
+    // Track
+    ctx.save();
+    roundRect(ctx, PAD_X + LABEL_W, y, BAR_MAX, rowH, 4);
+    ctx.fillStyle = '#0d1526';
+    ctx.fill();
+    ctx.restore();
+
+    // Fill
+    if (fillW > 1) {
+      ctx.save();
+      roundRect(ctx, PAD_X + LABEL_W, y, fillW, rowH, 4);
+      ctx.fillStyle = r.color + '55';
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Border
+    ctx.save();
+    roundRect(ctx, PAD_X + LABEL_W, y, BAR_MAX, rowH, 4);
+    ctx.strokeStyle = r.color;
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    // Value label
+    ctx.save();
+    ctx.fillStyle = r.color;
+    ctx.font = 'bold 11px JetBrains Mono, monospace';
+    ctx.textAlign = 'left';
+    ctx.fillText(r.val.toFixed(1) + ' ' + r.unit, PAD_X + LABEL_W + fillW + 6, midY);
+    ctx.restore();
+  });
+}
+
+// ══════════════════════════════════════════════════
+// SECTION 5: COMPARE
+// ══════════════════════════════════════════════════
+function onCmpSlider() {
+  const budget = +document.getElementById('cmp-sl-c').value;
+  document.getElementById('cmp-lbl-c').textContent = budget;
+  drawCompare(budget);
+}
+
+function drawCompare(budget) {
+  const [W, H, ctx] = setSize('cv-cmp', 260);
+  ctx.clearRect(0, 0, W, H);
+
+  const PAD_L = 46, PAD_R = 20, PAD_T = 16, PAD_B = 36;
+  const CW = W - PAD_L - PAD_R;
+  const CH = H - PAD_T - PAD_B;
+
+  const MAX_F = 200;
+  const MIN_P = 3, MAX_P = 22; // perplexity range for Y axis
+
+  const fToX = f => PAD_L + (f / MAX_F) * CW;
+  const pToY = p => PAD_T + CH - clamp((p - MIN_P) / (MAX_P - MIN_P), 0, 1) * CH;
+
+  // Axes
+  ctx.save();
+  ctx.strokeStyle = '#1e2d4a';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(PAD_L, PAD_T);
+  ctx.lineTo(PAD_L, PAD_T + CH);
+  ctx.lineTo(PAD_L + CW, PAD_T + CH);
+  ctx.stroke();
+  ctx.restore();
+
+  // Y-axis labels
+  [5, 8, 12, 16, 20].forEach(p => {
+    const y = pToY(p);
+    if (y >= PAD_T && y <= PAD_T + CH) {
+      ctx.save();
+      ctx.fillStyle = '#2d3f5a';
+      ctx.font = '8px JetBrains Mono, monospace';
+      ctx.textAlign = 'right';
+      ctx.fillText(p, PAD_L - 4, y + 3);
+      ctx.beginPath();
+      ctx.moveTo(PAD_L - 3, y);
+      ctx.lineTo(PAD_L, y);
+      ctx.strokeStyle = '#1e2d4a';
+      ctx.lineWidth = 0.5;
+      ctx.stroke();
+      ctx.restore();
+    }
+  });
+
+  // Y-axis title
+  ctx.save();
+  ctx.fillStyle = '#475569';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.translate(11, PAD_T + CH/2);
+  ctx.rotate(-Math.PI/2);
+  ctx.fillText('Perplexity ↓', 0, 0);
+  ctx.restore();
+
+  // X-axis ticks
+  [25, 50, 100, 150, 200].forEach(f => {
+    const x = fToX(f);
+    ctx.save();
+    ctx.fillStyle = '#2d3f5a';
+    ctx.font = '8px JetBrains Mono, monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText(f, x, PAD_T + CH + 14);
+    ctx.beginPath();
+    ctx.moveTo(x, PAD_T + CH);
+    ctx.lineTo(x, PAD_T + CH + 3);
+    ctx.strokeStyle = '#1e2d4a';
+    ctx.lineWidth = 0.5;
+    ctx.stroke();
+    ctx.restore();
+  });
+
+  // X-axis label
+  ctx.save();
+  ctx.fillStyle = '#475569';
+  ctx.font = '9px JetBrains Mono, monospace';
+  ctx.textAlign = 'center';
+  ctx.fillText('Compute Budget (TFLOPs / token)', PAD_L + CW/2, H - 4);
+  ctx.restore();
+
+  // Dense curve: perplexity ~ 22 · F^-0.34
+  ctx.save();
+  ctx.beginPath();
+  for (let f = 5; f <= MAX_F; f += 1) {
+    const p = 22 * Math.pow(f, -0.34);
+    const x = fToX(f), y = pToY(p);
+    f === 5 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // MoE curve: perplexity ~ 17 · F^-0.38
+  ctx.save();
+  ctx.beginPath();
+  for (let f = 5; f <= MAX_F; f += 1) {
+    const p = 17 * Math.pow(f, -0.38);
+    const x = fToX(f), y = pToY(p);
+    f === 5 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+  }
+  ctx.strokeStyle = '#34d399';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.restore();
+
+  // Budget vertical line
+  const bx = clamp(fToX(budget), PAD_L, PAD_L + CW);
+  ctx.save();
+  ctx.beginPath();
+  ctx.moveTo(bx, PAD_T);
+  ctx.lineTo(bx, PAD_T + CH);
+  ctx.strokeStyle = '#fb923caa';
+  ctx.lineWidth = 1.5;
+  ctx.setLineDash([5, 3]);
+  ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.restore();
+
+  // Intersection dots
+  const denseP = 22 * Math.pow(budget, -0.34);
+  const moeP   = 17 * Math.pow(budget, -0.38);
+
+  [{p:denseP, c:'#38bdf8'}, {p:moeP, c:'#34d399'}].forEach(({p, c}) => {
+    const py = pToY(p);
+    if (py >= PAD_T && py <= PAD_T + CH) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(bx, py, 5, 0, Math.PI*2);
+      ctx.fillStyle = c;
+      ctx.fill();
+      ctx.restore();
+    }
+  });
+
+  // Curve labels
+  const labelF = MAX_F * 0.7;
+  ctx.save();
+  ctx.font = 'bold 10px Syne, sans-serif';
+  ctx.textAlign = 'left';
+  ctx.fillStyle = '#38bdf8';
+  ctx.fillText('Dense', fToX(labelF) + 6, pToY(22 * Math.pow(labelF, -0.34)) - 6);
+  ctx.fillStyle = '#34d399';
+  ctx.fillText('MoE', fToX(labelF) + 6, pToY(17 * Math.pow(labelF, -0.38)) + 14);
+  ctx.restore();
+
+  // Annotation
+  const gap = ((denseP - moeP) / denseP * 100).toFixed(1);
+  document.getElementById('cmp-annotation').innerHTML =
+    'At <b>' + budget + ' TFLOPs/token</b>: Dense ≈ <b style="color:#38bdf8">' + denseP.toFixed(2) +
+    '</b> perplexity, MoE ≈ <b style="color:#34d399">' + moeP.toFixed(2) +
+    '</b> perplexity. MoE is <b style="color:#34d399">' + gap + '% better</b> at this compute point.';
+}
+
+// ══════════════════════════════════════════════════
+// INIT + RESIZE
+// ══════════════════════════════════════════════════
+function initAll() {
+  onOvSlider();
+  rerouteToken();
+  runLBSim();
+  onHWSlider();
+  onCmpSlider();
+}
+
+let _resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(_resizeTimer);
+  _resizeTimer = setTimeout(() => {
+    // Re-render only the active section to avoid layout thrash
+    const active = document.querySelector('.section.active');
+    if (!active) return;
+    const id = active.id.replace('sec-','');
+    if (id==='overview')    onOvSlider();
+    if (id==='routing')     drawRouting(
+      +document.getElementById('r-sl-n').value,
+      clamp(+document.getElementById('r-sl-k').value, 1, +document.getElementById('r-sl-n').value),
+      +document.getElementById('r-sl-t').value / 10,
+      _routingLogits
+    );
+    if (id==='loadbalance') runLBSim();
+    if (id==='hardware')    onHWSlider();
+    if (id==='compare')     onCmpSlider();
+  }, 80);
+});
+
+window.addEventListener('load', initAll);
+</script>
+</body>
+</html>
