@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CPU vs GPU vs TPU Visualizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/react@18/umd/react.development.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js" crossorigin></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <style>
+    @keyframes popIn {
+      from { opacity: 0; transform: scale(0.96) translateY(8px); }
+      to { opacity: 1; transform: scale(1) translateY(0); }
+    }
+    .pop-in { animation: popIn 0.35s ease-out both; }
+    @keyframes pulseSoft {
+      0%, 100% { transform: scale(1); opacity: 0.9; }
+      50% { transform: scale(1.02); opacity: 1; }
+    }
+    .pulse-soft { animation: pulseSoft 1.8s ease-in-out infinite; }
+    .grid-bg {
+      background-image:
+        linear-gradient(to right, rgba(148,163,184,0.12) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(148,163,184,0.12) 1px, transparent 1px);
+      background-size: 24px 24px;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-900 min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useMemo, useState } = React;
+
+    const workloads = {
+      branchy: {
+        label: "Branchy scalar code",
+        description: "If/else-heavy code with irregular control flow and small working sets.",
+        instructions: ["LOAD", "CMP", "BRANCH", "ADD", "STORE", "BRANCH", "LOAD", "MUL"],
+        cpu: { score: 95, reason: "Strong branch prediction, caches, and low-latency single-thread performance." },
+        gpu: { score: 35, reason: "Divergence makes many lanes idle when threads take different paths." },
+        tpu: { score: 20, reason: "Dense tensor hardware is not built for irregular branching." },
+      },
+      matmul: {
+        label: "Dense matrix multiply",
+        description: "A classic high-throughput workload with regular math and lots of reuse.",
+        instructions: ["LOAD TILE", "FMA", "FMA", "FMA", "ACCUM", "STORE TILE"],
+        cpu: { score: 55, reason: "Can do it well, but has fewer parallel arithmetic lanes." },
+        gpu: { score: 88, reason: "Excellent throughput from many parallel lanes and shared-memory tiling." },
+        tpu: { score: 98, reason: "Systolic arrays are designed for multiply-accumulate at massive scale." },
+      },
+      sparse: {
+        label: "Sparse / irregular inference",
+        description: "Dynamic shapes, sparse lookups, and irregular control flow that can leave tensor hardware underutilized.",
+        instructions: ["LOOKUP", "BRANCH", "GATHER", "STORE", "BRANCH", "LOOKUP"],
+        cpu: { score: 62, reason: "Flexible control flow and cache hierarchy handle irregular work reasonably well." },
+        gpu: { score: 78, reason: "Still benefits from parallel execution, but divergence and sparse access reduce efficiency." },
+        tpu: { score: 24, reason: "TPUs shine on dense tensor math, so sparse and dynamic workloads often waste the array." },
+      },
+      attention: {
+        label: "Attention / Transformer",
+        description: "Large batched linear algebra with memory bandwidth pressure and tensor reuse.",
+        instructions: ["QK^T", "SOFTMAX", "VALUE MIX", "PROJECTION"],
+        cpu: { score: 40, reason: "Good for small batches or control-heavy parts, but not peak throughput." },
+        gpu: { score: 92, reason: "Common choice because attention maps well to parallel matrix ops." },
+        tpu: { score: 94, reason: "Very strong when the model and batch size fit the tensor pipeline." },
+      }
+    };
+
+    const architectureData = {
+      cpu: {
+        title: "CPU",
+        subtitle: "A few powerful cores optimized for latency",
+        color: "indigo",
+        summary: [
+          "Deep cache hierarchy",
+          "Branch prediction",
+          "Out-of-order execution",
+          "Great at control-heavy code"
+        ],
+        layout: {
+          lanes: 4,
+          labels: ["Fetch", "Decode", "Execute", "Load/Store", "Commit"],
+          style: "grid grid-cols-1 gap-3"
+        }
+      },
+      gpu: {
+        title: "GPU",
+        subtitle: "Many simpler lanes optimized for throughput",
+        color: "emerald",
+        summary: [
+          "SIMT / warp execution",
+          "Thousands of threads",
+          "Hides latency with occupancy",
+          "Great at data-parallel code"
+        ],
+        layout: {
+          lanes: 8,
+          labels: ["Warp 0", "Warp 1", "Warp 2", "Warp 3"],
+          style: "grid grid-cols-2 sm:grid-cols-4 gap-3"
+        }
+      },
+      tpu: {
+        title: "TPU",
+        subtitle: "Matrix engine built for dense tensor math",
+        color: "amber",
+        summary: [
+          "Systolic array",
+          "High tensor throughput",
+          "Streaming dataflow",
+          "Best for matmul-heavy workloads"
+        ],
+        layout: {
+          lanes: 6,
+          labels: ["Tile in", "MAC", "MAC", "MAC", "Accumulate", "Tile out"],
+          style: "grid grid-cols-2 sm:grid-cols-3 gap-3"
+        }
+      }
+    };
+
+    const colors = {
+      indigo: {
+        bg: "bg-indigo-50",
+        border: "border-indigo-200",
+        text: "text-indigo-700",
+        chip: "bg-indigo-600 text-white",
+        soft: "bg-indigo-100",
+      },
+      emerald: {
+        bg: "bg-emerald-50",
+        border: "border-emerald-200",
+        text: "text-emerald-700",
+        chip: "bg-emerald-600 text-white",
+        soft: "bg-emerald-100",
+      },
+      amber: {
+        bg: "bg-amber-50",
+        border: "border-amber-200",
+        text: "text-amber-700",
+        chip: "bg-amber-500 text-white",
+        soft: "bg-amber-100",
+      }
+    };
+
+    function scoreClass(score) {
+      if (score >= 90) return "bg-emerald-500";
+      if (score >= 65) return "bg-blue-500";
+      if (score >= 40) return "bg-amber-500";
+      return "bg-rose-500";
+    }
+
+    function computeTimeline(workloadKey) {
+      const w = workloads[workloadKey];
+      const instr = w.instructions;
+      const totalSteps = instr.length;
+      return {
+        cpu: instr.map((name, i) => ({
+          name,
+          lane: i % 2,
+          phase: i === 0 ? "fetch" : i === totalSteps - 1 ? "commit" : "execute",
+          highlight: name.includes("BRANCH") || name.includes("CMP")
+        })),
+        gpu: instr.map((name, i) => ({
+          name,
+          lane: i % 8,
+          phase: name.includes("LOAD") ? "memory" : "alu",
+          highlight: name.includes("FMA") || name.includes("MAC")
+        })),
+        tpu: instr.map((name, i) => ({
+          name,
+          lane: i % 6,
+          phase: name.includes("LOAD") || name.includes("STORE") ? "stream" : "matmul",
+          highlight: name.includes("FMA") || name.includes("MAC") || name === "QK^T"
+        }))
+      };
+    }
+
+    const ArchitecturePanel = ({ keyName, activeWorkload }) => {
+      const arch = architectureData[keyName];
+      const c = colors[arch.color];
+      const w = workloads[activeWorkload];
+      const score = w[keyName].score;
+      const timeline = computeTimeline(activeWorkload)[keyName];
+
+      return (
+        <div className={`rounded-3xl border ${c.border} ${c.bg} shadow-sm overflow-hidden pop-in`}>
+          <div className="p-5 border-b border-black/5 bg-white/70 backdrop-blur-sm">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className={`text-2xl font-black ${c.text}`}>{arch.title}</h3>
+                <p className="text-sm text-slate-600 mt-1">{arch.subtitle}</p>
+              </div>
+              <div className={`px-3 py-1.5 rounded-full text-xs font-black ${c.chip}`}>
+                Fit: {score}/100
+              </div>
+            </div>
+            <div className="mt-4 h-3 w-full bg-white rounded-full overflow-hidden border border-slate-200">
+              <div className={`h-full ${scoreClass(score)}`} style={{ width: `${score}%` }}></div>
+            </div>
+          </div>
+
+          <div className="p-5 space-y-5">
+            <div className="grid grid-cols-2 gap-2">
+              {arch.summary.map((item, idx) => (
+                <div key={idx} className="bg-white/80 border border-white rounded-2xl p-3 text-sm font-medium text-slate-700 shadow-sm">
+                  {item}
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+              <div className="flex items-center justify-between mb-3">
+                <h4 className="font-bold text-slate-800">How instructions are handled</h4>
+                <span className={`text-xs font-black px-2 py-1 rounded-full ${c.soft} ${c.text}`}>Active workload</span>
+              </div>
+              <div className={`${arch.layout.style}`}>
+                {timeline.map((step, idx) => (
+                  <div
+                    key={idx}
+                    className={`rounded-2xl border p-3 min-h-20 flex flex-col justify-between shadow-sm ${step.highlight ? "bg-slate-900 text-white border-slate-900" : "bg-slate-50 border-slate-200"}`}
+                  >
+                    <div className="text-[10px] uppercase tracking-widest font-black opacity-70">{arch.layout.labels[idx % arch.layout.labels.length]}</div>
+                    <div className="font-mono font-bold text-sm mt-2">{step.name}</div>
+                    <div className={`mt-2 inline-flex self-start text-[10px] px-2 py-1 rounded-full ${step.highlight ? "bg-white/15 text-white" : "bg-slate-200 text-slate-700"}`}>
+                      {step.phase}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="bg-white/80 rounded-2xl border border-white p-4 shadow-sm">
+              <h4 className="font-bold text-slate-800 mb-2">Why this score?</h4>
+              <p className="text-sm text-slate-600 leading-relaxed">{w[keyName].reason}</p>
+            </div>
+          </div>
+        </div>
+      );
+    };
+
+    function App() {
+      const [activeWorkload, setActiveWorkload] = useState("branchy");
+      const w = workloads[activeWorkload];
+      const comparison = useMemo(() => {
+        const cpu = w.cpu.score;
+        const gpu = w.gpu.score;
+        const tpu = w.tpu.score;
+        const best = Math.max(cpu, gpu, tpu);
+        const winner = best === cpu ? "CPU" : best === gpu ? "GPU" : "TPU";
+        return { cpu, gpu, tpu, winner };
+      }, [activeWorkload]);
+
+      return (
+        <div className="min-h-screen">
+          <div className="max-w-7xl mx-auto p-4 md:p-6 lg:p-8 space-y-6">
+            <header className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 md:p-8 grid-bg overflow-hidden relative">
+              <div className="relative z-10 flex flex-col gap-5">
+                <div>
+                  <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-slate-900 text-white text-xs font-black uppercase tracking-widest">
+                    Architecture Visualizer
+                  </div>
+                  <h1 className="text-4xl md:text-5xl font-black tracking-tight text-slate-900 mt-4">
+                    CPU vs GPU vs TPU
+                  </h1>
+                  <p className="text-slate-600 mt-3 max-w-3xl text-base md:text-lg leading-relaxed">
+                    Compare how the same workload is handled by three very different machines: a latency-optimized CPU, a throughput-optimized GPU, and a tensor-specialized TPU.
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {Object.entries(workloads).map(([key, item]) => (
+                    <button
+                      key={key}
+                      onClick={() => setActiveWorkload(key)}
+                      className={`px-4 py-2 rounded-full text-sm font-bold border transition-all ${activeWorkload === key ? "bg-slate-900 text-white border-slate-900 shadow-md" : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"}`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="bg-slate-50 rounded-2xl border border-slate-200 p-4 md:p-5">
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+                    <div>
+                      <h2 className="text-xl font-black text-slate-900">Current workload: {w.label}</h2>
+                      <p className="text-sm text-slate-600 mt-1">{w.description}</p>
+                    </div>
+                    <div className="text-sm font-semibold text-slate-700 bg-white px-4 py-2 rounded-2xl border border-slate-200 shadow-sm">
+                      Best fit: <span className="font-black text-emerald-700">{comparison.winner}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </header>
+
+            <section className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+              <ArchitecturePanel keyName="cpu" activeWorkload={activeWorkload} />
+              <ArchitecturePanel keyName="gpu" activeWorkload={activeWorkload} />
+              <ArchitecturePanel keyName="tpu" activeWorkload={activeWorkload} />
+            </section>
+          </div>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+  </script>
+</body>
+</html>
