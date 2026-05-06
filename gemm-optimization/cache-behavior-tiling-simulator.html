@@ -16,17 +16,23 @@
 
         .metric-card {
             background: white;
-            padding: 1rem;
+            padding: 1.25rem;
             border-radius: 0.75rem;
             box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
         }
 
-        .event-item {
+        .metric-compact {
             padding: 0.75rem;
-            border-left: 3px solid;
-            margin-bottom: 0.5rem;
-            border-radius: 0.375rem;
+            border-radius: 0.5rem;
             font-size: 0.875rem;
+        }
+
+        .event-item {
+            padding: 0.5rem;
+            border-left: 3px solid;
+            margin-bottom: 0.375rem;
+            border-radius: 0.25rem;
+            font-size: 0.75rem;
             font-family: monospace;
         }
 
@@ -46,17 +52,17 @@
         }
 
         canvas {
-            border-radius: 0.5rem;
+            border-radius: 0.375rem;
         }
 
         .cache-way {
             display: inline-block;
-            width: 50px;
-            height: 50px;
+            width: 52px;
+            height: 52px;
             border: 2px solid #cbd5e1;
             border-radius: 4px;
             margin: 2px;
-            padding: 2px;
+            padding: 3px;
             text-align: center;
             font-size: 8px;
             font-family: monospace;
@@ -97,205 +103,170 @@
         .matrix-label {
             font-weight: 700;
             text-align: center;
-            margin-bottom: 16px;
-            font-size: 1rem;
+            margin-bottom: 8px;
+            font-size: 0.75rem;
             color: #1e293b;
         }
 
         .dim-label {
             font-family: monospace;
-            font-size: 0.875rem;
+            font-size: 0.625rem;
             color: #64748b;
             position: absolute;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }
+
     </style>
 </head>
 
-<body class="p-4 md:p-8">
-    <div class="max-w-7xl mx-auto">
+<body class="p-6">
+    <div class="max-w-[1600px] mx-auto">
         <!-- Header -->
-        <header class="mb-8">
-            <h1 class="text-3xl font-bold text-slate-800">
-                Cache Behavior & Tiling Simulator
-            </h1>
-            <p class="text-slate-600 mt-2">
-                Interactive visualization of cache hits, misses, and evictions during GEMM matrix multiplication.
-                See LRU replacement, cache thrashing, and the cache cliff phenomenon in action.
-            </p>
+        <header class="mb-5">
+            <h1 class="text-3xl font-bold text-slate-800">Cache Behavior & Tiling Simulator</h1>
+            <p class="text-sm text-slate-600 mt-2">See cache hits, misses, evictions, and LRU replacement during GEMM tiling</p>
         </header>
 
-        <!-- Educational Context -->
-        <div class="metric-card mb-6 border-l-4 border-blue-500">
-            <h3 class="text-lg font-bold text-slate-800 mb-3">What You'll Learn</h3>
-            <div class="text-sm text-slate-700 space-y-2">
+        <!-- What to Expect - Always Visible -->
+        <div class="metric-card border-l-4 border-blue-500 mb-5">
+            <h3 class="text-base font-bold text-slate-700 mb-3">What to Expect</h3>
+            <div class="text-sm text-slate-700 space-y-2 leading-relaxed">
                 <p><strong>Cache Behavior During GEMM:</strong> Matrix multiplication accesses three matrices (A, B, C). Without tiling, data is accessed once and evicted before reuse. With tiling, small blocks fit in L1 cache and are reused multiple times, dramatically improving hit rates.</p>
-
                 <p><strong>LRU Replacement:</strong> When a cache set is full (all 8 ways occupied), the Least Recently Used line is evicted to make room for new data. You'll see LRU ages (0=newest, 7=oldest) and watch the oldest lines get replaced.</p>
-
                 <p><strong>Cache Thrashing:</strong> When the working set exceeds cache capacity, data is constantly evicted before it can be reused. You'll see frequent yellow evictions and red misses, with hit rates below 30%.</p>
-
                 <p><strong>Cache Cliff:</strong> As tile size increases, performance initially improves (better reuse), but once tiles exceed L1 capacity (~32KB), performance collapses. The "cliff" is the sharp transition from high hit rates (85%+) to thrashing (20%).</p>
             </div>
         </div>
 
-        <!-- Controls -->
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
-            <div class="metric-card">
-                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Matrix Size</label>
-                <select id="matrixSizeSelect" onchange="onParameterChange()" class="w-full border border-slate-300 rounded-md p-2 bg-white">
-                    <option value="64">64 × 64</option>
-                    <option value="128" selected>128 × 128</option>
-                </select>
+        <!-- Control Bar -->
+        <div class="metric-card mb-5">
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-3 items-center">
+                <!-- Controls -->
+                <div class="lg:col-span-2">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Matrix Size</label>
+                    <select id="matrixSizeSelect" onchange="onParameterChange()" class="w-full text-xs border border-slate-300 rounded p-1 bg-white">
+                        <option value="64">64×64</option>
+                        <option value="128" selected>128×128</option>
+                    </select>
+                </div>
+
+                <div class="lg:col-span-2">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Tile Size</label>
+                    <select id="tileSizeSelect" onchange="onParameterChange()" class="w-full text-xs border border-slate-300 rounded p-1 bg-white">
+                        <option value="16">16×16</option>
+                        <option value="32">32×32</option>
+                        <option value="64" selected>64×64</option>
+                        <option value="96">96×96</option>
+                    </select>
+                </div>
+
+                <div class="lg:col-span-2">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Preset</label>
+                    <div class="flex gap-1">
+                        <button onclick="loadPreset('optimal')" class="flex-1 bg-green-100 hover:bg-green-200 text-green-800 px-2 py-1 rounded text-[10px] font-bold">🟢</button>
+                        <button onclick="loadPreset('cliff')" class="flex-1 bg-red-100 hover:bg-red-200 text-red-800 px-2 py-1 rounded text-[10px] font-bold">🔴</button>
+                    </div>
+                </div>
+
+                <!-- Playback -->
+                <div class="lg:col-span-4">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Playback</label>
+                    <div class="flex gap-2">
+                        <button id="playBtn" onclick="toggleAutoPlay()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-1.5 rounded text-sm font-bold flex-grow" disabled>▶ Play</button>
+                        <button id="prevBtn" onclick="prevStep()" class="bg-slate-600 hover:bg-slate-700 text-white px-3 py-1.5 rounded text-sm" disabled>Back</button>
+                        <button id="nextBtn" onclick="nextStep()" class="bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded text-sm" disabled>Next</button>
+                        <button id="resetBtn" onclick="resetSimulation()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-3 py-1.5 rounded text-sm" disabled>Reset</button>
+                    </div>
+                </div>
+
+                <!-- Compact Metrics -->
+                <div class="lg:col-span-2">
+                    <label class="block text-[10px] font-bold text-slate-500 uppercase mb-1">Step: <span id="currentStep">0</span>/<span id="totalSteps">0</span></label>
+                    <div class="bg-slate-200 rounded-full h-2">
+                        <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+                    </div>
+                </div>
             </div>
 
-            <div class="metric-card">
-                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Tile Size</label>
-                <select id="tileSizeSelect" onchange="onParameterChange()" class="w-full border border-slate-300 rounded-md p-2 bg-white">
-                    <option value="16">16 × 16</option>
-                    <option value="32">32 × 32</option>
-                    <option value="64" selected>64 × 64</option>
-                    <option value="96">96 × 96</option>
-                </select>
-            </div>
-
-            <div class="metric-card lg:col-span-2">
-                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Preset Scenarios</label>
-                <div class="grid grid-cols-2 gap-2">
-                    <button onclick="loadPreset('optimal')" class="bg-green-100 hover:bg-green-200 text-green-800 px-3 py-2 rounded-md text-sm font-semibold transition">
-                        🟢 Optimal
-                    </button>
-                    <button onclick="loadPreset('cliff')" class="bg-red-100 hover:bg-red-200 text-red-800 px-3 py-2 rounded-md text-sm font-semibold transition">
-                        🔴 Cache Cliff
-                    </button>
+            <!-- Metrics Row -->
+            <div class="grid grid-cols-5 gap-3 mt-3">
+                <div class="metric-compact bg-green-50 border border-green-200">
+                    <div class="text-[9px] font-bold text-green-700 uppercase">Hits</div>
+                    <div id="hitsCount" class="text-lg font-bold text-green-600">0</div>
+                </div>
+                <div class="metric-compact bg-red-50 border border-red-200">
+                    <div class="text-[9px] font-bold text-red-700 uppercase">Misses</div>
+                    <div id="missesCount" class="text-lg font-bold text-red-600">0</div>
+                </div>
+                <div class="metric-compact bg-yellow-50 border border-yellow-200">
+                    <div class="text-[9px] font-bold text-yellow-700 uppercase">Evictions</div>
+                    <div id="evictionsCount" class="text-lg font-bold text-yellow-600">0</div>
+                </div>
+                <div class="metric-compact bg-blue-50 border border-blue-200">
+                    <div class="text-[9px] font-bold text-blue-700 uppercase">Hit Rate</div>
+                    <div id="hitRate" class="text-lg font-bold text-blue-600">0%</div>
+                </div>
+                <div class="metric-compact bg-purple-50 border border-purple-200">
+                    <div class="text-[9px] font-bold text-purple-700 uppercase">Cycles</div>
+                    <div id="totalCycles" class="text-sm font-bold text-purple-600">0</div>
                 </div>
             </div>
         </div>
 
-        <!-- Playback Controls (Moved to Top) -->
-        <div class="metric-card mb-6">
-            <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
-                <div class="flex gap-2">
-                    <button id="resetBtn" onclick="resetSimulation()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-6 py-2 rounded-md font-semibold transition" disabled>
-                        Reset
-                    </button>
-                    <button id="prevBtn" onclick="prevStep()" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md transition" disabled>
-                        ← Previous
-                    </button>
-                    <button id="nextBtn" onclick="nextStep()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-bold transition" disabled>
-                        Next Step →
-                    </button>
-                    <button id="playBtn" onclick="toggleAutoPlay()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition" disabled>
-                        ▶ Play
-                    </button>
-                </div>
-                <div class="text-sm font-semibold text-slate-700">
-                    Step: <span id="currentStep">0</span> / <span id="totalSteps">0</span>
-                </div>
-            </div>
-            <div class="mt-4">
-                <div class="bg-slate-200 rounded-full h-2">
-                    <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Metrics Dashboard -->
-        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
-            <div class="metric-card bg-green-50 border-2 border-green-200">
-                <div class="text-xs font-bold text-green-700 uppercase">Cache Hits</div>
-                <div id="hitsCount" class="text-2xl font-bold text-green-600">0</div>
-            </div>
-
-            <div class="metric-card bg-red-50 border-2 border-red-200">
-                <div class="text-xs font-bold text-red-700 uppercase">Cache Misses</div>
-                <div id="missesCount" class="text-2xl font-bold text-red-600">0</div>
-            </div>
-
-            <div class="metric-card bg-yellow-50 border-2 border-yellow-200">
-                <div class="text-xs font-bold text-yellow-700 uppercase">Evictions</div>
-                <div id="evictionsCount" class="text-2xl font-bold text-yellow-600">0</div>
-            </div>
-
-            <div class="metric-card bg-blue-50 border-2 border-blue-200">
-                <div class="text-xs font-bold text-blue-700 uppercase">Hit Rate</div>
-                <div id="hitRate" class="text-2xl font-bold text-blue-600">0%</div>
-            </div>
-
-            <div class="metric-card bg-purple-50 border-2 border-purple-200">
-                <div class="text-xs font-bold text-purple-700 uppercase">Total Cycles</div>
-                <div id="totalCycles" class="text-2xl font-bold text-purple-600">0</div>
-            </div>
-        </div>
-
-        <!-- Matrix Visualization (Box Style) -->
-        <div class="metric-card mb-6">
-            <h3 class="text-lg font-bold text-slate-700 mb-4">Matrix Access Pattern</h3>
-            <div class="flex flex-wrap justify-center items-start gap-8 p-6 bg-slate-50 rounded-lg">
-                <div class="flex flex-col items-center">
-                    <div class="matrix-label">Matrix A (\(M \times K\))</div>
-                    <div class="relative pt-6">
-                        <canvas id="matrixACanvas" width="160" height="160"></canvas>
-                        <div class="dim-label -top-1 left-0 right-0">\(K\)</div>
-                        <div class="dim-label -left-8 top-0 bottom-0" style="writing-mode: vertical-rl; transform: rotate(180deg)">
-                            \(M\)
+        <!-- Main 2-Column Layout -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
+            <!-- Left Column: Matrix + Cache -->
+            <div class="space-y-5">
+                <!-- Matrix Visualization -->
+                <div class="metric-card">
+                    <h3 class="text-base font-bold text-slate-700 mb-3">Matrix Access Pattern</h3>
+                    <div class="flex flex-col gap-3">
+                        <div class="flex items-center justify-center gap-4">
+                            <div class="flex flex-col items-center">
+                                <div class="matrix-label">A (\(M \times K\))</div>
+                                <canvas id="matrixACanvas" width="140" height="140"></canvas>
+                            </div>
+                            <div class="text-3xl font-light text-slate-300">×</div>
+                            <div class="flex flex-col items-center">
+                                <div class="matrix-label">B (\(K \times N\))</div>
+                                <canvas id="matrixBCanvas" width="140" height="140"></canvas>
+                            </div>
+                            <div class="text-3xl font-light text-slate-300">=</div>
+                            <div class="flex flex-col items-center">
+                                <div class="matrix-label">C (\(M \times N\))</div>
+                                <canvas id="matrixCCanvas" width="140" height="140"></canvas>
+                            </div>
+                        </div>
+                        <div class="text-xs text-slate-600 bg-slate-50 p-3 rounded">
+                            <div class="font-bold">Loop Indices:</div>
+                            <div id="loopIndices" class="font-mono text-xs mt-1">Tile: (0,0,0) Inner: (0,0,0)</div>
                         </div>
                     </div>
                 </div>
-                <div class="text-4xl font-light text-slate-300 self-center pt-8">×</div>
-                <div class="flex flex-col items-center">
-                    <div class="matrix-label">Matrix B (\(K \times N\))</div>
-                    <div class="relative pt-6">
-                        <canvas id="matrixBCanvas" width="160" height="160"></canvas>
-                        <div class="dim-label -top-1 left-0 right-0">\(N\)</div>
-                        <div class="dim-label -left-8 top-0 bottom-0" style="writing-mode: vertical-rl; transform: rotate(180deg)">
-                            \(K\)
-                        </div>
-                    </div>
-                </div>
-                <div class="text-4xl font-light text-slate-300 self-center pt-8">=</div>
-                <div class="flex flex-col items-center">
-                    <div class="matrix-label">Matrix C (\(M \times N\))</div>
-                    <div class="relative pt-6">
-                        <canvas id="matrixCCanvas" width="160" height="160"></canvas>
-                        <div class="dim-label -top-1 left-0 right-0">\(N\)</div>
-                        <div class="dim-label -left-8 top-0 bottom-0" style="writing-mode: vertical-rl; transform: rotate(180deg)">
-                            \(M\)
-                        </div>
-                    </div>
-                </div>
-            </div>
-            <div class="text-xs text-slate-600 bg-white p-3 rounded-lg mt-4">
-                <div><strong>Loop Indices:</strong></div>
-                <div id="loopIndices" class="font-mono mt-1">Tile: (0,0,0) Inner: (0,0,0)</div>
-            </div>
-        </div>
 
-        <!-- Main Visualization Area -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-            <!-- Cache Visualization -->
-            <div class="metric-card">
-                <h3 class="text-lg font-bold text-slate-700 mb-4">L1 Cache State (32KB, 8-way set associative)</h3>
-                <div id="cacheVisualization" class="overflow-auto" style="max-height: 400px;">
-                    <div class="text-sm text-slate-500 text-center py-8">
-                        Simulation initializing...
+                <!-- Cache Visualization -->
+                <div class="metric-card">
+                    <h3 class="text-base font-bold text-slate-700 mb-3">L1 Cache (32KB, 8-way)</h3>
+                    <div id="cacheVisualization" class="overflow-auto" style="max-height: 450px;">
+                        <div class="text-sm text-slate-500 text-center py-8">Initializing...</div>
                     </div>
                 </div>
             </div>
 
-            <!-- Event Log & Explanation -->
-            <div class="metric-card">
-                <h3 class="text-lg font-bold text-slate-700 mb-4">Current Explanation</h3>
-                <div id="explanationText" class="bg-slate-50 border border-slate-200 p-4 rounded-lg min-h-[120px] text-sm text-slate-700 leading-relaxed">
-                    Configure parameters above. Simulation will initialize automatically with optimal tiling preset.
+            <!-- Right Column: Explanation + Event Log -->
+            <div class="space-y-5">
+                <!-- Current Step Explanation -->
+                <div class="metric-card">
+                    <h3 class="text-base font-bold text-slate-700 mb-3">Current Step</h3>
+                    <div id="explanationText" class="bg-slate-50 border border-slate-200 p-4 rounded-lg text-sm text-slate-700 leading-relaxed" style="min-height: 100px;">
+                        Simulation will initialize automatically with optimal tiling preset.
+                    </div>
                 </div>
 
-                <h3 class="text-lg font-bold text-slate-700 mt-6 mb-4">Event Log</h3>
-                <div id="eventLog" class="overflow-auto" style="max-height: 200px;">
-                    <div class="text-sm text-slate-500 text-center py-8">
-                        No events yet
+                <!-- Event Log -->
+                <div class="metric-card">
+                    <h3 class="text-base font-bold text-slate-700 mb-3">Event Log</h3>
+                    <div id="eventLog" class="overflow-auto" style="max-height: 450px;">
+                        <div class="text-sm text-slate-500 text-center py-4">No events yet</div>
                     </div>
                 </div>
             </div>
@@ -309,7 +280,7 @@
             constructor() {
                 this.valid = false;
                 this.tag = null;
-                this.matrixId = null;  // 'A', 'B', or 'C'
+                this.matrixId = null;
                 this.lruAge = 0;
                 this.lastAccessed = -1;
             }
@@ -341,7 +312,7 @@
                 let maxAge = -1;
                 let victimIdx = 0;
                 for (let i = 0; i < this.lines.length; i++) {
-                    if (!this.lines[i].valid) return i;  // Empty slot
+                    if (!this.lines[i].valid) return i;
                     if (this.lines[i].lruAge > maxAge) {
                         maxAge = this.lines[i].lruAge;
                         victimIdx = i;
@@ -411,7 +382,7 @@
                         tag,
                         wayIdx: victimIdx,
                         evicted,
-                        cycles: this.config.latency + 100  // DRAM latency
+                        cycles: this.config.latency + 100
                     };
                 }
             }
@@ -431,7 +402,6 @@
             }
         }
 
-        // Cache configuration
         const cacheConfig = {
             capacity: 32768,
             lineSize: 64,
@@ -458,7 +428,6 @@
             for (let ti = 0; ti < n; ti += tileSize) {
                 for (let tj = 0; tj < n; tj += tileSize) {
                     for (let tk = 0; tk < n; tk += tileSize) {
-                        // Tile boundary marker
                         if (steps.length > 0 && steps.length < 200) {
                             steps.push({
                                 type: 'boundary',
@@ -489,7 +458,6 @@
                                         steps.push(step);
                                         prevTile = { ti, tj, tk };
                                     } else {
-                                        // Update cache state only
                                         updateCacheOnly(i, j, k, n, cache, globalMetrics);
                                     }
 
@@ -612,7 +580,7 @@
         let playInterval = null;
         let isInitializing = false;
 
-        // ============ PHASE 3: UI & Visualization Functions ============
+        // ============ UI Functions ============
 
         function onParameterChange() {
             if (!isInitializing) {
@@ -627,12 +595,11 @@
             const matrixSize = parseInt(document.getElementById('matrixSizeSelect').value);
             const tileSize = parseInt(document.getElementById('tileSizeSelect').value);
 
-            // Stop autoplay if running
             if (isPlaying) {
                 toggleAutoPlay();
             }
 
-            document.getElementById('cacheVisualization').innerHTML = '<div class="text-sm text-slate-500 text-center py-8">Generating simulation...</div>';
+            document.getElementById('cacheVisualization').innerHTML = '<div class="text-xs text-slate-500 text-center py-8">Generating simulation...</div>';
 
             setTimeout(() => {
                 simulationSteps = generateSimulationSteps(matrixSize, tileSize);
@@ -656,9 +623,8 @@
             document.getElementById('nextBtn').disabled = false;
             document.getElementById('prevBtn').disabled = true;
             document.getElementById('playBtn').disabled = false;
-            document.getElementById('playBtn').innerText = '▶ Play';
+            document.getElementById('playBtn').innerText = '▶';
 
-            // Reset to first step
             if (simulationSteps.length > 0) {
                 currentStepIndex = -1;
                 nextStep();
@@ -718,7 +684,6 @@
             const step = simulationSteps[currentStepIndex];
             if (!step) return;
 
-            // Update metrics
             const metrics = step.metrics;
             const hitRate = metrics.hits + metrics.misses > 0
                 ? ((metrics.hits / (metrics.hits + metrics.misses)) * 100).toFixed(1)
@@ -734,25 +699,20 @@
             const progress = ((currentStepIndex + 1) / simulationSteps.length) * 100;
             document.getElementById('progressBar').style.width = progress + '%';
 
-            // Update loop indices
             const { ti, tj, tk, i, j, k } = step.loopIndices;
             document.getElementById('loopIndices').innerText =
                 `Tile: (${ti}, ${tj}, ${tk}) Inner: (${i}, ${j}, ${k})`;
 
-            // Update explanation
             document.getElementById('explanationText').innerHTML = step.explanation;
 
-            // Update event log
             if (step.type === 'compute') {
                 addEventToLog(step);
             }
 
-            // Update cache visualization
             if (step.cacheSnapshot) {
                 updateCacheVisualization(step.cacheSnapshot, step.accesses);
             }
 
-            // Update matrix visualization
             drawMatrixVisualization(step);
         }
 
@@ -767,19 +727,18 @@
                 const eventDiv = document.createElement('div');
                 const eventClass = acc.hit ? 'event-hit' : (acc.evicted ? 'event-evict' : 'event-miss');
                 const eventIcon = acc.hit ? '🟢' : (acc.evicted ? '🟡' : '🔴');
-                const eventType = acc.hit ? 'HIT' : (acc.evicted ? 'EVICT+MISS' : 'MISS');
+                const eventType = acc.hit ? 'HIT' : (acc.evicted ? 'EVICT' : 'MISS');
 
                 eventDiv.className = `event-item ${eventClass}`;
                 eventDiv.innerHTML = `
-                    <strong>${eventIcon} ${eventType}</strong> - ${acc.matrix}[${acc.row},${acc.col}]<br>
-                    Set ${acc.setIndex}, Way ${acc.wayIdx}, Tag 0x${acc.tag.toString(16)}
+                    <strong>${eventIcon} ${eventType}</strong> ${acc.matrix}[${acc.row},${acc.col}]<br>
+                    Set ${acc.setIndex}, Way ${acc.wayIdx}
                 `;
 
                 logContainer.insertBefore(eventDiv, logContainer.firstChild);
             });
 
-            // Keep only last 10 events
-            while (logContainer.children.length > 10) {
+            while (logContainer.children.length > 15) {
                 logContainer.removeChild(logContainer.lastChild);
             }
         }
@@ -793,9 +752,9 @@
             setIndices.forEach(setIdx => {
                 const setData = snapshot[setIdx];
                 const setDiv = document.createElement('div');
-                setDiv.className = 'mb-3 p-2 bg-slate-50 rounded';
+                setDiv.className = 'mb-2 p-1 bg-slate-50 rounded';
 
-                let html = `<div class="text-xs font-bold text-slate-600 mb-2">Set ${setIdx}</div><div class="flex flex-wrap gap-1">`;
+                let html = `<div class="text-[10px] font-bold text-slate-600 mb-1">Set ${setIdx}</div><div class="flex flex-wrap gap-1">`;
 
                 setData.ways.forEach((way, wayIdx) => {
                     const access = accesses?.find(a => a.setIndex === setIdx && a.wayIdx === wayIdx);
@@ -811,8 +770,8 @@
                     }
 
                     const content = way.valid
-                        ? `<div style="font-weight:bold; font-size:10px;">${way.matrixId}</div><div style="font-size:8px;">0x${way.tag.toString(16).substring(0,3)}</div><div style="font-size:7px;">LRU:${way.lruAge}</div>`
-                        : '<div style="color:#cbd5e1; padding-top:15px; font-size:10px;">---</div>';
+                        ? `<div style="font-weight:bold; font-size:9px;">${way.matrixId}</div><div style="font-size:7px;">0x${way.tag.toString(16).substring(0,3)}</div><div style="font-size:7px;">LRU:${way.lruAge}</div>`
+                        : '<div style="color:#cbd5e1; padding-top:12px; font-size:9px;">---</div>';
 
                     html += `<div class="${wayClass}">${content}</div>`;
                 });
@@ -828,14 +787,11 @@
             const tileSize = parseInt(document.getElementById('tileSizeSelect').value);
             const { i, j, k, ti, tj, tk } = step.loopIndices;
 
-            const cellSize = 20;
-            const numCells = 8; // Show 8x8 grid representing full matrix
+            const cellSize = 17.5;  // 140px / 8 cells = 17.5px per cell
+            const numCells = 8;
 
-            // Draw Matrix A
             drawMatrix('matrixACanvas', matrixSize, i, k, ti, tk, 'A', step.accesses, cellSize, numCells);
-            // Draw Matrix B
             drawMatrix('matrixBCanvas', matrixSize, k, j, tk, tj, 'B', step.accesses, cellSize, numCells);
-            // Draw Matrix C
             drawMatrix('matrixCCanvas', matrixSize, i, j, ti, tj, 'C', step.accesses, cellSize, numCells);
         }
 
@@ -857,7 +813,6 @@
                     let stroke = '#e2e8f0';
                     let lineWidth = 1;
 
-                    // Highlight active tile
                     const currentTileRow = Math.floor(tileRow / tileSize);
                     const currentTileCol = Math.floor(tileCol / tileSize);
 
@@ -867,7 +822,6 @@
                         lineWidth = 2;
                     }
 
-                    // Highlight current access
                     const access = accesses?.find(a => a.matrix === matrixName);
                     if (access) {
                         const accessCellRow = Math.floor((access.row / matrixSize) * numCells);
@@ -876,7 +830,7 @@
                         if (r === accessCellRow && c === accessCellCol) {
                             fill = access.hit ? '#22c55e' : '#ef4444';
                             stroke = access.hit ? '#16a34a' : '#dc2626';
-                            lineWidth = 3;
+                            lineWidth = 2;
                         }
                     }
 
@@ -889,7 +843,6 @@
             }
         }
 
-        // Initialize on load with optimal preset
         window.onload = () => {
             console.log('Cache Behavior & Tiling Simulator loaded');
             loadPreset('optimal');
