@@ -367,7 +367,8 @@ function renderBars() {
                 <div class="w-36 text-xs text-right text-slate-500 shrink-0 leading-tight">${g.label}</div>
                 <div class="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
                     <div class="seg-bar${pulse} h-5 rounded-full flex items-center justify-end pr-2"
-                         style="width:${pct}%;background:${g.color};min-width:${val>0?'3px':'0'}">
+                         data-w="${pct}%"
+                         style="width:0%;background:${g.color};min-width:0">
                         <span class="text-white text-xs font-semibold leading-none" style="text-shadow:0 1px 2px rgba(0,0,0,.5)">
                             ${lbl}
                         </span>
@@ -395,12 +396,9 @@ function renderBars() {
         '<hr class="border-slate-200 my-4">' +
         segRows(FF_SEGS, 'Feedforward', ffTotal);
 
-    // Trigger animation: briefly collapse, then expand
+    // Elements start at width:0% — one rAF later set the target so the CSS transition plays
     requestAnimationFrame(() => {
-        el.querySelectorAll('.seg-bar').forEach(b => { b.style.transition = 'none'; b.style.width = '0%'; });
-        requestAnimationFrame(() => {
-            el.querySelectorAll('.seg-bar').forEach(b => { b.style.transition = ''; });
-        });
+        el.querySelectorAll('.seg-bar').forEach(b => { b.style.width = b.dataset.w; });
     });
 }
 
