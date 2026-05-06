@@ -9,8 +9,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
         window.MathJax = {
-            tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] },
-            startup: { typeset: false }
+            tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] }
         };
     </script>
     <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
@@ -805,9 +804,9 @@
                     <strong>Implementation notes.</strong> Linear and polynomial fits use ordinary least squares solved via
                     normal equations with a small Tikhonov regularizer for numerical stability at high degree (and inputs are
                     rescaled to $[-1, 1]$ before lifting). The decision tree is a faithful 1D CART — greedy squared-error splits
-                    down to the depth limit, with leaves predicting the regional mean. SVR is implemented as primal sub-gradient
-                    descent on the kernelized epsilon-insensitive loss with linear, RBF, and polynomial kernels — a lightweight
-                    but mathematically faithful educational solver, not a production-grade SMO implementation.
+                    down to the depth limit, with leaves predicting the regional mean. SVR is solved with dual coordinate descent
+                    (libsvm-style) on the ε-insensitive loss: each per-coordinate update is the closed-form
+                    soft-threshold-then-clip $\beta_i \in [-C, C]$, with linear, RBF, and polynomial kernels.
                 </p>
             </div>
         </section>
@@ -1841,7 +1840,7 @@
                 renderOutlierLab();
                 renderIllustrations();
                 if (window.MathJax && window.MathJax.typesetPromise) {
-                    window.MathJax.typesetPromise([document.getElementById("preset-desc")]).catch(() => {});
+                    window.MathJax.typesetPromise([document.getElementById("preset-desc")]).catch(() => { });
                 }
             });
         }
