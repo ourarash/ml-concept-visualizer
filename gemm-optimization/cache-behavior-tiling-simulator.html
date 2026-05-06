@@ -1,0 +1,875 @@
+<!doctype html>
+<!-- Brief: Interactive visualization of cache behavior during GEMM tiling, showing hits, misses, evictions, and LRU replacement. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Cache Behavior & Tiling Simulator</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        body {
+            background-color: #f8fafc;
+            font-family: "Inter", sans-serif;
+        }
+
+        .metric-card {
+            background: white;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+        }
+
+        .event-item {
+            padding: 0.75rem;
+            border-left: 3px solid;
+            margin-bottom: 0.5rem;
+            border-radius: 0.375rem;
+            font-size: 0.875rem;
+            font-family: monospace;
+        }
+
+        .event-hit {
+            border-color: #22c55e;
+            background-color: #dcfce7;
+        }
+
+        .event-miss {
+            border-color: #ef4444;
+            background-color: #fee2e2;
+        }
+
+        .event-evict {
+            border-color: #f59e0b;
+            background-color: #fef3c7;
+        }
+
+        canvas {
+            border-radius: 0.5rem;
+        }
+
+        .cache-way {
+            display: inline-block;
+            width: 50px;
+            height: 35px;
+            border: 2px solid #cbd5e1;
+            border-radius: 4px;
+            margin: 2px;
+            padding: 2px;
+            text-align: center;
+            font-size: 8px;
+            font-family: monospace;
+            transition: all 0.3s ease;
+        }
+
+        .cache-way-valid {
+            background-color: #e0e7ff;
+            border-color: #818cf8;
+        }
+
+        .cache-way-hit {
+            background-color: #dcfce7;
+            border-color: #22c55e;
+            border-width: 3px;
+            transform: scale(1.05);
+        }
+
+        .cache-way-miss {
+            background-color: #fee2e2;
+            border-color: #ef4444;
+            border-width: 3px;
+        }
+
+        .cache-way-evict {
+            background-color: #fef3c7;
+            border-color: #f59e0b;
+            border-width: 3px;
+            animation: evict-pulse 0.5s ease;
+        }
+
+        @keyframes evict-pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.1); }
+        }
+
+        .explanation-box {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 1rem;
+            border-radius: 0.75rem;
+            font-size: 0.875rem;
+            line-height: 1.6;
+        }
+    </style>
+</head>
+
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto">
+        <!-- Header -->
+        <header class="mb-8">
+            <h1 class="text-3xl font-bold text-slate-800">
+                Cache Behavior & Tiling Simulator
+            </h1>
+            <p class="text-slate-600 mt-2">
+                Interactive visualization of cache hits, misses, and evictions during GEMM matrix multiplication.
+                See LRU replacement, cache thrashing, and the cache cliff phenomenon in action.
+            </p>
+        </header>
+
+        <!-- Controls -->
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-4 mb-6">
+            <div class="metric-card">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Matrix Size</label>
+                <select id="matrixSizeSelect" class="w-full border border-slate-300 rounded-md p-2 bg-white">
+                    <option value="64">64 × 64</option>
+                    <option value="128" selected>128 × 128</option>
+                </select>
+            </div>
+
+            <div class="metric-card">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Tile Size</label>
+                <select id="tileSizeSelect" class="w-full border border-slate-300 rounded-md p-2 bg-white">
+                    <option value="16">16 × 16</option>
+                    <option value="32" selected>32 × 32</option>
+                    <option value="64">64 × 64</option>
+                    <option value="96">96 × 96</option>
+                </select>
+            </div>
+
+            <div class="metric-card lg:col-span-2">
+                <label class="block text-xs font-bold text-slate-500 uppercase mb-2">Preset Scenarios</label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="loadPreset('optimal')" class="bg-green-100 hover:bg-green-200 text-green-800 px-3 py-2 rounded-md text-sm font-semibold transition">
+                        🟢 Optimal
+                    </button>
+                    <button onclick="loadPreset('cliff')" class="bg-red-100 hover:bg-red-200 text-red-800 px-3 py-2 rounded-md text-sm font-semibold transition">
+                        🔴 Cache Cliff
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Metrics Dashboard -->
+        <div class="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <div class="metric-card bg-green-50 border-2 border-green-200">
+                <div class="text-xs font-bold text-green-700 uppercase">Cache Hits</div>
+                <div id="hitsCount" class="text-2xl font-bold text-green-600">0</div>
+            </div>
+
+            <div class="metric-card bg-red-50 border-2 border-red-200">
+                <div class="text-xs font-bold text-red-700 uppercase">Cache Misses</div>
+                <div id="missesCount" class="text-2xl font-bold text-red-600">0</div>
+            </div>
+
+            <div class="metric-card bg-yellow-50 border-2 border-yellow-200">
+                <div class="text-xs font-bold text-yellow-700 uppercase">Evictions</div>
+                <div id="evictionsCount" class="text-2xl font-bold text-yellow-600">0</div>
+            </div>
+
+            <div class="metric-card bg-blue-50 border-2 border-blue-200">
+                <div class="text-xs font-bold text-blue-700 uppercase">Hit Rate</div>
+                <div id="hitRate" class="text-2xl font-bold text-blue-600">0%</div>
+            </div>
+
+            <div class="metric-card bg-purple-50 border-2 border-purple-200">
+                <div class="text-xs font-bold text-purple-700 uppercase">Total Cycles</div>
+                <div id="totalCycles" class="text-2xl font-bold text-purple-600">0</div>
+            </div>
+        </div>
+
+        <!-- Main Visualization Area -->
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
+            <!-- Matrix Visualization -->
+            <div class="metric-card">
+                <h3 class="text-lg font-bold text-slate-700 mb-4">Matrix Access Pattern</h3>
+                <div class="flex flex-col gap-4 items-center">
+                    <div class="text-center">
+                        <div class="text-xs font-bold text-slate-500 mb-2">Matrix A × B = C</div>
+                        <canvas id="matrixCanvas" width="400" height="150"></canvas>
+                    </div>
+                    <div class="text-xs text-slate-600 bg-slate-50 p-3 rounded-lg w-full">
+                        <div><strong>Loop Indices:</strong></div>
+                        <div id="loopIndices" class="font-mono mt-1">Tile: (0,0,0) Inner: (0,0,0)</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cache Visualization -->
+            <div class="metric-card lg:col-span-2">
+                <h3 class="text-lg font-bold text-slate-700 mb-4">L1 Cache State (32KB, 8-way set associative)</h3>
+                <div id="cacheVisualization" class="overflow-auto" style="max-height: 400px;">
+                    <div class="text-sm text-slate-500 text-center py-8">
+                        Click "Initialize" to start simulation
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Explanation & Event Log -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+            <div class="metric-card">
+                <h3 class="text-lg font-bold text-slate-700 mb-4">Current Explanation</h3>
+                <div id="explanationText" class="explanation-box min-h-[100px]">
+                    Configure parameters and click "Initialize Simulation" to begin.
+                </div>
+            </div>
+
+            <div class="metric-card">
+                <h3 class="text-lg font-bold text-slate-700 mb-4">Event Log</h3>
+                <div id="eventLog" class="overflow-auto" style="max-height: 200px;">
+                    <div class="text-sm text-slate-500 text-center py-8">
+                        No events yet
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Playback Controls -->
+        <div class="metric-card">
+            <div class="flex flex-col md:flex-row gap-4 items-center justify-between">
+                <div class="flex gap-2">
+                    <button id="initBtn" onclick="initSimulation()" class="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-md font-bold transition">
+                        Initialize Simulation
+                    </button>
+                    <button id="resetBtn" onclick="resetSimulation()" class="bg-slate-200 hover:bg-slate-300 text-slate-800 px-6 py-2 rounded-md font-semibold transition" disabled>
+                        Reset
+                    </button>
+                </div>
+                <div class="flex gap-2">
+                    <button id="prevBtn" onclick="prevStep()" class="bg-slate-600 hover:bg-slate-700 text-white px-4 py-2 rounded-md transition" disabled>
+                        ← Previous
+                    </button>
+                    <button id="nextBtn" onclick="nextStep()" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md font-bold transition" disabled>
+                        Next Step →
+                    </button>
+                    <button id="playBtn" onclick="toggleAutoPlay()" class="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-md transition" disabled>
+                        ▶ Play
+                    </button>
+                </div>
+                <div class="text-sm font-semibold text-slate-700">
+                    Step: <span id="currentStep">0</span> / <span id="totalSteps">0</span>
+                </div>
+            </div>
+            <div class="mt-4">
+                <div class="bg-slate-200 rounded-full h-2">
+                    <div id="progressBar" class="bg-blue-600 h-2 rounded-full transition-all" style="width: 0%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ============ PHASE 1: Cache Simulation Classes ============
+
+        class CacheLine {
+            constructor() {
+                this.valid = false;
+                this.tag = null;
+                this.matrixId = null;  // 'A', 'B', or 'C'
+                this.lruAge = 0;
+                this.lastAccessed = -1;
+            }
+
+            reset() {
+                this.valid = false;
+                this.tag = null;
+                this.matrixId = null;
+                this.lruAge = 0;
+                this.lastAccessed = -1;
+            }
+        }
+
+        class CacheSet {
+            constructor(numWays) {
+                this.lines = Array(numWays).fill(null).map(() => new CacheLine());
+            }
+
+            findLine(tag) {
+                for (let i = 0; i < this.lines.length; i++) {
+                    if (this.lines[i].valid && this.lines[i].tag === tag) {
+                        return i;
+                    }
+                }
+                return -1;
+            }
+
+            findLRUVictim() {
+                let maxAge = -1;
+                let victimIdx = 0;
+                for (let i = 0; i < this.lines.length; i++) {
+                    if (!this.lines[i].valid) return i;  // Empty slot
+                    if (this.lines[i].lruAge > maxAge) {
+                        maxAge = this.lines[i].lruAge;
+                        victimIdx = i;
+                    }
+                }
+                return victimIdx;
+            }
+
+            updateLRU(accessedIdx) {
+                this.lines.forEach((line, idx) => {
+                    if (idx === accessedIdx) {
+                        line.lruAge = 0;
+                    } else if (line.valid) {
+                        line.lruAge++;
+                    }
+                });
+            }
+
+            reset() {
+                this.lines.forEach(line => line.reset());
+            }
+        }
+
+        class Cache {
+            constructor(config) {
+                this.config = config;
+                this.sets = Array(config.numSets).fill(null).map(() => new CacheSet(config.numWays));
+            }
+
+            access(address, matrixId, stepNum) {
+                const { setIndex, tag } = this.parseAddress(address);
+                const set = this.sets[setIndex];
+                const wayIdx = set.findLine(tag);
+
+                if (wayIdx !== -1) {
+                    // HIT
+                    set.lines[wayIdx].lastAccessed = stepNum;
+                    set.updateLRU(wayIdx);
+                    return {
+                        hit: true,
+                        setIndex,
+                        tag,
+                        wayIdx,
+                        evicted: null,
+                        cycles: this.config.latency
+                    };
+                } else {
+                    // MISS
+                    const victimIdx = set.findLRUVictim();
+                    const evicted = set.lines[victimIdx].valid ? {
+                        tag: set.lines[victimIdx].tag,
+                        matrixId: set.lines[victimIdx].matrixId,
+                        setIndex,
+                        wayIdx: victimIdx
+                    } : null;
+
+                    // Install new line
+                    set.lines[victimIdx].valid = true;
+                    set.lines[victimIdx].tag = tag;
+                    set.lines[victimIdx].matrixId = matrixId;
+                    set.lines[victimIdx].lastAccessed = stepNum;
+                    set.updateLRU(victimIdx);
+
+                    return {
+                        hit: false,
+                        setIndex,
+                        tag,
+                        wayIdx: victimIdx,
+                        evicted,
+                        cycles: this.config.latency + 100  // DRAM latency
+                    };
+                }
+            }
+
+            parseAddress(address) {
+                const offsetBits = Math.log2(this.config.lineSize);
+                const setIndexBits = Math.log2(this.config.numSets);
+
+                const setIndex = (address >> offsetBits) & ((1 << setIndexBits) - 1);
+                const tag = address >> (offsetBits + setIndexBits);
+
+                return { setIndex, tag };
+            }
+
+            reset() {
+                this.sets.forEach(set => set.reset());
+            }
+        }
+
+        // Cache configuration
+        const cacheConfig = {
+            capacity: 32768,
+            lineSize: 64,
+            numSets: 64,
+            numWays: 8,
+            latency: 1
+        };
+
+        // ============ PHASE 2: GEMM Tiling & Step Generation ============
+
+        function matrixToAddress(matrix, row, col, matrixSize) {
+            const bases = { A: 0x10000, B: 0x20000, C: 0x30000 };
+            const floatSize = 4;
+            return bases[matrix] + (row * matrixSize + col) * floatSize;
+        }
+
+        function generateSimulationSteps(n, tileSize) {
+            const steps = [];
+            const cache = new Cache(cacheConfig);
+            let globalMetrics = { hits: 0, misses: 0, evictions: 0, cycles: 0 };
+            let stepCounter = 0;
+            let prevTile = { ti: -1, tj: -1, tk: -1 };
+
+            for (let ti = 0; ti < n; ti += tileSize) {
+                for (let tj = 0; tj < n; tj += tileSize) {
+                    for (let tk = 0; tk < n; tk += tileSize) {
+                        // Tile boundary marker
+                        if (steps.length > 0 && steps.length < 200) {
+                            steps.push({
+                                type: 'boundary',
+                                loopIndices: { ti, tj, tk, i: ti, j: tj, k: tk },
+                                metrics: { ...globalMetrics },
+                                explanation: `🔄 Tile boundary: Starting new tile (${ti/tileSize}, ${tj/tileSize}, ${tk/tileSize}). Fresh data needs loading.`
+                            });
+                        }
+
+                        let innerCount = 0;
+                        const tileLimit = Math.min(tileSize, n - ti);
+
+                        for (let i = ti; i < Math.min(ti + tileSize, n); i++) {
+                            for (let j = tj; j < Math.min(tj + tileSize, n); j++) {
+                                for (let k = tk; k < Math.min(tk + tileSize, n); k++) {
+                                    stepCounter++;
+                                    innerCount++;
+
+                                    const shouldCapture =
+                                        steps.length < 300 && (
+                                            innerCount <= 8 ||
+                                            innerCount > (tileLimit * tileLimit * tileLimit - 3) ||
+                                            innerCount % 30 === 0
+                                        );
+
+                                    if (shouldCapture) {
+                                        const step = simulateIteration(i, j, k, ti, tj, tk, n, cache, globalMetrics, stepCounter, prevTile);
+                                        steps.push(step);
+                                        prevTile = { ti, tj, tk };
+                                    } else {
+                                        // Update cache state only
+                                        updateCacheOnly(i, j, k, n, cache, globalMetrics);
+                                    }
+
+                                    if (steps.length >= 300) break;
+                                }
+                                if (steps.length >= 300) break;
+                            }
+                            if (steps.length >= 300) break;
+                        }
+                        if (steps.length >= 300) break;
+                    }
+                    if (steps.length >= 300) break;
+                }
+                if (steps.length >= 300) break;
+            }
+
+            return steps;
+        }
+
+        function simulateIteration(i, j, k, ti, tj, tk, n, cache, metrics, stepNum, prevTile) {
+            const accesses = [
+                { matrix: 'A', row: i, col: k },
+                { matrix: 'B', row: k, col: j },
+                { matrix: 'C', row: i, col: j }
+            ];
+
+            const results = [];
+            accesses.forEach(acc => {
+                const addr = matrixToAddress(acc.matrix, acc.row, acc.col, n);
+                const result = cache.access(addr, acc.matrix, stepNum);
+
+                metrics.cycles += result.cycles;
+                if (result.hit) metrics.hits++;
+                else metrics.misses++;
+                if (result.evicted) metrics.evictions++;
+
+                results.push({
+                    matrix: acc.matrix,
+                    row: acc.row,
+                    col: acc.col,
+                    ...result
+                });
+            });
+
+            const explanation = generateExplanation(results, i, j, k, ti, tj, tk, prevTile, metrics);
+
+            return {
+                type: 'compute',
+                loopIndices: { ti, tj, tk, i, j, k },
+                accesses: results,
+                metrics: { ...metrics },
+                cacheSnapshot: captureActiveCache(cache, results),
+                explanation
+            };
+        }
+
+        function updateCacheOnly(i, j, k, n, cache, metrics) {
+            const accesses = [
+                { matrix: 'A', row: i, col: k },
+                { matrix: 'B', row: k, col: j },
+                { matrix: 'C', row: i, col: j }
+            ];
+
+            accesses.forEach(acc => {
+                const addr = matrixToAddress(acc.matrix, acc.row, acc.col, n);
+                const result = cache.access(addr, acc.matrix, -1);
+
+                metrics.cycles += result.cycles;
+                if (result.hit) metrics.hits++;
+                else metrics.misses++;
+                if (result.evicted) metrics.evictions++;
+            });
+        }
+
+        function captureActiveCache(cache, results) {
+            const activeSets = new Set();
+            results.forEach(r => activeSets.add(r.setIndex));
+
+            const snapshot = {};
+            activeSets.forEach(setIdx => {
+                snapshot[setIdx] = {
+                    ways: cache.sets[setIdx].lines.map(line => ({
+                        valid: line.valid,
+                        tag: line.tag,
+                        matrixId: line.matrixId,
+                        lruAge: line.lruAge
+                    }))
+                };
+            });
+
+            return snapshot;
+        }
+
+        function generateExplanation(results, i, j, k, ti, tj, tk, prevTile, metrics) {
+            const hits = results.filter(r => r.hit).length;
+            const misses = results.filter(r => !r.hit).length;
+            const evictions = results.filter(r => r.evicted !== null).length;
+
+            const isTileBoundary = (ti !== prevTile.ti || tj !== prevTile.tj || tk !== prevTile.tk);
+
+            if (isTileBoundary && prevTile.ti !== -1) {
+                return `🔄 Tile boundary crossed! Entering new tile (${ti}, ${tj}, ${tk}). Expect cold misses as new data loads into cache.`;
+            } else if (hits === 3) {
+                return `✅ Perfect! All three accesses hit in L1 cache. Data from A[${i},${k}], B[${k},${j}], C[${i},${j}] was already loaded. This is temporal locality at work.`;
+            } else if (evictions > 0) {
+                const evictedMatrix = results.find(r => r.evicted)?.evicted.matrixId || 'data';
+                return `⚠️ Cache eviction! Had to kick out old ${evictedMatrix} data (LRU replacement). Working set may exceed L1 capacity (${cacheConfig.capacity / 1024}KB).`;
+            } else if (misses > 0) {
+                return `🔴 Cache miss(es): ${misses} access(es) not in L1. Fetched from DRAM (+100 cycles). Computing C[${i},${j}] += A[${i},${k}] × B[${k},${j}].`;
+            } else {
+                return `Computing C[${i},${j}] += A[${i},${k}] × B[${k},${j}]. Total hits: ${metrics.hits}, misses: ${metrics.misses}.`;
+            }
+        }
+
+        // ============ Global State ============
+
+        let simulationSteps = [];
+        let currentStepIndex = -1;
+        let isPlaying = false;
+        let playInterval = null;
+
+        // ============ PHASE 3: UI & Visualization Functions ============
+
+        function initSimulation() {
+            const matrixSize = parseInt(document.getElementById('matrixSizeSelect').value);
+            const tileSize = parseInt(document.getElementById('tileSizeSelect').value);
+
+            document.getElementById('initBtn').disabled = true;
+            document.getElementById('initBtn').innerText = 'Generating...';
+
+            setTimeout(() => {
+                simulationSteps = generateSimulationSteps(matrixSize, tileSize);
+                currentStepIndex = -1;
+
+                document.getElementById('totalSteps').innerText = simulationSteps.length;
+                document.getElementById('initBtn').innerText = 'Initialized ✓';
+                document.getElementById('resetBtn').disabled = false;
+                document.getElementById('nextBtn').disabled = false;
+                document.getElementById('playBtn').disabled = false;
+
+                nextStep();
+            }, 100);
+        }
+
+        function resetSimulation() {
+            currentStepIndex = -1;
+            isPlaying = false;
+            if (playInterval) clearInterval(playInterval);
+
+            document.getElementById('initBtn').disabled = false;
+            document.getElementById('initBtn').innerText = 'Initialize Simulation';
+            document.getElementById('resetBtn').disabled = true;
+            document.getElementById('nextBtn').disabled = true;
+            document.getElementById('prevBtn').disabled = true;
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('playBtn').innerText = '▶ Play';
+
+            document.getElementById('currentStep').innerText = '0';
+            document.getElementById('hitsCount').innerText = '0';
+            document.getElementById('missesCount').innerText = '0';
+            document.getElementById('evictionsCount').innerText = '0';
+            document.getElementById('hitRate').innerText = '0%';
+            document.getElementById('totalCycles').innerText = '0';
+            document.getElementById('progressBar').style.width = '0%';
+
+            document.getElementById('explanationText').innerHTML = 'Click "Initialize Simulation" to begin.';
+            document.getElementById('eventLog').innerHTML = '<div class="text-sm text-slate-500 text-center py-8">No events yet</div>';
+            document.getElementById('cacheVisualization').innerHTML = '<div class="text-sm text-slate-500 text-center py-8">Click "Initialize" to start simulation</div>';
+
+            clearMatrixCanvas();
+        }
+
+        function nextStep() {
+            if (currentStepIndex >= simulationSteps.length - 1) return;
+
+            currentStepIndex++;
+            updateVisualization();
+
+            document.getElementById('prevBtn').disabled = currentStepIndex === 0;
+            document.getElementById('nextBtn').disabled = currentStepIndex >= simulationSteps.length - 1;
+        }
+
+        function prevStep() {
+            if (currentStepIndex <= 0) return;
+
+            currentStepIndex--;
+            updateVisualization();
+
+            document.getElementById('prevBtn').disabled = currentStepIndex === 0;
+            document.getElementById('nextBtn').disabled = false;
+        }
+
+        function toggleAutoPlay() {
+            isPlaying = !isPlaying;
+
+            if (isPlaying) {
+                document.getElementById('playBtn').innerText = '⏸ Pause';
+                playInterval = setInterval(() => {
+                    if (currentStepIndex >= simulationSteps.length - 1) {
+                        toggleAutoPlay();
+                    } else {
+                        nextStep();
+                    }
+                }, 500);
+            } else {
+                document.getElementById('playBtn').innerText = '▶ Play';
+                if (playInterval) clearInterval(playInterval);
+            }
+        }
+
+        function loadPreset(type) {
+            if (type === 'optimal') {
+                document.getElementById('matrixSizeSelect').value = '128';
+                document.getElementById('tileSizeSelect').value = '64';
+            } else if (type === 'cliff') {
+                document.getElementById('matrixSizeSelect').value = '128';
+                document.getElementById('tileSizeSelect').value = '96';
+            }
+        }
+
+        function updateVisualization() {
+            const step = simulationSteps[currentStepIndex];
+            if (!step) return;
+
+            // Update metrics
+            const metrics = step.metrics;
+            const hitRate = metrics.hits + metrics.misses > 0
+                ? ((metrics.hits / (metrics.hits + metrics.misses)) * 100).toFixed(1)
+                : 0;
+
+            document.getElementById('currentStep').innerText = currentStepIndex + 1;
+            document.getElementById('hitsCount').innerText = metrics.hits;
+            document.getElementById('missesCount').innerText = metrics.misses;
+            document.getElementById('evictionsCount').innerText = metrics.evictions;
+            document.getElementById('hitRate').innerText = hitRate + '%';
+            document.getElementById('totalCycles').innerText = metrics.cycles.toLocaleString();
+
+            const progress = ((currentStepIndex + 1) / simulationSteps.length) * 100;
+            document.getElementById('progressBar').style.width = progress + '%';
+
+            // Update loop indices
+            const { ti, tj, tk, i, j, k } = step.loopIndices;
+            document.getElementById('loopIndices').innerText =
+                `Tile: (${ti}, ${tj}, ${tk}) Inner: (${i}, ${j}, ${k})`;
+
+            // Update explanation
+            document.getElementById('explanationText').innerHTML = step.explanation;
+
+            // Update event log
+            if (step.type === 'compute') {
+                addEventToLog(step);
+            }
+
+            // Update cache visualization
+            if (step.cacheSnapshot) {
+                updateCacheVisualization(step.cacheSnapshot, step.accesses);
+            }
+
+            // Update matrix visualization
+            drawMatrixVisualization(step);
+        }
+
+        function addEventToLog(step) {
+            const logContainer = document.getElementById('eventLog');
+
+            if (logContainer.children.length === 1 && logContainer.children[0].classList.contains('text-slate-500')) {
+                logContainer.innerHTML = '';
+            }
+
+            step.accesses.forEach(acc => {
+                const eventDiv = document.createElement('div');
+                const eventClass = acc.hit ? 'event-hit' : (acc.evicted ? 'event-evict' : 'event-miss');
+                const eventIcon = acc.hit ? '🟢' : (acc.evicted ? '🟡' : '🔴');
+                const eventType = acc.hit ? 'HIT' : (acc.evicted ? 'EVICT+MISS' : 'MISS');
+
+                eventDiv.className = `event-item ${eventClass}`;
+                eventDiv.innerHTML = `
+                    <strong>${eventIcon} ${eventType}</strong> - ${acc.matrix}[${acc.row},${acc.col}]<br>
+                    Set ${acc.setIndex}, Way ${acc.wayIdx}, Tag 0x${acc.tag.toString(16)}
+                `;
+
+                logContainer.insertBefore(eventDiv, logContainer.firstChild);
+            });
+
+            // Keep only last 10 events
+            while (logContainer.children.length > 10) {
+                logContainer.removeChild(logContainer.lastChild);
+            }
+        }
+
+        function updateCacheVisualization(snapshot, accesses) {
+            const container = document.getElementById('cacheVisualization');
+            container.innerHTML = '';
+
+            const setIndices = Object.keys(snapshot).map(Number).sort((a, b) => a - b);
+
+            setIndices.forEach(setIdx => {
+                const setData = snapshot[setIdx];
+                const setDiv = document.createElement('div');
+                setDiv.className = 'mb-3 p-2 bg-slate-50 rounded';
+
+                let html = `<div class="text-xs font-bold text-slate-600 mb-2">Set ${setIdx}</div><div class="flex flex-wrap gap-1">`;
+
+                setData.ways.forEach((way, wayIdx) => {
+                    const access = accesses?.find(a => a.setIndex === setIdx && a.wayIdx === wayIdx);
+                    let wayClass = 'cache-way';
+
+                    if (way.valid) {
+                        wayClass += ' cache-way-valid';
+                        if (access) {
+                            if (access.hit) wayClass += ' cache-way-hit';
+                            else if (access.evicted) wayClass += ' cache-way-evict';
+                            else wayClass += ' cache-way-miss';
+                        }
+                    }
+
+                    const content = way.valid
+                        ? `<div style="font-weight:bold;">${way.matrixId}</div><div>0x${way.tag.toString(16).substring(0,3)}</div><div style="font-size:7px;">LRU:${way.lruAge}</div>`
+                        : '<div style="color:#cbd5e1; padding-top:8px;">---</div>';
+
+                    html += `<div class="${wayClass}">${content}</div>`;
+                });
+
+                html += '</div>';
+                setDiv.innerHTML = html;
+                container.appendChild(setDiv);
+            });
+        }
+
+        function drawMatrixVisualization(step) {
+            const canvas = document.getElementById('matrixCanvas');
+            const ctx = canvas.getContext('2d');
+            const { i, j, k, ti, tj, tk } = step.loopIndices;
+
+            const matrixSize = parseInt(document.getElementById('matrixSizeSelect').value);
+            const tileSize = parseInt(document.getElementById('tileSizeSelect').value);
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const matrixWidth = 120;
+            const matrixHeight = 120;
+            const spacing = 20;
+            const startX = [10, matrixWidth + spacing + 10, (matrixWidth + spacing) * 2 + 10];
+
+            // Draw matrices A, B, C
+            ['A', 'B', 'C'].forEach((mat, idx) => {
+                const x = startX[idx];
+                const y = 10;
+
+                // Draw matrix outline
+                ctx.strokeStyle = '#94a3b8';
+                ctx.lineWidth = 2;
+                ctx.strokeRect(x, y, matrixWidth, matrixHeight);
+
+                // Draw tile grid
+                const numTiles = matrixSize / tileSize;
+                const tilePixelSize = matrixWidth / numTiles;
+
+                ctx.strokeStyle = '#cbd5e1';
+                ctx.lineWidth = 1;
+                for (let r = 0; r <= numTiles; r++) {
+                    ctx.beginPath();
+                    ctx.moveTo(x, y + r * tilePixelSize);
+                    ctx.lineTo(x + matrixWidth, y + r * tilePixelSize);
+                    ctx.stroke();
+                }
+                for (let c = 0; c <= numTiles; c++) {
+                    ctx.beginPath();
+                    ctx.moveTo(x + c * tilePixelSize, y);
+                    ctx.lineTo(x + c * tilePixelSize, y + matrixHeight);
+                    ctx.stroke();
+                }
+
+                // Highlight active tile
+                const tileRow = Math.floor(ti / tileSize);
+                const tileCol = Math.floor((mat === 'B' ? tj : ti) / tileSize);
+
+                ctx.fillStyle = 'rgba(59, 130, 246, 0.2)';
+                ctx.fillRect(
+                    x + tileCol * tilePixelSize + 1,
+                    y + tileRow * tilePixelSize + 1,
+                    tilePixelSize - 2,
+                    tilePixelSize - 2
+                );
+
+                // Draw current access point
+                if (step.accesses) {
+                    const access = step.accesses.find(a => a.matrix === mat);
+                    if (access) {
+                        const pixelRow = (access.row / matrixSize) * matrixHeight;
+                        const pixelCol = (access.col / matrixSize) * matrixWidth;
+
+                        ctx.fillStyle = access.hit ? '#22c55e' : '#ef4444';
+                        ctx.beginPath();
+                        ctx.arc(x + pixelCol, y + pixelRow, 4, 0, 2 * Math.PI);
+                        ctx.fill();
+                    }
+                }
+
+                // Label
+                ctx.fillStyle = '#1e293b';
+                ctx.font = 'bold 14px sans-serif';
+                ctx.fillText(mat, x + matrixWidth / 2 - 6, y - 5);
+            });
+
+            // Draw × and = symbols
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = '20px sans-serif';
+            ctx.fillText('×', startX[0] + matrixWidth + 5, 70);
+            ctx.fillText('=', startX[1] + matrixWidth + 5, 70);
+        }
+
+        function clearMatrixCanvas() {
+            const canvas = document.getElementById('matrixCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+        }
+
+        // Initialize on load
+        window.onload = () => {
+            console.log('Cache Behavior & Tiling Simulator loaded');
+        };
+    </script>
+</body>
+
+</html>
