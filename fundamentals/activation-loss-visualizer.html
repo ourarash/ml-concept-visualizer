@@ -364,10 +364,15 @@ function drawGraph(canvasId, h, fns, xMin, xMax, yMin, yMax, markerX, xLabel, yL
 
         for (const { fn, color } of fns) {
             const yv = fn(markerX);
-            const sy = yPos(yv);
+            let sy = yPos(yv);
+            const visible = sy >= m.top - 10 && sy <= m.top + cH + 10;
+            sy = Math.max(m.top, Math.min(m.top + cH, sy));
             ctx.fillStyle = color; ctx.beginPath(); ctx.arc(mx, sy, 5, 0, Math.PI*2); ctx.fill();
-            ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
-            ctx.fillText(yv.toFixed(3), mx + 8, sy - 4);
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif';
+            const nearRight = mx > W - 80;
+            ctx.textAlign = nearRight ? 'right' : 'left';
+            const label = visible ? yv.toFixed(3) : (yv > 0 ? '▲ ' : '▼ ') + yv.toFixed(1);
+            ctx.fillText(label, nearRight ? mx - 8 : mx + 8, sy - 4);
         }
     }
 }
@@ -403,14 +408,13 @@ function drawActivations() {
         const fn = key === 'leaky' ? leaky.fn : def.fn;
         const deriv = key === 'leaky' ? leaky.deriv : def.deriv;
         const fv = fn(x), dv = deriv(x);
-        const gradWarn = Math.abs(dv) < 0.01 ? '⚠️ vanishing' : Math.abs(dv) < 0.1 ? '⚠️ small' : '✓ healthy';
+        const gradWarn = (key === 'relu' && x <= 0) ? '💀 dead neuron' : Math.abs(dv) < 0.01 ? '⚠️ vanishing' : Math.abs(dv) < 0.1 ? '⚠️ small' : '✓ healthy';
         statsHTML += `<div class="stat-card"><div class="lbl" style="color:${def.color}">${def.name}</div><div class="val" style="color:${def.color}">f(${x.toFixed(1)}) = ${fv.toFixed(4)}</div><div style="font-size:0.75rem;color:var(--text-dim)">f' = ${dv.toFixed(4)} ${gradWarn}</div></div>`;
     }
     $('#act-stats').innerHTML = statsHTML;
 
     // Description
     let desc = `<strong>x = ${x.toFixed(2)}:</strong> `;
-    const sigmoid_val = 1/(1+Math.exp(-x));
     if (x < -3) desc += 'Deep negative region — Sigmoid/Tanh saturate (gradient ≈ 0, vanishing gradient problem). ReLU outputs 0 (dead neuron). GELU and Swish allow small negative values.';
     else if (x < 0) desc += 'Negative region — ReLU is 0 (dead). Leaky ReLU passes a small signal (α×x). Sigmoid/Tanh still have some gradient.';
     else if (x < 0.5) desc += 'Near-zero region — all activations are approximately linear. Gradients are near their maximum.';
@@ -700,11 +704,22 @@ function drawPipeline() {
 
     // Description
     let desc = `<strong>z=${z.toFixed(2)}, y=${y}:</strong> `;
-    if (Math.abs(dL_dz) < 0.01) desc += `⚠️ <strong>Vanishing gradient!</strong> The gradient ∂L/∂z ≈ 0, so this neuron learns very slowly. `;
-    else if (Math.abs(dL_dz) > 3) desc += `⚡ <strong>Large gradient</strong> — fast learning but risk of instability. `;
-    else desc += `✓ Healthy gradient — the neuron will update effectively. `;
+
+    // Warn about activation-loss compatibility
+    const unbounded = actKey === 'relu' || actKey === 'leaky' || actKey === 'gelu' || actKey === 'swish';
+    const tanhAct = actKey === 'tanh';
+    if ((unbounded || tanhAct) && lossKey === 'bce') {
+        desc += `⚠️ <strong>${actDef.name} + BCE is unusual</strong> — BCE expects output in (0,1), but ${actDef.name} output is ${tanhAct ? '(-1,1)' : 'unbounded'}. In practice, Sigmoid is paired with BCE. Showing clamped values. `;
+    } else if (Math.abs(dL_dz) < 0.01) {
+        desc += `⚠️ <strong>Vanishing gradient!</strong> The gradient ∂L/∂z ≈ 0, so this neuron learns very slowly. `;
+    } else if (Math.abs(dL_dz) > 3) {
+        desc += `⚡ <strong>Large gradient</strong> — fast learning but risk of instability. `;
+    } else {
+        desc += `✓ Healthy gradient — the neuron will update effectively. `;
+    }
 
     if (actKey === 'relu' && z < 0) desc += `ReLU outputs 0 for z<0 (dead neuron, gradient=0). Try Leaky ReLU to fix this.`;
+    else if (actKey === 'leaky' && z < 0) desc += `Leaky ReLU passes α×z = ${(a).toFixed(4)} — small but non-zero, avoiding the dead neuron problem.`;
     else if ((actKey === 'sigmoid' || actKey === 'tanh') && Math.abs(z) > 3) desc += `${actDef.name} is saturated at this z — gradient is near zero (vanishing gradient problem).`;
 
     $('#pipe-desc').innerHTML = desc;
