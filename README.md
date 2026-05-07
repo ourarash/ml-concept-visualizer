@@ -133,6 +133,7 @@ Analyzing and predicting system performance
 
 - Roofline model visualization
 - Performance bounds and bottlenecks
+- Pipeline parallelism bubbles and microbatch scheduling tradeoffs
 
 ## 📁 Repository Structure
 
