@@ -1,0 +1,1097 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Reinforcement Learning Visualizer — EE508</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0d1117;
+      color: #e2e8f0;
+      min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 20px 28px 16px;
+      border-bottom: 1px solid #1e2736;
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    header h1 {
+      font-size: 1.55rem;
+      font-weight: 700;
+      background: linear-gradient(120deg, #60a5fa 0%, #a78bfa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    header .sub { color: #64748b; font-size: 0.82rem; margin-top: 3px; }
+
+    /* ── Online / Offline comparison banner ── */
+    .compare-bar {
+      display: flex;
+      gap: 20px;
+      padding: 10px 28px;
+      background: #111827;
+      border-bottom: 1px solid #1e2736;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .compare-bar .label { font-size: 0.75rem; color: #64748b; font-weight: 600; text-transform: uppercase; letter-spacing: .04em; }
+    .cmp-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      color: #94a3b8;
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 9px;
+      border-radius: 20px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: .03em;
+    }
+    .badge.online  { background: #052e16; color: #34d399; border: 1px solid #059669; }
+    .badge.offline { background: #1e1b4b; color: #a78bfa; border: 1px solid #7c3aed; }
+
+    /* ── Tabs ── */
+    .tabs {
+      display: flex;
+      gap: 4px;
+      padding: 12px 28px 0;
+      border-bottom: 1px solid #1e2736;
+    }
+    .tab-btn {
+      padding: 9px 22px;
+      border-radius: 8px 8px 0 0;
+      border: 1px solid transparent;
+      border-bottom: none;
+      background: transparent;
+      color: #64748b;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.15s;
+    }
+    .tab-btn:hover { color: #94a3b8; background: #161b27; }
+    .tab-btn.active {
+      color: #60a5fa;
+      background: #0d1117;
+      border-color: #1e2736;
+      border-bottom-color: #0d1117;
+      margin-bottom: -1px;
+    }
+
+    /* ── Tab panels ── */
+    .tab-panel { display: none; padding: 20px 28px 28px; }
+    .tab-panel.active { display: grid; grid-template-columns: 260px 1fr 210px; gap: 20px; }
+
+    @media (max-width: 860px) {
+      .tab-panel.active { grid-template-columns: 1fr; }
+    }
+
+    /* ── Left: algo panel ── */
+    .algo-panel {
+      background: #111827;
+      border: 1px solid #1e2736;
+      border-radius: 12px;
+      padding: 18px;
+    }
+    .algo-panel .head {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 10px;
+    }
+    .algo-panel h2 { font-size: 1.05rem; font-weight: 700; }
+    .algo-panel p  { font-size: 0.8rem; color: #94a3b8; line-height: 1.65; margin-bottom: 12px; }
+    .eq {
+      background: #0d1117;
+      border: 1px solid #2d3748;
+      border-left: 3px solid #60a5fa;
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: 'Courier New', monospace;
+      font-size: 0.77rem;
+      color: #fbbf24;
+      line-height: 2;
+      margin-bottom: 10px;
+    }
+    .eq span { color: #94a3b8; }
+    .key-list { list-style: none; margin-top: 6px; }
+    .key-list li {
+      font-size: 0.76rem;
+      color: #94a3b8;
+      padding: 3px 0;
+      border-bottom: 1px solid #1e2736;
+    }
+    .key-list li:last-child { border-bottom: none; }
+    .key-list li b { color: #e2e8f0; }
+
+    /* ── Centre: grid + controls ── */
+    .grid-area {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 14px;
+    }
+    canvas.grid-canvas {
+      border-radius: 10px;
+      border: 1px solid #1e2736;
+      display: block;
+    }
+    .controls {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+    }
+    button.btn {
+      padding: 7px 16px;
+      border-radius: 8px;
+      border: 1px solid #2d3748;
+      background: #111827;
+      color: #e2e8f0;
+      cursor: pointer;
+      font-size: 0.82rem;
+      transition: all 0.15s;
+    }
+    button.btn:hover { background: #1e2736; }
+    button.btn.primary { border-color: #3b82f6; color: #60a5fa; background: #0f2044; }
+    button.btn.primary:hover { background: #1a3060; }
+    button.btn.danger  { border-color: #dc2626; color: #f87171; }
+    button.btn.danger:hover  { background: #2d1111; }
+    button.btn.active-auto { background: #1a3060; border-color: #60a5fa; color: #93c5fd; }
+    .speed-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.76rem;
+      color: #64748b;
+    }
+    input[type=range] { width: 70px; accent-color: #60a5fa; cursor: pointer; }
+
+    /* ── Right: stats panel ── */
+    .stats-panel {
+      background: #111827;
+      border: 1px solid #1e2736;
+      border-radius: 12px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+    }
+    .stats-panel h3 {
+      font-size: 0.72rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+      color: #475569;
+      margin-bottom: 10px;
+    }
+    .stat-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 5px 0;
+      border-bottom: 1px solid #1e2736;
+      font-size: 0.79rem;
+    }
+    .stat-row:last-of-type { border-bottom: none; }
+    .stat-row .lbl { color: #64748b; }
+    .stat-row .val { font-family: monospace; font-weight: 600; color: #60a5fa; }
+
+    .legend { margin-top: 14px; }
+    .legend h3 { margin-bottom: 8px; }
+    .leg-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 0.75rem;
+      color: #94a3b8;
+      margin-bottom: 5px;
+    }
+    .leg-swatch {
+      width: 14px; height: 14px;
+      border-radius: 3px;
+      flex-shrink: 0;
+    }
+
+    /* Episode log */
+    .ep-log {
+      margin-top: 12px;
+      background: #0d1117;
+      border: 1px solid #1e2736;
+      border-radius: 7px;
+      padding: 8px;
+      font-size: 0.72rem;
+      font-family: monospace;
+      color: #64748b;
+      height: 110px;
+      overflow-y: auto;
+      flex-shrink: 0;
+    }
+    .ep-log .ok  { color: #34d399; }
+    .ep-log .bad { color: #f87171; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div>
+    <h1>Reinforcement Learning Visualizer</h1>
+    <p class="sub">EE508 · Interactive visualization of core RL algorithms on a grid-world</p>
+  </div>
+</header>
+
+<!-- Online / Offline comparison bar -->
+<div class="compare-bar">
+  <span class="label">Learning paradigm:</span>
+  <div class="cmp-item"><span class="badge online">Online</span> Agent learns by <em>interacting</em> with the environment in real time — each step updates parameters immediately.</div>
+  <div style="color:#2d3748; font-size:1.2rem;">|</div>
+  <div class="cmp-item"><span class="badge offline">Offline</span> Agent learns from a <em>fixed dataset</em> of transitions collected beforehand — no live environment needed. (e.g. Conservative Q-Learning, Decision Transformer)</div>
+  <div style="color:#2d3748; font-size:1.2rem;">|</div>
+  <div class="cmp-item" style="color:#fbbf24; font-size:0.78rem;">← All three algorithms below are <b>Online</b></div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <button class="tab-btn active" onclick="switchTab('ql', this)">Q-Learning &nbsp;<span class="badge online" style="font-size:0.62rem;">Online · Value-Based</span></button>
+  <button class="tab-btn"        onclick="switchTab('pg', this)">REINFORCE &nbsp;<span class="badge online" style="font-size:0.62rem;">Online · Policy-Based</span></button>
+  <button class="tab-btn"        onclick="switchTab('ac', this)">Actor-Critic &nbsp;<span class="badge online" style="font-size:0.62rem;">Online · Hybrid</span></button>
+</div>
+
+<!-- ================================================================
+     TAB 1 — Q-LEARNING
+     ================================================================ -->
+<div id="panel-ql" class="tab-panel active">
+
+  <div class="algo-panel">
+    <div class="head">
+      <h2>Q-Learning</h2>
+      <span class="badge online">Online</span>
+    </div>
+    <p>
+      Learns a <b>Q-function</b> Q(s,a) — the expected discounted reward for taking action <em>a</em>
+      in state <em>s</em>. The agent uses an <b>ε-greedy policy</b>: explore randomly with probability ε,
+      otherwise act greedily on Q.
+    </p>
+    <div class="eq">
+      Q(s,a) ← Q(s,a) + α[r + γ·max<sub>a'</sub>Q(s',a') − Q(s,a)]
+    </div>
+    <p style="font-size:0.75rem; color:#64748b;">Cells are colored by max Q-value. The best action arrow appears once Q-values diverge from zero.</p>
+    <ul class="key-list">
+      <li><b>α</b> = 0.10 — learning rate</li>
+      <li><b>γ</b> = 0.95 — discount factor</li>
+      <li><b>ε</b> — starts at 1.0, decays each episode → 0.05</li>
+      <li><b>Update:</b> after every single step (TD(0))</li>
+      <li><b>Paradigm:</b> Off-policy (learns greedy policy while following ε-greedy)</li>
+    </ul>
+  </div>
+
+  <div class="grid-area">
+    <canvas id="cvs-ql" class="grid-canvas" width="400" height="400"></canvas>
+    <div class="controls">
+      <button class="btn primary" onclick="qlStep()">Step</button>
+      <button class="btn primary" onclick="qlRunEp()">Run Episode</button>
+      <button class="btn" id="btn-ql-auto" onclick="qlToggleAuto()">Auto Run</button>
+      <button class="btn danger" onclick="qlReset()">Reset</button>
+      <div class="speed-wrap">Speed <input id="spd-ql" type="range" min="30" max="490" value="250"></div>
+    </div>
+  </div>
+
+  <div class="stats-panel">
+    <h3>Statistics</h3>
+    <div class="stat-row"><span class="lbl">Episode</span><span class="val" id="ql-ep">0</span></div>
+    <div class="stat-row"><span class="lbl">Steps (this ep.)</span><span class="val" id="ql-st">0</span></div>
+    <div class="stat-row"><span class="lbl">Reward (this ep.)</span><span class="val" id="ql-rw">0.00</span></div>
+    <div class="stat-row"><span class="lbl">ε (epsilon)</span><span class="val" id="ql-eps">1.000</span></div>
+    <div class="stat-row"><span class="lbl">Best episode steps</span><span class="val" id="ql-best">—</span></div>
+
+    <div class="legend">
+      <h3>Legend</h3>
+      <div class="leg-item"><div class="leg-swatch" style="background:#1e3a5f;border:1px solid #3b82f6;"></div>Agent</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#065f46;"></div>Goal (+10)</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#374151;"></div>Wall</div>
+      <div class="leg-item">
+        <canvas id="ql-heatbar" width="60" height="14" style="border-radius:3px;"></canvas>
+        Negative ← Q-value → Positive
+      </div>
+      <div class="leg-item" style="font-size:0.72rem; color:#64748b;">Arrow = greedy action after visit</div>
+    </div>
+    <div class="ep-log" id="log-ql"></div>
+  </div>
+</div>
+
+<!-- ================================================================
+     TAB 2 — REINFORCE (Policy Gradient)
+     ================================================================ -->
+<div id="panel-pg" class="tab-panel">
+
+  <div class="algo-panel">
+    <div class="head">
+      <h2>REINFORCE</h2>
+      <span class="badge online">Online</span>
+    </div>
+    <p>
+      Directly parameterizes and optimizes the <b>policy π(a|s;θ)</b>.
+      Runs a <em>full episode</em>, computes discounted returns G<sub>t</sub>,
+      subtracts a per-episode baseline b, then nudges θ to increase the probability
+      of actions with above-baseline returns.
+    </p>
+    <div class="eq">
+      θ ← θ + α · (G<sub>t</sub> − b) · ∇<sub>θ</sub> log π(a<sub>t</sub>|s<sub>t</sub>; θ)
+    </div>
+    <div class="eq" style="color:#94a3b8; font-size:0.73rem; margin-top:-4px;">
+      G<sub>t</sub> = Σ γ<sup>k</sup>·r<sub>t+k</sub> &nbsp;|&nbsp; b = mean<sub>t</sub>G<sub>t</sub> &nbsp;|&nbsp; π(a|s) = softmax(θ<sub>s,a</sub>)
+    </div>
+    <p style="font-size:0.75rem; color:#64748b;">Arrow thickness = action probability. Trajectory shown in yellow; return sign colours the path.</p>
+    <ul class="key-list">
+      <li><b>α</b> = 0.05 — policy learning rate</li>
+      <li><b>γ</b> = 0.95 — discount</li>
+      <li><b>Update:</b> once per full episode (Monte Carlo)</li>
+      <li><b>Paradigm:</b> On-policy Monte Carlo; baseline reduces variance</li>
+      <li><b>Weakness:</b> still needs many episodes to reduce variance</li>
+    </ul>
+  </div>
+
+  <div class="grid-area">
+    <canvas id="cvs-pg" class="grid-canvas" width="400" height="400"></canvas>
+    <div class="controls">
+      <button class="btn primary" onclick="pgRunEp()">Run Episode</button>
+      <button class="btn" id="btn-pg-auto" onclick="pgToggleAuto()">Auto Run</button>
+      <button class="btn danger" onclick="pgReset()">Reset</button>
+      <div class="speed-wrap">Speed <input id="spd-pg" type="range" min="50" max="1500" value="500"></div>
+    </div>
+  </div>
+
+  <div class="stats-panel">
+    <h3>Statistics</h3>
+    <div class="stat-row"><span class="lbl">Episode</span><span class="val" id="pg-ep">0</span></div>
+    <div class="stat-row"><span class="lbl">Last return G₀</span><span class="val" id="pg-g">0.00</span></div>
+    <div class="stat-row"><span class="lbl">Avg G (last 10)</span><span class="val" id="pg-avg">0.00</span></div>
+    <div class="stat-row"><span class="lbl">Episode length</span><span class="val" id="pg-len">—</span></div>
+
+    <div class="legend">
+      <h3>Legend</h3>
+      <div class="leg-item"><div class="leg-swatch" style="background:#1e3a5f;border:1px solid #3b82f6;"></div>Agent (episode end)</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#065f46;"></div>Goal (+10)</div>
+      <div class="leg-item" style="font-size:0.72rem;">→ Arrow size = action prob.</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#fbbf24; opacity:.6;"></div>Trajectory path</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#34d399; opacity:.4;"></div>Positive return</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#f87171; opacity:.4;"></div>Negative return</div>
+    </div>
+    <div class="ep-log" id="log-pg"></div>
+  </div>
+</div>
+
+<!-- ================================================================
+     TAB 3 — ACTOR-CRITIC
+     ================================================================ -->
+<div id="panel-ac" class="tab-panel">
+
+  <div class="algo-panel">
+    <div class="head">
+      <h2>Actor-Critic</h2>
+      <span class="badge online">Online</span>
+    </div>
+    <p>
+      Combines value-based and policy-based methods.
+      The <b style="color:#60a5fa;">Actor</b> (policy) decides actions;
+      the <b style="color:#f87171;">Critic</b> (V-function) evaluates them via TD error δ,
+      replacing G<sub>t</sub> with a lower-variance bootstrap estimate.
+    </p>
+    <div class="eq">
+      δ = r + γ·V(s') − V(s) <span>&nbsp;← TD error</span><br>
+      θ ← θ + α<sub>A</sub>·δ·∇<sub>θ</sub> log π(a|s) <span>&nbsp;← actor</span><br>
+      w ← w + α<sub>C</sub>·δ·∇<sub>w</sub> V(s) <span>&nbsp;← critic</span>
+    </div>
+    <p style="font-size:0.75rem; color:#64748b;">Cell colour = critic V(s). Arrows = actor π(a|s). Flash = TD error sign.</p>
+    <ul class="key-list">
+      <li><b>α<sub>A</sub></b> = 0.05 — actor LR</li>
+      <li><b>α<sub>C</sub></b> = 0.10 — critic LR</li>
+      <li><b>Update:</b> every step (TD(0))</li>
+      <li><b>vs REINFORCE:</b> lower variance via critic bootstrap</li>
+      <li><b>vs Q-Learning:</b> explicit stochastic policy (actor)</li>
+    </ul>
+  </div>
+
+  <div class="grid-area">
+    <canvas id="cvs-ac" class="grid-canvas" width="400" height="400"></canvas>
+    <div class="controls">
+      <button class="btn primary" onclick="acStep()">Step</button>
+      <button class="btn primary" onclick="acRunEp()">Run Episode</button>
+      <button class="btn" id="btn-ac-auto" onclick="acToggleAuto()">Auto Run</button>
+      <button class="btn danger" onclick="acReset()">Reset</button>
+      <div class="speed-wrap">Speed <input id="spd-ac" type="range" min="30" max="490" value="250"></div>
+    </div>
+  </div>
+
+  <div class="stats-panel">
+    <h3>Statistics</h3>
+    <div class="stat-row"><span class="lbl">Episode</span><span class="val" id="ac-ep">0</span></div>
+    <div class="stat-row"><span class="lbl">Steps (this ep.)</span><span class="val" id="ac-st">0</span></div>
+    <div class="stat-row"><span class="lbl">TD error δ</span><span class="val" id="ac-td">0.000</span></div>
+    <div class="stat-row"><span class="lbl">Reward (this ep.)</span><span class="val" id="ac-rw">0.00</span></div>
+    <div class="stat-row"><span class="lbl">Best episode steps</span><span class="val" id="ac-best">—</span></div>
+
+    <div class="legend">
+      <h3>Legend</h3>
+      <div class="leg-item"><div class="leg-swatch" style="background:#1e3a5f;border:1px solid #3b82f6;"></div>Agent</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#065f46;"></div>Goal (+10)</div>
+      <div class="leg-item">
+        <canvas id="ac-valuebar" width="60" height="14" style="border-radius:3px;"></canvas>
+        Negative ← V(s) → Positive
+      </div>
+      <div class="leg-item" style="font-size:0.72rem;">→ Arrow = Actor policy</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#fbbf24;opacity:.6;"></div>δ &gt; 0 flash (better than expected)</div>
+      <div class="leg-item"><div class="leg-swatch" style="background:#f87171;opacity:.6;"></div>δ &lt; 0 flash (worse than expected)</div>
+    </div>
+    <div class="ep-log" id="log-ac"></div>
+  </div>
+</div>
+
+<script>
+// ============================================================
+//  ENVIRONMENT
+// ============================================================
+const GS   = 5;        // grid size
+const CELL = 80;       // px per cell
+
+// 0=empty  1=wall  2=goal
+const GRID = [
+  [0, 0, 0, 0, 0],
+  [0, 1, 0, 1, 0],
+  [0, 0, 0, 0, 0],
+  [0, 1, 0, 1, 0],
+  [0, 0, 0, 0, 2],
+];
+
+const SR = 0, SC = 0;   // start
+const GR = 4, GC = 4;   // goal
+const NA = 4;           // num actions
+const DR = [-1, 1, 0, 0];
+const DC = [0, 0, -1, 1];
+const SYMS = ['↑','↓','←','→'];
+
+function sid(r, c) { return r * GS + c; }
+
+function step(r, c, a) {
+  const nr = r + DR[a], nc = c + DC[a];
+  if (nr < 0 || nr >= GS || nc < 0 || nc >= GS || GRID[nr][nc] === 1)
+    return { r, c, reward: -0.5, done: false };
+  if (GRID[nr][nc] === 2)
+    return { r: nr, c: nc, reward: 10, done: true };
+  return { r: nr, c: nc, reward: -0.1, done: false };
+}
+
+// ============================================================
+//  MATH UTILS
+// ============================================================
+function softmax(arr) {
+  const m = Math.max(...arr);
+  const e = arr.map(x => Math.exp(x - m));
+  const s = e.reduce((a, b) => a + b, 0);
+  return e.map(x => x / s);
+}
+function argmax(arr) { return arr.indexOf(Math.max(...arr)); }
+function clamp(x, lo, hi) { return Math.max(lo, Math.min(hi, x)); }
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+// ============================================================
+//  COLOR HELPERS
+// ============================================================
+function coldHot(t) {
+  // dark navy → teal → warm orange  (t in [0,1])
+  t = clamp(t, 0, 1);
+  const r = Math.round(lerp(13, 251, t));
+  const g = Math.round(lerp(17, 146, t));
+  const b = Math.round(lerp(50, 11, t));
+  return `rgb(${r},${g},${b})`;
+}
+
+function valueColor(t) {
+  // dark blue → dark green
+  t = clamp(t, 0, 1);
+  const r = Math.round(lerp(15, 5, t));
+  const g = Math.round(lerp(23, 78, t));
+  const b = Math.round(lerp(42, 50, t));
+  return `rgb(${r * 3},${g * 2},${b + 20})`;
+}
+
+function signedValueColor(v, maxAbs) {
+  const t = clamp(Math.abs(v) / Math.max(maxAbs, 1e-6), 0, 1);
+  if (Math.abs(v) < 1e-9) return '#1f2937';
+
+  if (v > 0) {
+    const r = Math.round(lerp(55, 251, t));
+    const g = Math.round(lerp(65, 191, t));
+    const b = Math.round(lerp(81, 36, t));
+    return `rgb(${r},${g},${b})`;
+  }
+
+  const r = Math.round(lerp(31, 37, t));
+  const g = Math.round(lerp(41, 99, t));
+  const b = Math.round(lerp(55, 235, t));
+  return `rgb(${r},${g},${b})`;
+}
+
+// ============================================================
+//  DRAWING PRIMITIVES
+// ============================================================
+function drawCells(ctx, bgFn, flashList) {
+  for (let r = 0; r < GS; r++) {
+    for (let c = 0; c < GS; c++) {
+      const x = c * CELL, y = r * CELL;
+      // base fill
+      if (GRID[r][c] === 1)      ctx.fillStyle = '#2d3748';
+      else if (GRID[r][c] === 2) ctx.fillStyle = '#064e3b';
+      else                       ctx.fillStyle = bgFn ? bgFn(r, c) : '#111827';
+      ctx.fillRect(x, y, CELL, CELL);
+
+      // flash overlay
+      const fl = flashList && flashList.find(f => f.r === r && f.c === c);
+      if (fl) {
+        ctx.fillStyle = fl.color;
+        ctx.globalAlpha = fl.alpha;
+        ctx.fillRect(x, y, CELL, CELL);
+        ctx.globalAlpha = 1;
+      }
+
+      // grid lines
+      ctx.strokeStyle = '#1a2130';
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x, y, CELL, CELL);
+
+      // wall
+      if (GRID[r][c] === 1) {
+        ctx.fillStyle = '#4b5563';
+        ctx.font = '20px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('▪', x + CELL / 2, y + CELL / 2);
+      }
+
+      // goal
+      if (GRID[r][c] === 2) {
+        ctx.fillStyle = '#34d399';
+        ctx.font = 'bold 26px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('G', x + CELL / 2, y + CELL / 2);
+      }
+
+      // start marker
+      if (r === SR && c === SC) {
+        ctx.fillStyle = '#475569';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillText('S', x + 4, y + 4);
+      }
+    }
+  }
+}
+
+function drawAgent(ctx, r, c) {
+  const x = c * CELL + CELL / 2;
+  const y = r * CELL + CELL / 2;
+  ctx.save();
+  ctx.shadowColor = '#60a5fa';
+  ctx.shadowBlur = 16;
+  ctx.fillStyle = '#2563eb';
+  ctx.beginPath();
+  ctx.arc(x, y, 15, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = '#fff';
+  ctx.font = 'bold 13px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('A', x, y);
+  ctx.restore();
+}
+
+function drawArrow(ctx, r, c, a, prob) {
+  if (prob < 0.04) return;
+  const cx = c * CELL + CELL / 2;
+  const cy = r * CELL + CELL / 2;
+  const t  = clamp(prob, 0, 1);
+  const len = 8 + 24 * t;
+  const alpha = 0.18 + 0.82 * t;
+  const lw = 0.75 + 3.25 * t;
+
+  const dx = DC[a], dy = DR[a]; // note: DR is row delta → y axis
+  const ex = cx + dx * len;
+  const ey = cy + dy * len;
+  const angle = Math.atan2(dy, dx);
+
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.strokeStyle = '#a78bfa';
+  ctx.fillStyle   = '#a78bfa';
+  ctx.lineWidth   = lw;
+  ctx.lineCap     = 'round';
+
+  ctx.beginPath();
+  ctx.moveTo(cx - dx * 5, cy - dy * 5);
+  ctx.lineTo(ex, ey);
+  ctx.stroke();
+
+  // arrowhead
+  ctx.beginPath();
+  ctx.moveTo(ex, ey);
+  ctx.lineTo(ex - 8 * Math.cos(angle - 0.45), ey - 8 * Math.sin(angle - 0.45));
+  ctx.lineTo(ex - 8 * Math.cos(angle + 0.45), ey - 8 * Math.sin(angle + 0.45));
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+function log(id, text, cls) {
+  const el = document.getElementById(id);
+  const d  = document.createElement('div');
+  d.className = cls || '';
+  d.textContent = text;
+  el.appendChild(d);
+  el.scrollTop = el.scrollHeight;
+  while (el.children.length > 60) el.removeChild(el.firstChild);
+}
+
+// ============================================================
+//  TAB SWITCHING
+// ============================================================
+function switchTab(name, btn) {
+  document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('panel-' + name).classList.add('active');
+  btn.classList.add('active');
+}
+
+// ============================================================
+//  Q-LEARNING
+// ============================================================
+const ql = {
+  Q: null, visits: null, r: SR, c: SC,
+  ep: 0, st: 0, rw: 0, bestSt: Infinity,
+  eps: 1.0, alpha: 0.1, gamma: 0.95,
+  epsDecay: 0.995, epsMin: 0.05,
+  timer: null, flash: []
+};
+
+function qlReset() {
+  clearInterval(ql.timer); ql.timer = null;
+  document.getElementById('btn-ql-auto').classList.remove('active-auto');
+  ql.Q = Array.from({length: GS * GS}, () => new Float64Array(NA));
+  ql.visits = new Uint32Array(GS * GS);
+  ql.r = SR; ql.c = SC; ql.ep = 0; ql.st = 0; ql.rw = 0; ql.bestSt = Infinity;
+  ql.eps = 1.0; ql.flash = [];
+  document.getElementById('log-ql').innerHTML = '';
+  qlUpdate(); qlDraw();
+}
+
+function qlAct() {
+  if (Math.random() < ql.eps) return Math.floor(Math.random() * NA);
+  return argmax([...ql.Q[sid(ql.r, ql.c)]]);
+}
+
+function qlDoStep() {
+  if (!ql.Q) qlReset();
+  const s = sid(ql.r, ql.c);
+  ql.visits[s]++;
+  const a = qlAct();
+  const {r: nr, c: nc, reward, done} = step(ql.r, ql.c, a);
+  const ns = sid(nr, nc);
+  const maxNext = done ? 0 : Math.max(...ql.Q[ns]);
+  ql.Q[s][a] += ql.alpha * (reward + ql.gamma * maxNext - ql.Q[s][a]);
+
+  const fc = reward > 5 ? 'rgba(52,211,153,0.45)' : reward < -0.2 ? 'rgba(248,113,113,0.35)' : 'rgba(96,165,250,0.25)';
+  ql.flash = [{r: ql.r, c: ql.c, color: fc, alpha: 1}];
+  ql.r = nr; ql.c = nc; ql.st++; ql.rw += reward;
+
+  if (done || ql.st >= 150) {
+    const ok = done;
+    if (ok && ql.st < ql.bestSt) ql.bestSt = ql.st;
+    log('log-ql', `Ep ${ql.ep+1} | steps ${ql.st} | R ${ql.rw.toFixed(1)} | ε ${ql.eps.toFixed(3)}`, ok ? 'ok' : 'bad');
+    ql.ep++; ql.eps = Math.max(ql.epsMin, ql.eps * ql.epsDecay);
+    ql.r = SR; ql.c = SC; ql.st = 0; ql.rw = 0;
+  }
+  qlUpdate(); qlDraw();
+}
+
+function qlStep()       { qlDoStep(); }
+function qlRunEp()      {
+  if (!ql.Q) qlReset();
+  const spd = 520 - +document.getElementById('spd-ql').value;
+  const ep0 = ql.ep;
+  const iv = setInterval(() => { qlDoStep(); if (ql.ep > ep0) clearInterval(iv); }, Math.max(20, spd));
+}
+function qlToggleAuto() {
+  if (ql.timer) {
+    clearInterval(ql.timer); ql.timer = null;
+    document.getElementById('btn-ql-auto').classList.remove('active-auto');
+  } else {
+    if (!ql.Q) qlReset();
+    const spd = 520 - +document.getElementById('spd-ql').value;
+    ql.timer = setInterval(qlDoStep, Math.max(15, spd / 4));
+    document.getElementById('btn-ql-auto').classList.add('active-auto');
+  }
+}
+
+function qlUpdate() {
+  document.getElementById('ql-ep').textContent  = ql.ep;
+  document.getElementById('ql-st').textContent  = ql.st;
+  document.getElementById('ql-rw').textContent  = ql.rw.toFixed(2);
+  document.getElementById('ql-eps').textContent = ql.eps.toFixed(3);
+  document.getElementById('ql-best').textContent = ql.bestSt < Infinity ? ql.bestSt : '—';
+}
+
+function qlDraw() {
+  const ctx = document.getElementById('cvs-ql').getContext('2d');
+  ctx.clearRect(0, 0, CELL * GS, CELL * GS);
+
+  const allVals = ql.Q ? ql.Q.map(qa => Math.max(...qa)) : [];
+  const maxAbsQ = allVals.length ? Math.max(1, ...allVals.map(v => Math.abs(v))) : 1;
+
+  drawCells(ctx, (r, c) => {
+    if (!ql.Q) return '#111827';
+    const s = sid(r, c);
+    if (!ql.visits[s]) return '#1f2937';
+    const v = Math.max(...ql.Q[s]);
+    return signedValueColor(v, maxAbsQ);
+  }, ql.flash);
+
+  // best-action arrows + Q value text
+  if (ql.Q) {
+    for (let r = 0; r < GS; r++) {
+      for (let c = 0; c < GS; c++) {
+        if (GRID[r][c] !== 0) continue;
+        const s = sid(r, c);
+        const qa = [...ql.Q[s]];
+        const best = argmax(qa);
+        const maxQ = Math.max(...qa);
+        const spread = maxQ - Math.min(...qa);
+        if (ql.visits[s] > 0 && spread > 1e-3) {
+          ctx.fillStyle = 'rgba(226,232,240,0.85)';
+          ctx.font = '20px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(SYMS[best], c * CELL + CELL / 2, r * CELL + CELL / 2);
+        }
+        ctx.fillStyle = '#475569';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'bottom';
+        ctx.fillText(maxQ.toFixed(1), c * CELL + CELL / 2, (r + 1) * CELL - 2);
+      }
+    }
+  }
+  drawAgent(ctx, ql.r, ql.c);
+  ql.flash = [];
+}
+
+// ============================================================
+//  REINFORCE (Policy Gradient)
+// ============================================================
+const pg = {
+  theta: null, ep: 0, G: 0, avgG: [], lastLen: 0,
+  alpha: 0.05, gamma: 0.95,
+  timer: null, traj: []
+};
+
+function pgReset() {
+  clearInterval(pg.timer); pg.timer = null;
+  document.getElementById('btn-pg-auto').classList.remove('active-auto');
+  pg.theta = Array.from({length: GS * GS}, () => new Float64Array(NA));
+  pg.ep = 0; pg.G = 0; pg.avgG = []; pg.lastLen = 0; pg.traj = [];
+  document.getElementById('log-pg').innerHTML = '';
+  pgUpdate(); pgDraw();
+}
+
+function pgPolicy(r, c) { return softmax([...pg.theta[sid(r, c)]]); }
+
+function pgSample(r, c) {
+  const probs = pgPolicy(r, c);
+  let x = Math.random(), cum = 0;
+  for (let a = 0; a < NA; a++) { cum += probs[a]; if (x < cum) return a; }
+  return NA - 1;
+}
+
+function pgDoEp() {
+  if (!pg.theta) pgReset();
+  let cr = SR, cc = SC;
+  const traj = [];
+  for (let t = 0; t < 150; t++) {
+    const a = pgSample(cr, cc);
+    const {r: nr, c: nc, reward, done} = step(cr, cc, a);
+    traj.push({r: cr, c: cc, nr, nc, a, reward, done});
+    cr = nr; cc = nc;
+    if (done) break;
+  }
+  // returns
+  const G = [];
+  let g = 0;
+  for (let t = traj.length - 1; t >= 0; t--) { g = traj[t].reward + pg.gamma * g; G[t] = g; }
+
+  // baseline (mean return)
+  const mean = G.reduce((s, v) => s + v, 0) / G.length;
+
+  // gradient update
+  for (let t = 0; t < traj.length; t++) {
+    const {r, c, a} = traj[t];
+    const s = sid(r, c);
+    const probs = softmax([...pg.theta[s]]);
+    const adv = G[t] - mean;
+    for (let aa = 0; aa < NA; aa++) {
+      pg.theta[s][aa] += pg.alpha * adv * ((aa === a ? 1 : 0) - probs[aa]);
+    }
+  }
+
+  pg.traj = traj;
+  pg.G = G[0] || 0;
+  pg.avgG.push(pg.G);
+  if (pg.avgG.length > 10) pg.avgG.shift();
+  pg.lastLen = traj.length;
+  pg.ep++;
+  const ok = traj[traj.length - 1] && traj[traj.length - 1].done;
+  log('log-pg', `Ep ${pg.ep} | len ${traj.length} | G₀ ${pg.G.toFixed(1)}`, ok ? 'ok' : 'bad');
+  pgUpdate(); pgDraw();
+}
+
+function pgRunEp()      { pgDoEp(); }
+function pgToggleAuto() {
+  if (pg.timer) {
+    clearInterval(pg.timer); pg.timer = null;
+    document.getElementById('btn-pg-auto').classList.remove('active-auto');
+  } else {
+    if (!pg.theta) pgReset();
+    const spd = 1550 - +document.getElementById('spd-pg').value;
+    pg.timer = setInterval(pgDoEp, Math.max(50, spd / 3));
+    document.getElementById('btn-pg-auto').classList.add('active-auto');
+  }
+}
+
+function pgUpdate() {
+  document.getElementById('pg-ep').textContent  = pg.ep;
+  document.getElementById('pg-g').textContent   = pg.G.toFixed(2);
+  document.getElementById('pg-avg').textContent =
+    pg.avgG.length ? (pg.avgG.reduce((a,b)=>a+b,0)/pg.avgG.length).toFixed(2) : '0.00';
+  document.getElementById('pg-len').textContent = pg.lastLen || '—';
+}
+
+function pgDraw() {
+  const ctx = document.getElementById('cvs-pg').getContext('2d');
+  ctx.clearRect(0, 0, CELL * GS, CELL * GS);
+
+  // trajectory tint
+  const flash = [];
+  if (pg.traj.length) {
+    const ok = pg.G > 0;
+    const seen = new Set();
+    pg.traj.forEach(({r, c, nr, nc}) => {
+      const cells = [{r, c}, {r: nr, c: nc}];
+      cells.forEach(cell => {
+        const key = `${cell.r},${cell.c}`;
+        if (seen.has(key)) return;
+        seen.add(key);
+        if (!(cell.r === GR && cell.c === GC))
+          flash.push({r: cell.r, c: cell.c, color: ok ? 'rgba(52,211,153,0.18)' : 'rgba(248,113,113,0.18)', alpha: 1});
+      });
+    });
+  }
+
+  drawCells(ctx, null, flash);
+
+  // policy arrows
+  if (pg.theta) {
+    for (let r = 0; r < GS; r++) {
+      for (let c = 0; c < GS; c++) {
+        if (GRID[r][c] !== 0) continue;
+        const probs  = pgPolicy(r, c);
+        for (let a = 0; a < NA; a++) drawArrow(ctx, r, c, a, probs[a]);
+      }
+    }
+  }
+
+  // trajectory path
+  if (pg.traj.length > 0) {
+    ctx.save();
+    ctx.strokeStyle = '#fbbf24';
+    ctx.lineWidth = 2;
+    ctx.globalAlpha = 0.55;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    const points = [{r: pg.traj[0].r, c: pg.traj[0].c}].concat(pg.traj.map(({nr, nc}) => ({r: nr, c: nc})));
+    points.forEach(({r, c}, i) => {
+      const px = c * CELL + CELL / 2, py = r * CELL + CELL / 2;
+      i === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py);
+    });
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  const last = pg.traj.length ? pg.traj[pg.traj.length - 1] : null;
+  if (last) drawAgent(ctx, last.nr, last.nc);
+  else      drawAgent(ctx, SR, SC);
+}
+
+// ============================================================
+//  ACTOR-CRITIC
+// ============================================================
+const ac = {
+  theta: null, V: null, visits: null, r: SR, c: SC,
+  ep: 0, st: 0, rw: 0, bestSt: Infinity, td: 0,
+  alphaA: 0.05, alphaC: 0.1, gamma: 0.95,
+  timer: null, flash: []
+};
+
+function acReset() {
+  clearInterval(ac.timer); ac.timer = null;
+  document.getElementById('btn-ac-auto').classList.remove('active-auto');
+  ac.theta = Array.from({length: GS * GS}, () => new Float64Array(NA));
+  ac.V     = new Float64Array(GS * GS);
+  ac.visits = new Uint32Array(GS * GS);
+  ac.r = SR; ac.c = SC; ac.ep = 0; ac.st = 0; ac.rw = 0; ac.td = 0; ac.bestSt = Infinity;
+  ac.flash = [];
+  document.getElementById('log-ac').innerHTML = '';
+  acUpdate(); acDraw();
+}
+
+function acPolicy(r, c) { return softmax([...ac.theta[sid(r, c)]]); }
+function acSample(r, c) {
+  const probs = acPolicy(r, c);
+  let x = Math.random(), cum = 0;
+  for (let a = 0; a < NA; a++) { cum += probs[a]; if (x < cum) return a; }
+  return NA - 1;
+}
+
+function acDoStep() {
+  if (!ac.theta) acReset();
+  const s = sid(ac.r, ac.c);
+  ac.visits[s]++;
+  const a = acSample(ac.r, ac.c);
+  const {r: nr, c: nc, reward, done} = step(ac.r, ac.c, a);
+  const ns = sid(nr, nc);
+
+  // TD error
+  const vNext = done ? 0 : ac.V[ns];
+  const td = reward + ac.gamma * vNext - ac.V[s];
+  ac.td = td;
+
+  // Critic update
+  ac.V[s] += ac.alphaC * td;
+
+  // Actor update
+  const probs = acPolicy(ac.r, ac.c);
+  for (let aa = 0; aa < NA; aa++) {
+    ac.theta[s][aa] += ac.alphaA * td * ((aa === a ? 1 : 0) - probs[aa]);
+  }
+
+  const fc = td > 0 ? 'rgba(251,191,36,0.40)' : 'rgba(248,113,113,0.35)';
+  ac.flash = [{r: ac.r, c: ac.c, color: fc, alpha: 1}];
+
+  ac.r = nr; ac.c = nc; ac.st++; ac.rw += reward;
+  if (done || ac.st >= 150) {
+    const ok = done;
+    if (ok && ac.st < ac.bestSt) ac.bestSt = ac.st;
+    log('log-ac', `Ep ${ac.ep+1} | steps ${ac.st} | R ${ac.rw.toFixed(1)} | δ ${td.toFixed(2)}`, ok ? 'ok' : 'bad');
+    ac.ep++; ac.r = SR; ac.c = SC; ac.st = 0; ac.rw = 0;
+  }
+  acUpdate(); acDraw();
+}
+
+function acStep()      { acDoStep(); }
+function acRunEp()     {
+  if (!ac.theta) acReset();
+  const spd = 520 - +document.getElementById('spd-ac').value;
+  const ep0 = ac.ep;
+  const iv = setInterval(() => { acDoStep(); if (ac.ep > ep0) clearInterval(iv); }, Math.max(20, spd));
+}
+function acToggleAuto() {
+  if (ac.timer) {
+    clearInterval(ac.timer); ac.timer = null;
+    document.getElementById('btn-ac-auto').classList.remove('active-auto');
+  } else {
+    if (!ac.theta) acReset();
+    const spd = 520 - +document.getElementById('spd-ac').value;
+    ac.timer = setInterval(acDoStep, Math.max(15, spd / 4));
+    document.getElementById('btn-ac-auto').classList.add('active-auto');
+  }
+}
+
+function acUpdate() {
+  document.getElementById('ac-ep').textContent   = ac.ep;
+  document.getElementById('ac-st').textContent   = ac.st;
+  document.getElementById('ac-td').textContent   = ac.td.toFixed(3);
+  document.getElementById('ac-rw').textContent   = ac.rw.toFixed(2);
+  document.getElementById('ac-best').textContent = ac.bestSt < Infinity ? ac.bestSt : '—';
+}
+
+function acDraw() {
+  const ctx = document.getElementById('cvs-ac').getContext('2d');
+  ctx.clearRect(0, 0, CELL * GS, CELL * GS);
+
+  const maxAbsV = ac.V ? Math.max(1, ...Array.from(ac.V, v => Math.abs(v))) : 1;
+
+  drawCells(ctx, (r, c) => {
+    if (!ac.V) return '#111827';
+    const s = sid(r, c);
+    if (!ac.visits[s]) return '#1f2937';
+    return signedValueColor(ac.V[s], maxAbsV);
+  }, ac.flash);
+
+  // actor arrows + critic value labels
+  if (ac.theta) {
+    for (let r = 0; r < GS; r++) {
+      for (let c = 0; c < GS; c++) {
+        if (GRID[r][c] !== 0) continue;
+        const probs = acPolicy(r, c);
+        for (let a = 0; a < NA; a++) drawArrow(ctx, r, c, a, probs[a]);
+        // critic value text
+        ctx.fillStyle = '#475569';
+        ctx.font = '8px monospace';
+        ctx.textAlign = 'right';
+        ctx.textBaseline = 'top';
+        ctx.fillText('V=' + ac.V[sid(r, c)].toFixed(1), (c + 1) * CELL - 3, r * CELL + 3);
+      }
+    }
+  }
+  drawAgent(ctx, ac.r, ac.c);
+  ac.flash = [];
+}
+
+// ============================================================
+//  HEAT-BAR LEGENDS
+// ============================================================
+function drawBar(id, colorFn) {
+  const cvs = document.getElementById(id);
+  if (!cvs) return;
+  const ctx = cvs.getContext('2d');
+  for (let i = 0; i < 60; i++) {
+    ctx.fillStyle = colorFn(i / 59);
+    ctx.fillRect(i, 0, 1, 14);
+  }
+}
+
+// ============================================================
+//  INIT
+// ============================================================
+qlReset();
+pgReset();
+acReset();
+// Legend bars use signedValueColor to match actual cell rendering
+// Map bar position [0,1] → signed value [-1, +1] → color
+drawBar('ql-heatbar', t => signedValueColor(t * 2 - 1, 1));
+drawBar('ac-valuebar', t => signedValueColor(t * 2 - 1, 1));
+</script>
+</body>
+</html>
