@@ -1,0 +1,416 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NoC Topology Comparator</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0d1117;color:#e6edf3;font-family:'Segoe UI',system-ui,sans-serif;padding:18px 20px;min-width:1020px}
+header{text-align:center;margin-bottom:14px}
+h1{font-size:1.55rem;font-weight:700;color:#f0f6fc}
+header p{color:#8b949e;font-size:0.85rem;margin-top:3px}
+.bar{display:flex;align-items:center;gap:9px;background:#161b22;border:1px solid #30363d;border-radius:8px;padding:9px 14px;margin-bottom:12px;flex-wrap:wrap}
+label{font-size:0.79rem;color:#8b949e}
+select{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:5px;padding:3px 7px;font-size:0.79rem;cursor:pointer;outline:none}
+.badge{padding:3px 12px;border-radius:10px;font-size:0.76rem;font-weight:700;white-space:nowrap}
+.src-m{background:#0d4429;border:1px solid #3fb950;color:#3fb950}
+.dst-m{background:#4d1919;border:1px solid #f85149;color:#f85149}
+.rdy-m{background:#0c2d6b;border:1px solid #388bfd;color:#79c0ff}
+button{background:#21262d;color:#e6edf3;border:1px solid #30363d;border-radius:5px;padding:4px 12px;font-size:0.79rem;cursor:pointer;white-space:nowrap;transition:background .15s}
+button:hover:not(:disabled){background:#30363d}
+button:disabled{opacity:.35;cursor:default}
+.go{background:#0c2d6b;border-color:#388bfd;color:#79c0ff}
+.go:hover:not(:disabled){background:#1a4a8a;color:#fff}
+.stp{background:#1a3a1a;border-color:#3fb950;color:#3fb950}
+.stp:hover:not(:disabled){background:#1f5c1f}
+.spd{display:flex;align-items:center;gap:5px;margin-left:auto}
+input[type=range]{width:70px;accent-color:#388bfd;cursor:pointer}
+.legend{display:flex;gap:12px}
+.li{display:flex;align-items:center;gap:4px;font-size:0.75rem;color:#8b949e}
+.ld{width:9px;height:9px;border-radius:50%}
+
+.row{display:flex;gap:12px;margin-bottom:12px}
+.card{background:#161b22;border:1px solid #30363d;border-radius:9px;overflow:hidden;display:flex;flex-direction:column}
+.ch{display:flex;align-items:center;justify-content:space-between;padding:7px 11px;border-bottom:1px solid #30363d}
+.cn{font-weight:700;font-size:0.88rem}
+.ct{font-size:0.7rem;color:#8b949e;background:#21262d;padding:2px 7px;border-radius:7px;font-family:monospace}
+.hbar{padding:5px 11px;background:#0d1117;border-bottom:1px solid #1c2128;display:flex;align-items:center;justify-content:space-between;min-height:28px}
+.hcount{font-size:0.8rem;font-weight:700;font-family:monospace;color:#79c0ff;min-width:90px}
+.hpath{font-size:0.7rem;color:#6e7681;font-family:monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+canvas{display:block}
+.mets{display:grid;grid-template-columns:1fr 1fr;border-top:1px solid #1c2128}
+.met{padding:5px 10px;display:flex;justify-content:space-between;font-size:0.74rem;border-top:1px solid #1c2128}
+.met:nth-child(-n+2){border-top:none}
+.ml{color:#8b949e} .mv{font-weight:700;font-family:monospace}
+.hi{color:#3fb950} .lo{color:#f85149} .mid{color:#d29922}
+
+.comp{background:#161b22;border:1px solid #30363d;border-radius:9px;padding:13px;margin-bottom:12px}
+.comp h3{font-size:0.79rem;font-weight:700;color:#8b949e;text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px}
+table{width:100%;border-collapse:collapse;font-size:0.76rem}
+th{background:#21262d;color:#8b949e;padding:5px 9px;text-align:left;font-weight:600}
+td{padding:5px 9px;border-top:1px solid #1c2128}
+tr:hover td{background:#1c2128}
+.g{color:#3fb950;font-weight:700} .b{color:#f85149;font-weight:700} .m{color:#d29922;font-weight:700}
+</style>
+</head>
+<body>
+<header>
+  <h1>NoC Topology Comparator — PE Array Interconnect</h1>
+  <p>Click any PE to set source → click another for destination → watch packet route simultaneously across all three topologies</p>
+</header>
+
+<div class="bar">
+  <label>Array:</label>
+  <select id="gsel"><option value="2">2×2 (4 PEs)</option><option value="3">3×3 (9 PEs)</option><option value="4" selected>4×4 (16 PEs)</option></select>
+  <span class="badge src-m" id="badge">① Click any canvas to select Source PE</span>
+  <button id="resetBtn">↺ Reset</button>
+  <button class="go" id="goBtn" disabled>▶ Auto Route</button>
+  <button class="stp" id="stepBtn" disabled>⏭ Next Hop</button>
+  <div class="spd"><label>Speed:</label><input type="range" id="spd" min="1" max="10" value="4"><span id="spdLbl" style="font-size:.74rem;color:#8b949e;width:18px">4×</span></div>
+  <div class="legend">
+    <div class="li"><div class="ld" style="background:#3fb950"></div>Source</div>
+    <div class="li"><div class="ld" style="background:#f85149"></div>Dest</div>
+    <div class="li"><div class="ld" style="background:#ffa657"></div>Packet</div>
+    <div class="li"><div style="width:16px;height:3px;background:#388bfd;border-radius:2px"></div>Path</div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="card">
+    <div class="ch"><span class="cn">🔵 Ring</span><span class="ct">O(N) links</span></div>
+    <div class="hbar"><span class="hcount" id="hc-ring">—</span><span class="hpath" id="hp-ring">Click a PE to begin</span></div>
+    <canvas id="cRing" width="316" height="284"></canvas>
+    <div class="mets">
+      <div class="met"><span class="ml">Hops (this route)</span><span class="mv lo" id="r-hops">—</span></div>
+      <div class="met"><span class="ml">Diameter</span><span class="mv" id="r-diam">—</span></div>
+      <div class="met"><span class="ml">Total Links</span><span class="mv hi" id="r-links">—</span></div>
+      <div class="met"><span class="ml">Bisection BW</span><span class="mv lo" id="r-bw">—</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="cn">🟡 2D Mesh</span><span class="ct">O(N^1.5) links</span></div>
+    <div class="hbar"><span class="hcount" id="hc-mesh">—</span><span class="hpath" id="hp-mesh">Click a PE to begin</span></div>
+    <canvas id="cMesh" width="316" height="284"></canvas>
+    <div class="mets">
+      <div class="met"><span class="ml">Hops (this route)</span><span class="mv mid" id="m-hops">—</span></div>
+      <div class="met"><span class="ml">Diameter</span><span class="mv" id="m-diam">—</span></div>
+      <div class="met"><span class="ml">Total Links</span><span class="mv mid" id="m-links">—</span></div>
+      <div class="met"><span class="ml">Bisection BW</span><span class="mv mid" id="m-bw">—</span></div>
+    </div>
+  </div>
+  <div class="card">
+    <div class="ch"><span class="cn">🔴 Crossbar</span><span class="ct">O(N²) crosspoints</span></div>
+    <div class="hbar"><span class="hcount" id="hc-cross">—</span><span class="hpath" id="hp-cross">Click a PE to begin</span></div>
+    <canvas id="cCross" width="316" height="284"></canvas>
+    <div class="mets">
+      <div class="met"><span class="ml">Hops (this route)</span><span class="mv hi" id="c-hops">—</span></div>
+      <div class="met"><span class="ml">Diameter</span><span class="mv hi" id="c-diam">—</span></div>
+      <div class="met"><span class="ml">Total Links</span><span class="mv lo" id="c-links">—</span></div>
+      <div class="met"><span class="ml">Bisection BW</span><span class="mv hi" id="c-bw">—</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="comp">
+  <h3>Comparison — <span id="compTitle" style="color:#f0f6fc;font-size:.85rem;text-transform:none;letter-spacing:0"></span></h3>
+  <table><thead><tr><th>Property</th><th>Ring</th><th>2D Mesh</th><th>Crossbar</th></tr></thead>
+  <tbody id="compBody"></tbody></table>
+</div>
+
+<div class="comp">
+  <h3>ML Accelerator Mapping</h3>
+  <table><thead><tr><th>Topology</th><th>Accelerator Examples</th><th>Why This Choice</th></tr></thead>
+  <tbody>
+    <tr><td>Ring</td><td>NVIDIA NVLink AllReduce, Google TPU ICI ring</td><td>O(N) wires only; every node participates equally — ideal for AllReduce collective where gradient passes around the ring</td></tr>
+    <tr><td>2D Mesh</td><td>Eyeriss, DaDianNao, Google TPU MXU systolic array</td><td>Neighbors share input rows/weights in row-stationary / output-stationary dataflow; XY routing is simple and deterministic</td></tr>
+    <tr><td>Crossbar</td><td>NVSwitch backplane (small), L1↔L2 cache interconnect</td><td>Any-to-any in 1 hop — zero contention but O(N²) crosspoints make it unscalable beyond ~64 ports</td></tr>
+  </tbody></table>
+</div>
+
+<script>
+const CW=316, CH=284;
+let N=4, src=-1, dst=-1, mode='src';
+let rPath=[], mPath=[], cPath=[];
+const anim={active:false,raf:null,hop:0,t:0,speed:0.015};
+
+const CV={ring:document.getElementById('cRing'),mesh:document.getElementById('cMesh'),cross:document.getElementById('cCross')};
+const CX={ring:CV.ring.getContext('2d'),mesh:CV.mesh.getContext('2d'),cross:CV.cross.getContext('2d')};
+
+function nr(){return N===2?20:N===3?15:11;}
+
+// ── Positions ──────────────────────────
+function rPos(){
+  const T=N*N,cx=CW/2,cy=CH/2,r=Math.min(CW,CH)/2-36;
+  return Array.from({length:T},(_,i)=>{const a=(2*Math.PI*i/T)-Math.PI/2;return{x:cx+r*Math.cos(a),y:cy+r*Math.sin(a)};});
+}
+function mPos(){
+  const pad=34,step=(Math.min(CW,CH)-2*pad)/(N-1||1);
+  return Array.from({length:N*N},(_,i)=>({x:pad+(i%N)*step,y:pad+Math.floor(i/N)*step}));
+}
+
+// ── Edges ──────────────────────────────
+function rEdges(){const T=N*N;return Array.from({length:T},(_,i)=>[i,(i+1)%T]);}
+function mEdges(){const e=[];for(let r=0;r<N;r++)for(let c=0;c<N;c++){const i=r*N+c;if(c<N-1)e.push([i,i+1]);if(r<N-1)e.push([i,i+N]);}return e;}
+function cEdges(){const e=[],T=N*N;for(let i=0;i<T;i++)for(let j=i+1;j<T;j++)e.push([i,j]);return e;}
+
+// ── Routing ─────────────────────────────
+function calcR(s,d){
+  const T=N*N,cw=[],ccw=[];let c=s;
+  while(c!==d){cw.push(c);c=(c+1)%T;}cw.push(d);
+  c=s;while(c!==d){ccw.push(c);c=(c-1+T)%T;}ccw.push(d);
+  return cw.length<=ccw.length?cw:ccw;
+}
+function calcM(s,d){
+  const sr=Math.floor(s/N),sc=s%N,dr=Math.floor(d/N),dc=d%N;
+  const p=[s];let r=sr,col=sc;
+  while(col!==dc){col+=(col<dc?1:-1);p.push(r*N+col);}
+  while(r!==dr){r+=(r<dr?1:-1);p.push(r*N+col);}
+  return p;
+}
+
+// ── Draw one frame ─────────────────────
+function draw(type, doneHops){
+  const ctx=CX[type];
+  const pos=type==='ring'?rPos():mPos();
+  const path=type==='ring'?rPath:type==='mesh'?mPath:cPath;
+  const edges=type==='ring'?rEdges():type==='mesh'?mEdges():cEdges();
+  const R=nr();
+
+  ctx.clearRect(0,0,CW,CH);
+  ctx.fillStyle='#0d1117';ctx.fillRect(0,0,CW,CH);
+
+  // Build lit edge/node sets
+  const litEdge=new Set(),litNode=new Set();
+  for(let i=0;i<doneHops&&i<path.length-1;i++){
+    const a=Math.min(path[i],path[i+1]),b=Math.max(path[i],path[i+1]);
+    litEdge.add(a+'-'+b);litNode.add(path[i]);
+  }
+  if(doneHops>0&&path.length>0)litNode.add(path[Math.min(doneHops,path.length-1)]);
+
+  // Draw edges
+  if(type==='cross'){
+    const T=N*N;
+    if(T<=9){
+      edges.forEach(([a,b])=>{const k=Math.min(a,b)+'-'+Math.max(a,b);drawEdge(ctx,pos,a,b,litEdge.has(k));});
+    } else {
+      // Very faint all-to-all hint
+      ctx.globalAlpha=0.04;ctx.strokeStyle='#58a6ff';ctx.lineWidth=1;
+      edges.forEach(([a,b])=>{ctx.beginPath();ctx.moveTo(pos[a].x,pos[a].y);ctx.lineTo(pos[b].x,pos[b].y);ctx.stroke();});
+      ctx.globalAlpha=1;
+      // Bright edges from src / to dst
+      if(src>=0) edges.filter(([a,b])=>a===src||b===src).forEach(([a,b])=>{
+        const k=Math.min(a,b)+'-'+Math.max(a,b);drawEdge(ctx,pos,a,b,litEdge.has(k),litEdge.has(k)?1:0.25);});
+      if(dst>=0&&dst!==src) edges.filter(([a,b])=>a===dst||b===dst).forEach(([a,b])=>{
+        const k=Math.min(a,b)+'-'+Math.max(a,b);drawEdge(ctx,pos,a,b,litEdge.has(k),litEdge.has(k)?1:0.2);});
+    }
+  } else {
+    edges.forEach(([a,b])=>{const k=Math.min(a,b)+'-'+Math.max(a,b);drawEdge(ctx,pos,a,b,litEdge.has(k));});
+  }
+
+  // Draw nodes
+  pos.forEach((p,i)=>{
+    const iS=i===src,iD=i===dst,onP=path.includes(i)&&!iS&&!iD,vis=litNode.has(i)&&!iS&&!iD;
+    if(iS||iD){
+      const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,R+14);
+      g.addColorStop(0,iS?'rgba(63,185,80,0.35)':'rgba(248,81,73,0.35)');g.addColorStop(1,'transparent');
+      ctx.beginPath();ctx.arc(p.x,p.y,R+14,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    }
+    ctx.beginPath();ctx.arc(p.x,p.y,R,0,Math.PI*2);
+    ctx.fillStyle=iS?'#1a4d2a':iD?'#4d1919':vis?'#0c2040':onP?'#111827':'#1c2128';
+    ctx.fill();
+    ctx.strokeStyle=iS?'#3fb950':iD?'#f85149':vis?'#388bfd':onP?'#30363d':'#2d333b';
+    ctx.lineWidth=iS||iD?2.5:vis?2:1;ctx.stroke();
+    ctx.fillStyle=iS?'#3fb950':iD?'#f85149':vis?'#79c0ff':'#8b949e';
+    ctx.font=`bold ${Math.max(9,R-3)}px monospace`;ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(i,p.x,p.y);
+  });
+
+  // Packet
+  if(anim.active&&path.length>1&&doneHops<path.length-1){
+    const from=pos[path[doneHops]],to=pos[path[doneHops+1]];
+    const px=from.x+(to.x-from.x)*anim.t,py=from.y+(to.y-from.y)*anim.t;
+    // Trail
+    for(let ti=4;ti>=1;ti--){
+      const tt=Math.max(0,anim.t-ti*0.07);
+      const tx=from.x+(to.x-from.x)*tt,ty=from.y+(to.y-from.y)*tt;
+      ctx.beginPath();ctx.arc(tx,ty,9-ti*2,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,166,87,${0.35-ti*0.07})`;ctx.fill();
+    }
+    // Outer glow
+    const g=ctx.createRadialGradient(px,py,0,px,py,22);
+    g.addColorStop(0,'rgba(255,166,87,0.6)');g.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(px,py,22,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    // Body
+    ctx.shadowColor='#ffa657';ctx.shadowBlur=12;
+    ctx.beginPath();ctx.arc(px,py,10,0,Math.PI*2);
+    ctx.fillStyle='#ffa657';ctx.fill();
+    ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();
+    ctx.shadowBlur=0;
+    // Hop number on packet
+    ctx.fillStyle='#000';ctx.font='bold 8px monospace';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(doneHops+1,px,py);
+  }
+  // Arrived indicator
+  if(!anim.active&&path.length>1&&src>=0&&dst>=0&&doneHops>=path.length-1){
+    const p=pos[path[path.length-1]];
+    const g=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,R+16);
+    g.addColorStop(0,'rgba(255,166,87,0.45)');g.addColorStop(1,'transparent');
+    ctx.beginPath();ctx.arc(p.x,p.y,R+16,0,Math.PI*2);ctx.fillStyle=g;ctx.fill();
+    ctx.fillStyle='#ffa657';ctx.font='bold 11px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('✓',p.x,p.y-R-10);
+  }
+}
+
+function drawEdge(ctx,pos,a,b,lit,alpha=1){
+  ctx.globalAlpha=lit?alpha:0.18*alpha;
+  ctx.beginPath();ctx.moveTo(pos[a].x,pos[a].y);ctx.lineTo(pos[b].x,pos[b].y);
+  if(lit){ctx.shadowColor='#388bfd';ctx.shadowBlur=9;ctx.strokeStyle='#388bfd';ctx.lineWidth=3.5;}
+  else{ctx.shadowBlur=0;ctx.strokeStyle='#2d333b';ctx.lineWidth=1.2;}
+  ctx.stroke();ctx.shadowBlur=0;ctx.globalAlpha=1;
+}
+
+// ── Render all three ───────────────────
+function renderAll(){
+  const h=anim.hop;
+  draw('ring',  Math.min(h,Math.max(0,rPath.length-1)));
+  draw('mesh',  Math.min(h,Math.max(0,mPath.length-1)));
+  draw('cross', Math.min(h,Math.max(0,cPath.length-1)));
+  updateHopBars();
+}
+
+function updateHopBars(){
+  const h=anim.hop;
+  function update(id,path,prefix){
+    const el_c=document.getElementById('hc-'+id),el_p=document.getElementById('hp-'+id);
+    if(!path||path.length<2){el_c.textContent='—';el_p.textContent='Select source PE';return;}
+    const hh=Math.min(h,path.length-1);
+    el_c.textContent=`Hop ${hh} / ${path.length-1}`;
+    el_p.textContent=path.slice(0,Math.min(hh+1,path.length)).join(' → ')+(hh<path.length-1?' → …':'');
+  }
+  update('ring',rPath);update('mesh',mPath);update('cross',cPath);
+}
+
+// ── Animation tick ─────────────────────
+function tick(){
+  if(!anim.active)return;
+  anim.t+=anim.speed;
+  if(anim.t>=1){
+    anim.t=0;anim.hop++;
+    const max=Math.max(rPath.length,mPath.length,cPath.length)-1;
+    if(anim.hop>=max){anim.active=false;anim.hop=max;renderAll();return;}
+  }
+  renderAll();
+  anim.raf=requestAnimationFrame(tick);
+}
+
+// ── Click ──────────────────────────────
+function handleClick(e,type){
+  if(anim.active)return;
+  const cvs=CV[type];
+  const rect=cvs.getBoundingClientRect();
+  const sx=CW/rect.width,sy=CH/rect.height;
+  const mx=(e.clientX-rect.left)*sx,my=(e.clientY-rect.top)*sy;
+  const pos=type==='ring'?rPos():mPos();
+  const threshold=nr()+6;
+  let hit=-1;
+  pos.forEach((p,i)=>{const dx=mx-p.x,dy=my-p.y;if(dx*dx+dy*dy<threshold*threshold)hit=i;});
+  if(hit<0)return;
+
+  if(mode==='src'){
+    src=hit;dst=-1;rPath=[];mPath=[];cPath=[];
+    anim.hop=0;anim.t=0;anim.active=false;
+    mode='dst';
+    setBadge('② Click Destination PE (any canvas)','dst-m');
+    document.getElementById('goBtn').disabled=true;
+    document.getElementById('stepBtn').disabled=true;
+    renderAll();
+  } else if(mode==='dst'&&hit!==src){
+    dst=hit;
+    rPath=calcR(src,dst);mPath=calcM(src,dst);cPath=[src,dst];
+    anim.hop=0;anim.t=0;
+    mode='ready';
+    setBadge('✓ Route computed — Auto Route or step through','rdy-m');
+    document.getElementById('goBtn').disabled=false;
+    document.getElementById('stepBtn').disabled=false;
+    updateMetrics();renderAll();
+  }
+}
+['ring','mesh','cross'].forEach(t=>CV[t].addEventListener('click',e=>handleClick(e,t)));
+
+function setBadge(txt,cls){const b=document.getElementById('badge');b.textContent=txt;b.className='badge '+cls;}
+
+document.getElementById('goBtn').addEventListener('click',()=>{
+  if(src<0||dst<0)return;
+  cancelAnimationFrame(anim.raf);
+  anim.hop=0;anim.t=0;anim.active=true;
+  document.getElementById('stepBtn').disabled=true;
+  anim.raf=requestAnimationFrame(tick);
+});
+document.getElementById('stepBtn').addEventListener('click',()=>{
+  if(anim.active||src<0||dst<0)return;
+  const max=Math.max(rPath.length,mPath.length,cPath.length)-1;
+  if(anim.hop>=max)return;
+  anim.hop++;anim.t=1;renderAll();
+  if(anim.hop>=max)document.getElementById('stepBtn').disabled=true;
+});
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  cancelAnimationFrame(anim.raf);
+  src=-1;dst=-1;mode='src';rPath=[];mPath=[];cPath=[];
+  anim.hop=0;anim.t=0;anim.active=false;
+  setBadge('① Click any canvas to select Source PE','src-m');
+  document.getElementById('goBtn').disabled=true;
+  document.getElementById('stepBtn').disabled=true;
+  clearMetrics();renderAll();
+});
+document.getElementById('spd').addEventListener('input',function(){
+  const v=parseInt(this.value);document.getElementById('spdLbl').textContent=v+'×';anim.speed=0.008*v;
+});
+document.getElementById('gsel').addEventListener('change',e=>{
+  N=parseInt(e.target.value);
+  cancelAnimationFrame(anim.raf);
+  src=-1;dst=-1;mode='src';rPath=[];mPath=[];cPath=[];
+  anim.hop=0;anim.t=0;anim.active=false;
+  setBadge('① Click any canvas to select Source PE','src-m');
+  document.getElementById('goBtn').disabled=true;
+  document.getElementById('stepBtn').disabled=true;
+  clearMetrics();updateStaticMetrics();renderAll();
+});
+
+// ── Metrics ────────────────────────────
+function updateMetrics(){
+  document.getElementById('r-hops').textContent=rPath.length-1;
+  document.getElementById('m-hops').textContent=mPath.length-1;
+  document.getElementById('c-hops').textContent=1;
+  updateStaticMetrics();
+}
+function clearMetrics(){
+  ['r-hops','m-hops','c-hops'].forEach(id=>document.getElementById(id).textContent='—');
+}
+function updateStaticMetrics(){
+  const T=N*N;
+  document.getElementById('r-diam').textContent=Math.floor(T/2);
+  document.getElementById('r-links').textContent=T;
+  document.getElementById('r-bw').textContent='2 links';
+  document.getElementById('m-diam').textContent=2*(N-1);
+  document.getElementById('m-links').textContent=2*N*(N-1);
+  document.getElementById('m-bw').textContent=N+' links';
+  document.getElementById('c-diam').textContent='1 (always)';
+  document.getElementById('c-links').textContent=T+'×'+T+' pts';
+  document.getElementById('c-bw').textContent=Math.floor(T/2)+' links';
+  const rows=[
+    ['Diameter (worst-case hops)',`<b class="b">${Math.floor(T/2)}</b>`,`<b class="m">${2*(N-1)}</b>`,`<b class="g">1</b>`],
+    ['Total Links',`<b class="g">${T}</b>`,`<b class="m">${2*N*(N-1)}</b>`,`<b class="b">${T*T} crosspoints</b>`],
+    ['Bisection Bandwidth',`<b class="b">2 links</b>`,`<b class="m">${N} links</b>`,`<b class="g">${Math.floor(T/2)} links</b>`],
+    ['Link cost scaling','<b class="g">O(N)</b>','<b class="m">O(N^1.5)</b>','<b class="b">O(N²)</b>'],
+    ['Latency scaling','<b class="b">O(N)</b>','<b class="m">O(√N)</b>','<b class="g">O(1)</b>'],
+    ['Avg hops (random pairs)',`<b class="b">${(T/4).toFixed(1)}</b>`,`<b class="m">${(2*(N-1)/3).toFixed(1)}</b>`,`<b class="g">1.0</b>`],
+  ];
+  document.getElementById('compTitle').textContent=`${N}×${N} array — ${T} Processing Elements`;
+  document.getElementById('compBody').innerHTML=rows.map(([p,r,m,c])=>`<tr><td>${p}</td><td>${r}</td><td>${m}</td><td>${c}</td></tr>`).join('');
+}
+
+updateStaticMetrics();renderAll();
+</script>
+</body>
+</html>
