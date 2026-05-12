@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LLM Pruning Scale-Down Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        :root {
+            --bg: #f8fafc;
+            --ink: #0f172a;
+            --accent: #0ea5e9;
+            --accent-2: #f97316;
+            --muted: #64748b;
+            --good: #22c55e;
+            --bad: #ef4444;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at 80% -10%, #dbeafe 0%, #f8fafc 40%, #f8fafc 100%);
+            color: var(--ink);
+        }
+
+        .mono {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            background: #ffffff;
+            border-radius: 0.75rem;
+            border: 1px solid #e2e8f0;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+
+        .chip {
+            animation: rise 0.4s ease-out;
+        }
+
+        @keyframes rise {
+            0% { transform: translateY(6px); opacity: 0; }
+            100% { transform: translateY(0); opacity: 1; }
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-7xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden">
+        <header class="px-6 md:px-8 py-6 bg-slate-900 text-white relative overflow-hidden">
+            <div class="absolute -right-16 -top-16 w-48 h-48 rounded-full bg-sky-500/20 blur-2xl"></div>
+            <h1 class="text-2xl md:text-3xl font-extrabold tracking-tight">Pruning as LLM Scale-Down</h1>
+            <p class="text-slate-300 mt-2 max-w-4xl text-sm md:text-base">
+                Explore how removing low-importance weights shrinks model memory and compute. Compare unstructured, structured, and N:M pruning while tracking parameter count, memory footprint, and quality trade-offs.
+            </p>
+        </header>
+
+        <section class="grid grid-cols-1 xl:grid-cols-4">
+            <aside class="xl:col-span-1 bg-slate-50 border-r border-slate-200 p-6 space-y-6">
+                <div>
+                    <h2 class="text-xs uppercase tracking-wider text-slate-500 font-bold mb-3">Pruning Controls</h2>
+
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-sm font-semibold text-slate-700">Base Model Size</label>
+                            <select id="model-size" class="mt-1 w-full border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm">
+                                <option value="7">7B parameters</option>
+                                <option value="13">13B parameters</option>
+                                <option value="34">34B parameters</option>
+                                <option value="70">70B parameters</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="text-sm font-semibold text-slate-700">Precision</label>
+                            <select id="precision" class="mt-1 w-full border border-slate-300 bg-white rounded-lg px-3 py-2 text-sm">
+                                <option value="16">FP16 (2 bytes / parameter)</option>
+                                <option value="8">INT8 (1 byte / parameter)</option>
+                                <option value="4">INT4 (0.5 byte / parameter)</option>
+                            </select>
+                        </div>
+
+                        <div>
+                            <label class="text-sm font-semibold text-slate-700">Pruning Strategy</label>
+                            <div class="mt-2 grid grid-cols-1 gap-2 text-sm">
+                                <label class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 cursor-pointer hover:border-sky-300">
+                                    <input type="radio" name="strategy" value="unstructured" checked>
+                                    <span>Unstructured (random sparse positions)</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 cursor-pointer hover:border-sky-300">
+                                    <input type="radio" name="strategy" value="structured">
+                                    <span>Structured (remove entire channels)</span>
+                                </label>
+                                <label class="flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2 cursor-pointer hover:border-sky-300">
+                                    <input type="radio" name="strategy" value="nm">
+                                    <span>N:M (keep top N in each M group)</span>
+                                </label>
+                            </div>
+                        </div>
+
+                        <div>
+                            <div class="flex items-center justify-between">
+                                <label class="text-sm font-semibold text-slate-700">Sparsity</label>
+                                <span id="sparsity-label" class="mono text-sm font-bold text-sky-700 bg-sky-100 px-2 py-0.5 rounded">50%</span>
+                            </div>
+                            <input id="sparsity" type="range" min="0" max="90" step="5" value="50" class="mt-2">
+                            <p class="text-xs text-slate-500 mt-1">Percent of parameters removed.</p>
+                        </div>
+
+                        <div id="nm-box" class="hidden p-3 rounded-lg border border-orange-200 bg-orange-50">
+                            <div class="text-sm font-semibold text-orange-800">N:M Pattern</div>
+                            <div class="mt-2 grid grid-cols-2 gap-2 text-sm">
+                                <label class="bg-white border border-orange-200 rounded px-2 py-1.5 cursor-pointer flex items-center gap-2">
+                                    <input type="radio" name="nm" value="2:4" checked>
+                                    <span>2:4</span>
+                                </label>
+                                <label class="bg-white border border-orange-200 rounded px-2 py-1.5 cursor-pointer flex items-center gap-2">
+                                    <input type="radio" name="nm" value="1:4">
+                                    <span>1:4</span>
+                                </label>
+                                <label class="bg-white border border-orange-200 rounded px-2 py-1.5 cursor-pointer flex items-center gap-2">
+                                    <input type="radio" name="nm" value="4:8">
+                                    <span>4:8</span>
+                                </label>
+                                <label class="bg-white border border-orange-200 rounded px-2 py-1.5 cursor-pointer flex items-center gap-2">
+                                    <input type="radio" name="nm" value="3:8">
+                                    <span>3:8</span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-4 space-y-2">
+                    <h3 class="text-xs uppercase tracking-wider text-slate-500 font-bold">Key Formula</h3>
+                    <p class="mono text-sm text-slate-700">remaining = total * (1 - sparsity)</p>
+                    <p class="mono text-sm text-slate-700">memory = remaining * bytes_per_param</p>
+                    <p class="text-xs text-slate-500">Real systems also include index/metadata overhead, especially for unstructured sparse tensors.</p>
+                </div>
+            </aside>
+
+            <main class="xl:col-span-3 p-6 md:p-8 space-y-6">
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                        <div class="text-xs uppercase tracking-wider text-slate-500 font-bold">Remaining Parameters</div>
+                        <div id="remaining-params" class="mono text-2xl font-bold text-slate-900 mt-2">3.50B</div>
+                        <div id="pruned-params" class="text-xs text-slate-500 mt-1">Pruned: 3.50B</div>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                        <div class="text-xs uppercase tracking-wider text-slate-500 font-bold">Estimated Model Memory</div>
+                        <div id="memory" class="mono text-2xl font-bold text-slate-900 mt-2">7.00 GB</div>
+                        <div id="memory-save" class="text-xs text-emerald-600 mt-1">Saved: 7.00 GB</div>
+                    </div>
+                    <div class="bg-slate-50 border border-slate-200 rounded-xl p-4">
+                        <div class="text-xs uppercase tracking-wider text-slate-500 font-bold">Quality Proxy</div>
+                        <div id="quality" class="mono text-2xl font-bold text-slate-900 mt-2">96.2 / 100</div>
+                        <div id="quality-note" class="text-xs text-slate-500 mt-1">Mild quality impact</div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold text-slate-800">Sparse Weight Matrix</h3>
+                            <span class="text-xs bg-slate-100 text-slate-600 px-2 py-1 rounded">Gray = removed</span>
+                        </div>
+                        <canvas id="matrix-canvas" width="700" height="420"></canvas>
+                    </div>
+
+                    <div class="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="font-bold text-slate-800">Layer-Wise Sparsity Profile</h3>
+                            <span class="text-xs bg-sky-100 text-sky-700 px-2 py-1 rounded">Auto-updated</span>
+                        </div>
+                        <canvas id="bars-canvas" width="700" height="420"></canvas>
+                    </div>
+                </div>
+
+                <div class="bg-slate-900 text-slate-100 rounded-xl p-5 border border-slate-800">
+                    <h3 class="font-bold text-lg">Interpretation</h3>
+                    <p id="interpretation" class="mt-2 text-slate-300 leading-relaxed text-sm md:text-base"></p>
+                    <div id="chips" class="mt-4 flex flex-wrap gap-2"></div>
+                </div>
+            </main>
+        </section>
+    </div>
+
+    <script>
+        const modelSizeEl = document.getElementById('model-size');
+        const precisionEl = document.getElementById('precision');
+        const sparsityEl = document.getElementById('sparsity');
+        const sparsityLabel = document.getElementById('sparsity-label');
+        const nmBox = document.getElementById('nm-box');
+
+        const remainingParamsEl = document.getElementById('remaining-params');
+        const prunedParamsEl = document.getElementById('pruned-params');
+        const memoryEl = document.getElementById('memory');
+        const memorySaveEl = document.getElementById('memory-save');
+        const qualityEl = document.getElementById('quality');
+        const qualityNoteEl = document.getElementById('quality-note');
+        const interpretationEl = document.getElementById('interpretation');
+        const chipsEl = document.getElementById('chips');
+
+        const matrixCanvas = document.getElementById('matrix-canvas');
+        const matrixCtx = matrixCanvas.getContext('2d');
+        const barsCanvas = document.getElementById('bars-canvas');
+        const barsCtx = barsCanvas.getContext('2d');
+
+        const LAYERS = [
+            'Embedding',
+            'Attn QKV',
+            'Attn Out',
+            'MLP Gate',
+            'MLP Up',
+            'MLP Down',
+            'LM Head'
+        ];
+
+        function strategyValue() {
+            return document.querySelector('input[name="strategy"]:checked').value;
+        }
+
+        function nmValue() {
+            const v = document.querySelector('input[name="nm"]:checked').value;
+            const parts = v.split(':').map(Number);
+            return { label: v, keep: parts[0], total: parts[1] };
+        }
+
+        function bytesPerParam(bits) {
+            return bits / 8;
+        }
+
+        function formatBillions(v) {
+            return v.toFixed(2) + 'B';
+        }
+
+        function formatGB(v) {
+            return v.toFixed(2) + ' GB';
+        }
+
+        function computeState() {
+            const totalB = parseFloat(modelSizeEl.value);
+            const bits = parseFloat(precisionEl.value);
+            const strategy = strategyValue();
+            let sparsity = parseFloat(sparsityEl.value) / 100;
+
+            if (strategy === 'nm') {
+                const nm = nmValue();
+                const forcedSparsity = 1 - (nm.keep / nm.total);
+                sparsity = forcedSparsity;
+                sparsityEl.value = String(Math.round(forcedSparsity * 100));
+            }
+
+            const totalParams = totalB * 1e9;
+            const remaining = totalParams * (1 - sparsity);
+            const pruned = totalParams - remaining;
+
+            const baseMemoryGB = (totalParams * bytesPerParam(bits)) / 1e9;
+
+            let overhead = 0;
+            if (strategy === 'unstructured') overhead = 0.08 + 0.12 * sparsity;
+            if (strategy === 'structured') overhead = 0.02;
+            if (strategy === 'nm') overhead = 0.03;
+
+            const prunedMemoryGB = ((remaining * bytesPerParam(bits)) / 1e9) * (1 + overhead);
+            const savedMemoryGB = Math.max(0, baseMemoryGB - prunedMemoryGB);
+
+            let qualityDrop = 0;
+            if (strategy === 'unstructured') qualityDrop = Math.pow(sparsity, 1.3) * 22;
+            if (strategy === 'structured') qualityDrop = Math.pow(sparsity, 1.18) * 28;
+            if (strategy === 'nm') qualityDrop = Math.pow(sparsity, 1.25) * 18;
+
+            const quality = Math.max(45, 100 - qualityDrop);
+
+            return {
+                totalB,
+                bits,
+                strategy,
+                sparsity,
+                remainingB: remaining / 1e9,
+                prunedB: pruned / 1e9,
+                baseMemoryGB,
+                prunedMemoryGB,
+                savedMemoryGB,
+                quality
+            };
+        }
+
+        function drawMatrix(state) {
+            const ctx = matrixCtx;
+            const w = matrixCanvas.width;
+            const h = matrixCanvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const rows = 16;
+            const cols = 24;
+            const pad = 22;
+            const gap = 3;
+
+            const cellW = (w - pad * 2 - (cols - 1) * gap) / cols;
+            const cellH = (h - pad * 2 - (rows - 1) * gap) / rows;
+
+            const keepRatio = 1 - state.sparsity;
+            const strat = state.strategy;
+
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    let keep = true;
+
+                    if (strat === 'unstructured') {
+                        const noise = ((r * 31 + c * 17 + 13) % 100) / 100;
+                        keep = noise < keepRatio;
+                    } else if (strat === 'structured') {
+                        const cutoffCol = Math.floor(cols * keepRatio);
+                        keep = c < cutoffCol;
+                    } else {
+                        const nm = nmValue();
+                        const groupIdx = Math.floor(c / nm.total);
+                        const posInGroup = c % nm.total;
+                        const threshold = nm.keep;
+                        const layerShift = (r + groupIdx) % nm.total;
+                        keep = ((posInGroup + layerShift) % nm.total) < threshold;
+                    }
+
+                    const x = pad + c * (cellW + gap);
+                    const y = pad + r * (cellH + gap);
+
+                    if (keep) {
+                        const val = ((r * 11 + c * 7) % 100) / 100;
+                        const blue = Math.floor(180 + val * 60);
+                        const green = Math.floor(120 + val * 80);
+                        ctx.fillStyle = 'rgb(14,' + green + ',' + blue + ')';
+                    } else {
+                        ctx.fillStyle = '#d1d5db';
+                    }
+
+                    ctx.fillRect(x, y, cellW, cellH);
+                }
+            }
+
+            ctx.fillStyle = '#475569';
+            ctx.font = '12px Inter, sans-serif';
+            ctx.fillText('Each block approximates a weight chunk.', 22, h - 22);
+        }
+
+        function drawLayerBars(state) {
+            const ctx = barsCtx;
+            const w = barsCanvas.width;
+            const h = barsCanvas.height;
+            ctx.clearRect(0, 0, w, h);
+
+            const left = 120;
+            const right = 24;
+            const top = 24;
+            const barH = 34;
+            const gap = 16;
+            const usable = w - left - right;
+
+            let perLayer = [];
+            for (let i = 0; i < LAYERS.length; i++) {
+                let s = state.sparsity;
+                if (state.strategy === 'unstructured') {
+                    s = Math.min(0.95, Math.max(0, s + (i % 3 - 1) * 0.04));
+                }
+                if (state.strategy === 'structured') {
+                    const heavy = [1, 3, 4, 5].includes(i);
+                    s = heavy ? Math.min(0.95, s + 0.08) : Math.max(0, s - 0.05);
+                }
+                if (state.strategy === 'nm') {
+                    const balance = (i % 2 === 0) ? -0.02 : 0.02;
+                    s = Math.min(0.95, Math.max(0, s + balance));
+                }
+                perLayer.push(s);
+            }
+
+            LAYERS.forEach((name, i) => {
+                const y = top + i * (barH + gap);
+                const s = perLayer[i];
+                const keep = 1 - s;
+
+                ctx.fillStyle = '#e2e8f0';
+                ctx.fillRect(left, y, usable, barH);
+
+                ctx.fillStyle = '#0284c7';
+                ctx.fillRect(left, y, usable * keep, barH);
+
+                ctx.fillStyle = '#f97316';
+                ctx.fillRect(left + usable * keep, y, usable * s, barH);
+
+                ctx.fillStyle = '#334155';
+                ctx.font = '12px Inter, sans-serif';
+                ctx.textAlign = 'right';
+                ctx.fillText(name, left - 10, y + 22);
+
+                ctx.textAlign = 'left';
+                ctx.fillStyle = '#0f172a';
+                ctx.fillText(Math.round(s * 100) + '% pruned', left + usable + 8, y + 22);
+            });
+
+            ctx.textAlign = 'left';
+            ctx.fillStyle = '#64748b';
+            ctx.font = '12px Inter, sans-serif';
+            ctx.fillText('Blue: kept weights, Orange: pruned weights', left, h - 12);
+        }
+
+        function buildInterpretation(state) {
+            const p = Math.round(state.sparsity * 100);
+            let text = '';
+
+            if (state.strategy === 'unstructured') {
+                text = 'Unstructured pruning reaches high sparsity by deleting individual weights. It can preserve quality fairly well at moderate sparsity, but hardware acceleration may be less efficient due to irregular memory access.';
+            } else if (state.strategy === 'structured') {
+                text = 'Structured pruning removes whole channels/neurons, so the resulting model is easier to accelerate on dense hardware. The compute win is practical, but quality can drop faster when sparsity gets aggressive.';
+            } else {
+                const nm = nmValue();
+                text = 'N:M pruning enforces a regular sparse pattern (' + nm.label + '), balancing hardware-friendliness with quality. This is common in production kernels because sparsity is predictable and compiler-friendly.';
+            }
+
+            if (p >= 70) {
+                text += ' At this level, retraining or fine-tuning is usually required to recover downstream task performance.';
+            } else if (p >= 40) {
+                text += ' This is a realistic deployment zone where pruning can combine well with quantization for further compression.';
+            } else {
+                text += ' This conservative setting usually gives modest savings with limited impact on output quality.';
+            }
+
+            return text;
+        }
+
+        function refreshChips(state) {
+            chipsEl.innerHTML = '';
+
+            const chips = [
+                { label: 'Strategy: ' + state.strategy, cls: 'bg-sky-500/20 text-sky-300 border-sky-400/40' },
+                { label: 'Sparsity: ' + Math.round(state.sparsity * 100) + '%', cls: 'bg-orange-500/20 text-orange-200 border-orange-400/40' },
+                { label: 'Precision: ' + state.bits + '-bit', cls: 'bg-emerald-500/20 text-emerald-200 border-emerald-400/40' },
+                { label: 'Memory Saved: ' + state.savedMemoryGB.toFixed(2) + ' GB', cls: 'bg-indigo-500/20 text-indigo-200 border-indigo-400/40' }
+            ];
+
+            chips.forEach(c => {
+                const el = document.createElement('span');
+                el.className = 'chip text-xs border px-2.5 py-1 rounded-full ' + c.cls;
+                el.textContent = c.label;
+                chipsEl.appendChild(el);
+            });
+        }
+
+        function updateUI() {
+            const state = computeState();
+
+            sparsityLabel.textContent = Math.round(state.sparsity * 100) + '%';
+            remainingParamsEl.textContent = formatBillions(state.remainingB);
+            prunedParamsEl.textContent = 'Pruned: ' + formatBillions(state.prunedB);
+
+            memoryEl.textContent = formatGB(state.prunedMemoryGB);
+            memorySaveEl.textContent = 'Saved: ' + formatGB(state.savedMemoryGB);
+
+            qualityEl.textContent = state.quality.toFixed(1) + ' / 100';
+            if (state.quality > 93) {
+                qualityNoteEl.textContent = 'Mild quality impact';
+                qualityNoteEl.className = 'text-xs text-emerald-600 mt-1';
+            } else if (state.quality > 84) {
+                qualityNoteEl.textContent = 'Moderate quality-risk zone';
+                qualityNoteEl.className = 'text-xs text-amber-600 mt-1';
+            } else {
+                qualityNoteEl.textContent = 'High degradation risk without recovery training';
+                qualityNoteEl.className = 'text-xs text-red-600 mt-1';
+            }
+
+            interpretationEl.textContent = buildInterpretation(state);
+            refreshChips(state);
+            drawMatrix(state);
+            drawLayerBars(state);
+        }
+
+        function onStrategyChange() {
+            const strat = strategyValue();
+            const nmMode = strat === 'nm';
+            nmBox.classList.toggle('hidden', !nmMode);
+            sparsityEl.disabled = nmMode;
+            sparsityEl.classList.toggle('opacity-60', nmMode);
+            updateUI();
+        }
+
+        modelSizeEl.addEventListener('change', updateUI);
+        precisionEl.addEventListener('change', updateUI);
+        sparsityEl.addEventListener('input', updateUI);
+
+        document.querySelectorAll('input[name="strategy"]').forEach(r => {
+            r.addEventListener('change', onStrategyChange);
+        });
+
+        document.querySelectorAll('input[name="nm"]').forEach(r => {
+            r.addEventListener('change', updateUI);
+        });
+
+        window.addEventListener('resize', updateUI);
+
+        onStrategyChange();
+    </script>
+</body>
+</html>

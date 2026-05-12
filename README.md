@@ -68,6 +68,7 @@ Numeric formats and quantized inference/training concepts
 - Floating-point format explorer for FP32, BF16, FP16, and FP8 variants
 - Quantization-aware training and fake-quantization gradient flow
 - Calibration, granularity, and INT8 deployment tradeoffs
+- LLM pruning scale-down: unstructured, structured, and N:M sparsity with memory-quality tradeoff analysis
 
 ### ⚡ GEMM Optimization
 
