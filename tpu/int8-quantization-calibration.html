@@ -1,0 +1,1512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>INT8 Quantization & Calibration Visualizer</title>
+    <style>
+        :root {
+            color-scheme: light;
+            --bg: #f4f7fb;
+            --panel: #ffffff;
+            --panel-soft: #f8fafc;
+            --ink: #0f172a;
+            --muted: #475569;
+            --soft: #64748b;
+            --line: #dbe5ef;
+            --blue: #2563eb;
+            --blue-dark: #1d4ed8;
+            --teal: #0f766e;
+            --amber: #d97706;
+            --red: #dc2626;
+            --green: #15803d;
+            --purple: #7c3aed;
+            --shadow: 0 18px 44px rgba(15, 23, 42, 0.11);
+            --radius: 14px;
+        }
+
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            background:
+                radial-gradient(circle at top left, rgba(37, 99, 235, 0.12), transparent 28rem),
+                linear-gradient(180deg, #ffffff 0%, var(--bg) 58%, #edf3f9 100%);
+            color: var(--ink);
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            line-height: 1.5;
+        }
+
+        a {
+            color: inherit;
+        }
+
+        button,
+        input,
+        select {
+            font: inherit;
+        }
+
+        .page {
+            width: min(1180px, calc(100% - 32px));
+            margin: 0 auto;
+            padding: 28px 0 48px;
+        }
+
+        .top-link {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 18px;
+            color: #1e40af;
+            font-weight: 700;
+            text-decoration: none;
+        }
+
+        .hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+            gap: 24px;
+            align-items: stretch;
+            padding: 30px;
+            border: 1px solid rgba(148, 163, 184, 0.28);
+            border-radius: 20px;
+            background: linear-gradient(135deg, #0f172a 0%, #164e63 55%, #115e59 100%);
+            box-shadow: var(--shadow);
+            color: #f8fafc;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .hero::after {
+            content: "";
+            position: absolute;
+            inset: auto -70px -130px auto;
+            width: 360px;
+            height: 360px;
+            border-radius: 999px;
+            border: 60px solid rgba(125, 211, 252, 0.12);
+        }
+
+        .hero > * {
+            position: relative;
+            z-index: 1;
+        }
+
+        .kicker {
+            display: inline-flex;
+            width: fit-content;
+            padding: 6px 10px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.08);
+            color: #bae6fd;
+            font-size: 0.75rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+        }
+
+        h1,
+        h2,
+        h3 {
+            margin: 0;
+            line-height: 1.12;
+        }
+
+        h1 {
+            max-width: 760px;
+            margin-top: 16px;
+            font-size: clamp(2rem, 5vw, 4.15rem);
+            letter-spacing: 0;
+        }
+
+        .hero p {
+            max-width: 760px;
+            margin: 18px 0 0;
+            color: #dbeafe;
+            font-size: 1.06rem;
+        }
+
+        .hero-panel {
+            display: grid;
+            align-content: center;
+            gap: 12px;
+            padding: 18px;
+            border: 1px solid rgba(255, 255, 255, 0.16);
+            border-radius: 16px;
+            background: rgba(15, 23, 42, 0.28);
+        }
+
+        .hero-chip {
+            display: grid;
+            grid-template-columns: auto 1fr;
+            gap: 10px;
+            align-items: center;
+            padding: 12px;
+            border-radius: 12px;
+            background: rgba(255, 255, 255, 0.09);
+        }
+
+        .hero-chip strong {
+            display: block;
+            color: #ffffff;
+        }
+
+        .hero-chip span {
+            color: #cbd5e1;
+            font-size: 0.9rem;
+        }
+
+        .chip-icon {
+            display: grid;
+            width: 40px;
+            height: 40px;
+            place-items: center;
+            border-radius: 10px;
+            background: rgba(96, 165, 250, 0.24);
+            color: #bfdbfe;
+            font-weight: 900;
+        }
+
+        .intro-grid,
+        .app-grid,
+        .metrics-grid,
+        .hardware-grid {
+            display: grid;
+            gap: 18px;
+        }
+
+        .intro-grid {
+            grid-template-columns: repeat(5, minmax(0, 1fr));
+            margin: 24px 0;
+        }
+
+        .intro-card {
+            min-height: 100%;
+            padding: 16px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: rgba(255, 255, 255, 0.88);
+            box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+        }
+
+        .intro-card strong {
+            display: block;
+            margin-bottom: 7px;
+            color: #0f172a;
+        }
+
+        .intro-card p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.93rem;
+        }
+
+        .app-grid {
+            grid-template-columns: minmax(260px, 330px) minmax(0, 1fr);
+            align-items: start;
+        }
+
+        .panel {
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--panel);
+            box-shadow: 0 12px 28px rgba(15, 23, 42, 0.07);
+        }
+
+        .panel-header {
+            padding: 18px 18px 0;
+        }
+
+        .panel-header p {
+            margin: 8px 0 0;
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        .controls {
+            display: grid;
+            gap: 18px;
+            padding: 18px;
+        }
+
+        .control-group {
+            display: grid;
+            gap: 9px;
+        }
+
+        .control-label {
+            color: #1e293b;
+            font-size: 0.86rem;
+            font-weight: 800;
+        }
+
+        .segmented,
+        .button-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .choice input {
+            position: absolute;
+            opacity: 0;
+            pointer-events: none;
+        }
+
+        .choice span,
+        .small-button,
+        .primary-button,
+        .select-input {
+            border-radius: 10px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #334155;
+            transition: transform 0.16s ease, border-color 0.16s ease, background 0.16s ease, color 0.16s ease, box-shadow 0.16s ease;
+        }
+
+        .choice span {
+            display: inline-flex;
+            min-height: 38px;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 12px;
+            cursor: pointer;
+            font-weight: 800;
+            font-size: 0.9rem;
+        }
+
+        .choice input:checked + span {
+            border-color: #1d4ed8;
+            background: #2563eb;
+            color: #ffffff;
+            box-shadow: 0 8px 18px rgba(37, 99, 235, 0.22);
+        }
+
+        .choice input:focus-visible + span,
+        button:focus-visible,
+        select:focus-visible,
+        input:focus-visible {
+            outline: 3px solid rgba(37, 99, 235, 0.28);
+            outline-offset: 2px;
+        }
+
+        .select-input {
+            width: 100%;
+            min-height: 40px;
+            padding: 8px 10px;
+            font-weight: 700;
+        }
+
+        .range-row {
+            display: grid;
+            grid-template-columns: 44px 1fr 52px;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .range-row output {
+            color: #334155;
+            font-weight: 800;
+            text-align: right;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--blue);
+        }
+
+        .primary-button,
+        .small-button {
+            min-height: 42px;
+            padding: 9px 13px;
+            cursor: pointer;
+            font-weight: 900;
+        }
+
+        .primary-button {
+            flex: 1 1 170px;
+            border-color: var(--blue);
+            background: var(--blue);
+            color: #ffffff;
+            box-shadow: 0 10px 20px rgba(37, 99, 235, 0.22);
+        }
+
+        .primary-button:hover {
+            background: var(--blue-dark);
+        }
+
+        .small-button:hover,
+        .choice span:hover {
+            transform: translateY(-1px);
+            border-color: #94a3b8;
+        }
+
+        .formula-box {
+            margin: 0 18px 18px;
+            padding: 16px;
+            border-radius: 12px;
+            background: #0f172a;
+            color: #e2e8f0;
+            overflow-x: auto;
+        }
+
+        .formula-box code {
+            display: block;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+            font-size: 0.86rem;
+            line-height: 1.8;
+        }
+
+        .mode-note {
+            margin: 0 18px 18px;
+            padding: 12px 14px;
+            border-radius: 12px;
+            background: #eff6ff;
+            color: #1e3a8a;
+            font-size: 0.92rem;
+        }
+
+        .visual-panel {
+            overflow: hidden;
+        }
+
+        .visual-toolbar {
+            display: flex;
+            gap: 10px;
+            justify-content: space-between;
+            align-items: center;
+            padding: 16px 18px;
+            border-bottom: 1px solid var(--line);
+            background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+        }
+
+        .visual-toolbar p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px 12px;
+            color: var(--muted);
+            font-size: 0.82rem;
+            font-weight: 700;
+        }
+
+        .legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dot-swatch {
+            width: 11px;
+            height: 11px;
+            border-radius: 999px;
+            background: var(--blue);
+        }
+
+        .dot-swatch.clipped {
+            background: var(--red);
+        }
+
+        .dot-swatch.done {
+            background: var(--green);
+        }
+
+        .quant-stage {
+            position: relative;
+            min-height: 360px;
+            padding: 18px;
+            background:
+                linear-gradient(90deg, rgba(148, 163, 184, 0.15) 1px, transparent 1px) 0 0 / 9.09% 100%,
+                #ffffff;
+            overflow: hidden;
+        }
+
+        .row-label {
+            position: absolute;
+            left: 18px;
+            width: 120px;
+            color: #334155;
+            font-size: 0.78rem;
+            font-weight: 900;
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .row-label.fp {
+            top: 38px;
+        }
+
+        .row-label.q {
+            top: 148px;
+        }
+
+        .row-label.deq {
+            top: 258px;
+        }
+
+        .axis-line {
+            position: absolute;
+            left: 130px;
+            right: 18px;
+            height: 2px;
+            border-radius: 999px;
+            background: #cbd5e1;
+        }
+
+        .axis-line.fp {
+            top: 58px;
+        }
+
+        .axis-line.q {
+            top: 168px;
+        }
+
+        .axis-line.deq {
+            top: 278px;
+        }
+
+        .range-band {
+            position: absolute;
+            top: 30px;
+            height: 280px;
+            border-left: 2px solid rgba(20, 184, 166, 0.7);
+            border-right: 2px solid rgba(20, 184, 166, 0.7);
+            background: rgba(20, 184, 166, 0.08);
+            pointer-events: none;
+        }
+
+        .stage-svg {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            overflow: visible;
+        }
+
+        .point {
+            position: absolute;
+            z-index: 4;
+            display: grid;
+            width: 18px;
+            height: 18px;
+            place-items: center;
+            border: 2px solid #ffffff;
+            border-radius: 999px;
+            background: var(--blue);
+            box-shadow: 0 6px 15px rgba(37, 99, 235, 0.22);
+            transform: translate(-50%, -50%);
+            transition: left 0.42s ease, top 0.42s ease, background 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
+        }
+
+        .point::after {
+            content: attr(data-label);
+            position: absolute;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            display: none;
+            min-width: max-content;
+            padding: 4px 6px;
+            border-radius: 7px;
+            background: #0f172a;
+            color: #ffffff;
+            font-size: 0.72rem;
+            font-weight: 800;
+        }
+
+        .point.active {
+            z-index: 8;
+            background: var(--purple);
+            box-shadow: 0 0 0 8px rgba(124, 58, 237, 0.15), 0 12px 24px rgba(124, 58, 237, 0.28);
+            transform: translate(-50%, -50%) scale(1.22);
+        }
+
+        .point.active::after,
+        .point:hover::after {
+            display: block;
+        }
+
+        .point.done {
+            background: var(--green);
+        }
+
+        .point.clipped {
+            background: var(--red);
+            box-shadow: 0 6px 16px rgba(220, 38, 38, 0.26);
+        }
+
+        .bin-strip {
+            position: absolute;
+            left: 130px;
+            right: 18px;
+            top: 182px;
+            display: grid;
+            gap: 2px;
+            height: 34px;
+        }
+
+        .bin {
+            min-width: 0;
+            border-radius: 6px;
+            background: #e0f2fe;
+            border: 1px solid #bae6fd;
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+
+        .bin.active {
+            background: #fbbf24;
+            border-color: #d97706;
+            transform: translateY(-3px);
+        }
+
+        .tick-row {
+            position: absolute;
+            left: 130px;
+            right: 18px;
+            bottom: 18px;
+            display: flex;
+            justify-content: space-between;
+            color: #475569;
+            font-size: 0.78rem;
+            font-weight: 800;
+        }
+
+        .metrics-grid {
+            grid-template-columns: repeat(7, minmax(0, 1fr));
+            padding: 18px;
+            border-top: 1px solid var(--line);
+            background: #f8fafc;
+        }
+
+        .metric {
+            padding: 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 12px;
+            background: #ffffff;
+        }
+
+        .metric span {
+            display: block;
+            color: var(--soft);
+            font-size: 0.72rem;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            display: block;
+            margin-top: 5px;
+            color: #0f172a;
+            font-size: 1.02rem;
+        }
+
+        .table-wrap {
+            max-height: 310px;
+            overflow: auto;
+            border-top: 1px solid var(--line);
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.88rem;
+        }
+
+        th,
+        td {
+            padding: 9px 11px;
+            border-bottom: 1px solid #e2e8f0;
+            text-align: right;
+        }
+
+        th:first-child,
+        td:first-child {
+            text-align: left;
+        }
+
+        th {
+            position: sticky;
+            top: 0;
+            z-index: 1;
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 0.75rem;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        tr.active-row {
+            background: #eef2ff;
+            color: #312e81;
+            font-weight: 800;
+        }
+
+        tr.clipped-row td:first-child::after {
+            content: " clipped";
+            color: var(--red);
+            font-size: 0.73rem;
+            font-weight: 900;
+        }
+
+        .explain-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 18px;
+            margin-top: 18px;
+        }
+
+        .explain-card {
+            padding: 18px;
+            border: 1px solid var(--line);
+            border-radius: var(--radius);
+            background: var(--panel);
+        }
+
+        .explain-card h2 {
+            font-size: 1.25rem;
+        }
+
+        .explain-card p,
+        .explain-card li {
+            color: var(--muted);
+        }
+
+        .explain-card ul {
+            margin: 12px 0 0;
+            padding-left: 20px;
+        }
+
+        .hardware-grid {
+            grid-template-columns: 1fr 1fr;
+            align-items: stretch;
+            margin-top: 18px;
+        }
+
+        .memory-panel {
+            padding: 18px;
+        }
+
+        .memory-panel h3 {
+            display: flex;
+            justify-content: space-between;
+            gap: 10px;
+            align-items: baseline;
+            font-size: 1.1rem;
+        }
+
+        .memory-panel h3 span {
+            color: var(--muted);
+            font-size: 0.86rem;
+        }
+
+        .memory-cells {
+            display: grid;
+            gap: 6px;
+            margin-top: 16px;
+        }
+
+        .memory-cells.fp32 {
+            grid-template-columns: repeat(8, 1fr);
+        }
+
+        .memory-cells.int8 {
+            grid-template-columns: repeat(16, 1fr);
+        }
+
+        .cell {
+            min-height: 34px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: #e2e8f0;
+            transition: transform 0.24s ease, background 0.24s ease;
+        }
+
+        .cell.fp32 {
+            background: #dbeafe;
+            border-color: #93c5fd;
+        }
+
+        .cell.int8 {
+            background: #ccfbf1;
+            border-color: #5eead4;
+        }
+
+        .cell.hot {
+            transform: translateY(-4px);
+            background: #fef3c7;
+            border-color: #f59e0b;
+        }
+
+        .hardware-note {
+            margin-top: 12px;
+            color: var(--muted);
+            font-size: 0.94rem;
+        }
+
+        @media (max-width: 1040px) {
+            .intro-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+
+            .metrics-grid {
+                grid-template-columns: repeat(3, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 860px) {
+            .hero,
+            .app-grid,
+            .explain-grid,
+            .hardware-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .quant-stage {
+                min-height: 390px;
+            }
+
+            .row-label {
+                left: 14px;
+                width: 86px;
+                font-size: 0.68rem;
+            }
+
+            .axis-line,
+            .bin-strip,
+            .tick-row {
+                left: 106px;
+            }
+        }
+
+        @media (max-width: 620px) {
+            .page {
+                width: min(100% - 20px, 1180px);
+                padding-top: 16px;
+            }
+
+            .hero {
+                padding: 22px;
+            }
+
+            .intro-grid,
+            .metrics-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .visual-toolbar {
+                align-items: flex-start;
+                flex-direction: column;
+            }
+
+            th,
+            td {
+                padding: 8px;
+                font-size: 0.78rem;
+            }
+
+            .memory-cells.int8 {
+                grid-template-columns: repeat(8, 1fr);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <a class="top-link" href="../index.html">Back to catalog</a>
+
+        <header class="hero">
+            <div>
+                <span class="kicker">EE508 Quantization Lab</span>
+                <h1>INT8 Quantization & Calibration Visualizer</h1>
+                <p>
+                    Move FP32 activation values into low-precision integer bins, then watch dequantization and error appear as calibration range changes.
+                </p>
+            </div>
+            <div class="hero-panel" aria-label="Quantization summary">
+                <div class="hero-chip">
+                    <span class="chip-icon">32</span>
+                    <div>
+                        <strong>FP32 inference</strong>
+                        <span>Uses 32-bit floating point values.</span>
+                    </div>
+                </div>
+                <div class="hero-chip">
+                    <span class="chip-icon">8</span>
+                    <div>
+                        <strong>INT8 inference</strong>
+                        <span>Maps continuous values to discrete integer bins.</span>
+                    </div>
+                </div>
+                <div class="hero-chip">
+                    <span class="chip-icon">4x</span>
+                    <div>
+                        <strong>Memory density</strong>
+                        <span>The same memory budget can hold four times more INT8 values.</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <section class="intro-grid" aria-label="Concept introduction">
+            <article class="intro-card">
+                <strong>From FP32 to bins</strong>
+                <p>Quantization replaces continuous FP32 activations with a finite set of integer codes.</p>
+            </article>
+            <article class="intro-card">
+                <strong>Why it helps</strong>
+                <p>Lower precision can reduce memory traffic and improve accelerator throughput when hardware supports it.</p>
+            </article>
+            <article class="intro-card">
+                <strong>Calibration matters</strong>
+                <p>The calibration range decides which real values fit inside the integer range.</p>
+            </article>
+            <article class="intro-card">
+                <strong>Too narrow</strong>
+                <p>A narrow range gives a smaller step size but clips values outside the calibrated interval.</p>
+            </article>
+            <article class="intro-card">
+                <strong>Too wide</strong>
+                <p>A wide range avoids clipping but spreads bins out, increasing rounding error for common values.</p>
+            </article>
+        </section>
+
+        <main class="app-grid">
+            <aside class="panel" aria-label="Interactive controls">
+                <div class="panel-header">
+                    <h2>Controls</h2>
+                    <p>Change precision, range, and data shape. Metrics update immediately.</p>
+                </div>
+                <form class="controls" id="controlForm">
+                    <div class="control-group">
+                        <span class="control-label">Bit width</span>
+                        <div class="segmented" role="radiogroup" aria-label="Bit width">
+                            <label class="choice"><input type="radio" name="bits" value="2"><span>2-bit</span></label>
+                            <label class="choice"><input type="radio" name="bits" value="4"><span>4-bit</span></label>
+                            <label class="choice"><input type="radio" name="bits" value="8" checked><span>8-bit</span></label>
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <span class="control-label">Quantization mode</span>
+                        <div class="segmented" role="radiogroup" aria-label="Quantization mode">
+                            <label class="choice"><input type="radio" name="mode" value="symmetric"><span>Symmetric</span></label>
+                            <label class="choice"><input type="radio" name="mode" value="asymmetric" checked><span>Asymmetric</span></label>
+                        </div>
+                    </div>
+
+                    <label class="control-group">
+                        <span class="control-label">Activation distribution</span>
+                        <select class="select-input" id="distribution">
+                            <option value="normal">Normal</option>
+                            <option value="wide">Wide</option>
+                            <option value="outlier">Outlier-heavy</option>
+                        </select>
+                    </label>
+
+                    <label class="control-group">
+                        <span class="control-label">Calibration min</span>
+                        <span class="range-row">
+                            <span>-4</span>
+                            <input type="range" id="rangeMin" min="-4" max="3.9" step="0.1" value="-2">
+                            <output id="rangeMinOut">-2.0</output>
+                        </span>
+                    </label>
+
+                    <label class="control-group">
+                        <span class="control-label">Calibration max</span>
+                        <span class="range-row">
+                            <span>-3.9</span>
+                            <input type="range" id="rangeMax" min="-3.9" max="4" step="0.1" value="2">
+                            <output id="rangeMaxOut">2.0</output>
+                        </span>
+                    </label>
+
+                    <label class="control-group">
+                        <span class="control-label">Animation speed</span>
+                        <span class="range-row">
+                            <span>Slow</span>
+                            <input type="range" id="speed" min="0.5" max="2.5" step="0.1" value="1.2">
+                            <output id="speedOut">1.2x</output>
+                        </span>
+                    </label>
+
+                    <div class="button-row">
+                        <button class="primary-button" id="animateBtn" type="button">Animate Quantization</button>
+                        <button class="small-button" id="resetBtn" type="button">Reset</button>
+                    </div>
+                </form>
+
+                <div class="panel-header">
+                    <h2>Formula Panel</h2>
+                    <p>The same equations power every dot in the animation.</p>
+                </div>
+                <div class="formula-box" aria-label="Quantization formulas">
+                    <code>scale = (x_max - x_min) / (q_max - q_min)</code>
+                    <code>q = round(x / scale + zero_point)</code>
+                    <code>x_hat = scale * (q - zero_point)</code>
+                    <code>error = x - x_hat</code>
+                </div>
+                <p class="mode-note" id="modeNote"></p>
+            </aside>
+
+            <section class="panel visual-panel" aria-label="Animated mapping visualization">
+                <div class="visual-toolbar">
+                    <div>
+                        <h2>FP32 value -> integer q -> dequantized x_hat -> error</h2>
+                        <p id="stageCaption">Ready. Press Animate Quantization to step through the values.</p>
+                    </div>
+                    <div class="legend" aria-label="Legend">
+                        <span><i class="dot-swatch"></i> pending</span>
+                        <span><i class="dot-swatch done"></i> quantized</span>
+                        <span><i class="dot-swatch clipped"></i> clipped</span>
+                    </div>
+                </div>
+
+                <div class="quant-stage" id="quantStage">
+                    <span class="row-label fp">FP32 value</span>
+                    <span class="row-label q">integer q</span>
+                    <span class="row-label deq">x_hat/error</span>
+                    <span class="axis-line fp"></span>
+                    <span class="axis-line q"></span>
+                    <span class="axis-line deq"></span>
+                    <span class="range-band" id="rangeBand"></span>
+                    <svg class="stage-svg" id="errorSvg" viewBox="0 0 100 340" preserveAspectRatio="none" aria-hidden="true"></svg>
+                    <div class="bin-strip" id="binStrip" aria-hidden="true"></div>
+                    <div id="pointLayer"></div>
+                    <div class="tick-row" id="tickRow"></div>
+                </div>
+
+                <div class="metrics-grid" aria-label="Live metrics">
+                    <div class="metric"><span>Scale</span><strong id="metricScale">0</strong></div>
+                    <div class="metric"><span>Zero point</span><strong id="metricZero">0</strong></div>
+                    <div class="metric"><span>MSE</span><strong id="metricMse">0</strong></div>
+                    <div class="metric"><span>MAE</span><strong id="metricMae">0</strong></div>
+                    <div class="metric"><span>SQNR</span><strong id="metricSqnr">0 dB</strong></div>
+                    <div class="metric"><span>Clipped</span><strong id="metricClipped">0</strong></div>
+                    <div class="metric"><span>Clipped %</span><strong id="metricClipPct">0%</strong></div>
+                </div>
+
+                <div class="table-wrap">
+                    <table aria-label="Quantization table">
+                        <thead>
+                            <tr>
+                                <th>Value</th>
+                                <th>q</th>
+                                <th>x_hat</th>
+                                <th>Error</th>
+                            </tr>
+                        </thead>
+                        <tbody id="valueTable"></tbody>
+                    </table>
+                </div>
+            </section>
+        </main>
+
+        <section class="explain-grid">
+            <article class="explain-card">
+                <h2>Error and Calibration</h2>
+                <ul>
+                    <li>Narrow calibration ranges reduce the quantization step, so in-range values can be represented more precisely.</li>
+                    <li>Values outside the range are clipped to the nearest endpoint, which can dominate error when outliers matter.</li>
+                    <li>Wide ranges avoid clipping but increase the step size, so ordinary values suffer more rounding error.</li>
+                    <li>Good calibration balances clipping error and rounding error for the activation distribution seen during inference.</li>
+                </ul>
+            </article>
+
+            <article class="explain-card">
+                <h2>Symmetric vs. Asymmetric</h2>
+                <p>
+                    Symmetric quantization uses a signed range such as INT8 [-127, 127], forces zero_point = 0, and expands the calibration interval to max(abs(min), abs(max)).
+                </p>
+                <p>
+                    Asymmetric quantization uses an unsigned range such as UINT8 [0, 255], computes zero_point from the selected min/max range, and clamps q into [q_min, q_max].
+                </p>
+            </article>
+        </section>
+
+        <section class="panel" style="margin-top: 18px;" aria-label="Hardware intuition panel">
+            <div class="panel-header">
+                <h2>Hardware Intuition: Memory Traffic</h2>
+                <p>FP32 uses 4 bytes per value. INT8 uses 1 byte per value, so the same memory budget can carry four times as many activation values.</p>
+            </div>
+            <div class="hardware-grid">
+                <article class="memory-panel">
+                    <h3>FP32 block <span>8 values x 4 bytes</span></h3>
+                    <div class="memory-cells fp32" id="fp32Cells"></div>
+                    <p class="hardware-note">Fewer values fit in a fixed memory block, so each value consumes more bandwidth.</p>
+                </article>
+                <article class="memory-panel">
+                    <h3>INT8 block <span>32 values x 1 byte</span></h3>
+                    <div class="memory-cells int8" id="int8Cells"></div>
+                    <p class="hardware-note">More values fit in the same memory footprint. Real speedup still depends on hardware support, memory bandwidth, and kernel implementation.</p>
+                </article>
+            </div>
+        </section>
+    </div>
+
+    <script>
+        const rowY = { fp: 58, q: 168, deq: 278 };
+        const stageLeftPct = 14;
+        const stageRightPct = 98;
+        const pointCount = 32;
+
+        const elements = {
+            form: document.getElementById("controlForm"),
+            distribution: document.getElementById("distribution"),
+            rangeMin: document.getElementById("rangeMin"),
+            rangeMax: document.getElementById("rangeMax"),
+            rangeMinOut: document.getElementById("rangeMinOut"),
+            rangeMaxOut: document.getElementById("rangeMaxOut"),
+            speed: document.getElementById("speed"),
+            speedOut: document.getElementById("speedOut"),
+            animateBtn: document.getElementById("animateBtn"),
+            resetBtn: document.getElementById("resetBtn"),
+            modeNote: document.getElementById("modeNote"),
+            stageCaption: document.getElementById("stageCaption"),
+            pointLayer: document.getElementById("pointLayer"),
+            errorSvg: document.getElementById("errorSvg"),
+            binStrip: document.getElementById("binStrip"),
+            tickRow: document.getElementById("tickRow"),
+            rangeBand: document.getElementById("rangeBand"),
+            table: document.getElementById("valueTable"),
+            metrics: {
+                scale: document.getElementById("metricScale"),
+                zero: document.getElementById("metricZero"),
+                mse: document.getElementById("metricMse"),
+                mae: document.getElementById("metricMae"),
+                sqnr: document.getElementById("metricSqnr"),
+                clipped: document.getElementById("metricClipped"),
+                clipPct: document.getElementById("metricClipPct")
+            },
+            fp32Cells: document.getElementById("fp32Cells"),
+            int8Cells: document.getElementById("int8Cells")
+        };
+
+        const state = {
+            values: [],
+            results: [],
+            activeIndex: -1,
+            activePhase: "idle",
+            timers: [],
+            memoryTick: 0
+        };
+
+        function seededRandom(seed) {
+            let value = seed % 2147483647;
+            return function next() {
+                value = value * 16807 % 2147483647;
+                return (value - 1) / 2147483646;
+            };
+        }
+
+        function gaussian(rand) {
+            const u1 = Math.max(rand(), 0.0001);
+            const u2 = rand();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+
+        function generateValues(kind) {
+            const rand = seededRandom(kind === "normal" ? 17 : kind === "wide" ? 29 : 43);
+            const values = [];
+            for (let i = 0; i < pointCount; i += 1) {
+                let value = gaussian(rand);
+                if (kind === "normal") {
+                    value = value * 0.78 + Math.sin(i * 0.42) * 0.16;
+                } else if (kind === "wide") {
+                    value = value * 1.45 + Math.sin(i * 0.36) * 0.45;
+                } else {
+                    value = value * 0.58 + Math.sin(i * 0.55) * 0.25;
+                    if (i % 9 === 0) value += i % 18 === 0 ? 3.2 : -3.0;
+                    if (i === 23) value = 3.75;
+                }
+                values.push(Number(value.toFixed(3)));
+            }
+            return values;
+        }
+
+        function getSettings() {
+            const bits = Number(document.querySelector("input[name='bits']:checked").value);
+            const mode = document.querySelector("input[name='mode']:checked").value;
+            let min = Number(elements.rangeMin.value);
+            let max = Number(elements.rangeMax.value);
+
+            if (min >= max) {
+                if (document.activeElement === elements.rangeMin) {
+                    max = Math.min(4, min + 0.1);
+                    elements.rangeMax.value = max.toFixed(1);
+                } else {
+                    min = Math.max(-4, max - 0.1);
+                    elements.rangeMin.value = min.toFixed(1);
+                }
+            }
+
+            return {
+                bits,
+                mode,
+                distribution: elements.distribution.value,
+                min,
+                max,
+                speed: Number(elements.speed.value)
+            };
+        }
+
+        function getQuantParams(settings) {
+            if (settings.mode === "symmetric") {
+                const limit = Math.max(Math.abs(settings.min), Math.abs(settings.max), 0.1);
+                const qMax = Math.pow(2, settings.bits - 1) - 1;
+                const qMin = -qMax;
+                return {
+                    qMin,
+                    qMax,
+                    xMin: -limit,
+                    xMax: limit,
+                    scale: (2 * limit) / (qMax - qMin),
+                    zeroPoint: 0
+                };
+            }
+
+            const qMin = 0;
+            const qMax = Math.pow(2, settings.bits) - 1;
+            const scale = (settings.max - settings.min) / (qMax - qMin);
+            const zeroPoint = clamp(Math.round(qMin - settings.min / scale), qMin, qMax);
+            return {
+                qMin,
+                qMax,
+                xMin: settings.min,
+                xMax: settings.max,
+                scale,
+                zeroPoint
+            };
+        }
+
+        function clamp(value, min, max) {
+            return Math.min(max, Math.max(min, value));
+        }
+
+        function quantizeValue(x, params) {
+            const rawQ = Math.round(x / params.scale + params.zeroPoint);
+            const q = clamp(rawQ, params.qMin, params.qMax);
+            const xHat = params.scale * (q - params.zeroPoint);
+            return {
+                x,
+                rawQ,
+                q,
+                xHat,
+                error: x - xHat,
+                clipped: rawQ !== q || x < params.xMin || x > params.xMax
+            };
+        }
+
+        function computeResults(settings) {
+            const params = getQuantParams(settings);
+            const results = state.values.map((value) => quantizeValue(value, params));
+            const errors = results.map((item) => item.error);
+            const mse = errors.reduce((sum, error) => sum + error * error, 0) / errors.length;
+            const mae = errors.reduce((sum, error) => sum + Math.abs(error), 0) / errors.length;
+            const signalPower = results.reduce((sum, item) => sum + item.x * item.x, 0) / results.length;
+            const sqnr = mse === 0 ? Infinity : 10 * Math.log10(signalPower / mse);
+            const clipped = results.filter((item) => item.clipped).length;
+            return { params, results, mse, mae, sqnr, clipped };
+        }
+
+        function pctFromValue(value, domain) {
+            const ratio = (value - domain.min) / (domain.max - domain.min);
+            return stageLeftPct + clamp(ratio, 0, 1) * (stageRightPct - stageLeftPct);
+        }
+
+        function pctFromQ(q, params) {
+            const ratio = (q - params.qMin) / (params.qMax - params.qMin || 1);
+            return stageLeftPct + clamp(ratio, 0, 1) * (stageRightPct - stageLeftPct);
+        }
+
+        function getDomain(results, params) {
+            const allValues = results.flatMap((item) => [item.x, item.xHat, params.xMin, params.xMax]);
+            const min = Math.min(...allValues);
+            const max = Math.max(...allValues);
+            const pad = Math.max(0.25, (max - min) * 0.14);
+            return { min: min - pad, max: max + pad };
+        }
+
+        function formatNumber(value, digits = 3) {
+            if (!Number.isFinite(value)) return "inf";
+            const abs = Math.abs(value);
+            if (abs !== 0 && abs < 0.001) return value.toExponential(2);
+            return value.toFixed(digits);
+        }
+
+        function updateOutputs(settings) {
+            elements.rangeMinOut.textContent = settings.min.toFixed(1);
+            elements.rangeMaxOut.textContent = settings.max.toFixed(1);
+            elements.speedOut.textContent = `${settings.speed.toFixed(1)}x`;
+        }
+
+        function renderMetrics(data) {
+            const clipPct = data.clipped / data.results.length * 100;
+            elements.metrics.scale.textContent = formatNumber(data.params.scale, 4);
+            elements.metrics.zero.textContent = String(data.params.zeroPoint);
+            elements.metrics.mse.textContent = formatNumber(data.mse, 5);
+            elements.metrics.mae.textContent = formatNumber(data.mae, 4);
+            elements.metrics.sqnr.textContent = `${formatNumber(data.sqnr, 2)} dB`;
+            elements.metrics.clipped.textContent = `${data.clipped} / ${data.results.length}`;
+            elements.metrics.clipPct.textContent = `${clipPct.toFixed(1)}%`;
+        }
+
+        function renderModeNote(settings, params) {
+            if (settings.mode === "symmetric") {
+                elements.modeNote.textContent = `Symmetric ${settings.bits}-bit uses signed q range [${params.qMin}, ${params.qMax}], zero_point = 0, and an effective range [${formatNumber(params.xMin, 2)}, ${formatNumber(params.xMax, 2)}].`;
+            } else {
+                elements.modeNote.textContent = `Asymmetric ${settings.bits}-bit uses unsigned q range [${params.qMin}, ${params.qMax}], zero_point = ${params.zeroPoint}, and the selected range [${formatNumber(params.xMin, 2)}, ${formatNumber(params.xMax, 2)}].`;
+            }
+        }
+
+        function renderBins(params, activeResult) {
+            const totalBins = params.qMax - params.qMin + 1;
+            const visibleBins = Math.min(totalBins, 32);
+            const activeBucket = activeResult
+                ? Math.floor((activeResult.q - params.qMin) / totalBins * visibleBins)
+                : -1;
+
+            elements.binStrip.style.gridTemplateColumns = `repeat(${visibleBins}, minmax(0, 1fr))`;
+            elements.binStrip.innerHTML = "";
+            for (let i = 0; i < visibleBins; i += 1) {
+                const bin = document.createElement("span");
+                bin.className = `bin${i === activeBucket ? " active" : ""}`;
+                elements.binStrip.appendChild(bin);
+            }
+        }
+
+        function renderTicks(domain, params) {
+            elements.tickRow.innerHTML = `
+                <span>${formatNumber(domain.min, 2)}</span>
+                <span>q range [${params.qMin}, ${params.qMax}]</span>
+                <span>${formatNumber(domain.max, 2)}</span>
+            `;
+        }
+
+        function renderRangeBand(domain, params) {
+            const left = pctFromValue(params.xMin, domain);
+            const right = pctFromValue(params.xMax, domain);
+            elements.rangeBand.style.left = `${left}%`;
+            elements.rangeBand.style.width = `${Math.max(1.5, right - left)}%`;
+        }
+
+        function getPointPosition(item, params, domain, index) {
+            if (index < state.activeIndex) {
+                return { left: pctFromValue(item.xHat, domain), top: rowY.deq };
+            }
+            if (index === state.activeIndex && state.activePhase === "q") {
+                return { left: pctFromQ(item.q, params), top: rowY.q };
+            }
+            if (index === state.activeIndex && state.activePhase === "deq") {
+                return { left: pctFromValue(item.xHat, domain), top: rowY.deq };
+            }
+            return { left: pctFromValue(item.x, domain), top: rowY.fp };
+        }
+
+        function renderPoints(data) {
+            const domain = getDomain(data.results, data.params);
+            const activeResult = state.activeIndex >= 0 ? data.results[state.activeIndex] : null;
+
+            renderRangeBand(domain, data.params);
+            renderTicks(domain, data.params);
+            renderBins(data.params, activeResult);
+
+            elements.pointLayer.innerHTML = "";
+            data.results.forEach((item, index) => {
+                const point = document.createElement("span");
+                const position = getPointPosition(item, data.params, domain, index);
+                const classes = ["point"];
+                if (index < state.activeIndex) classes.push("done");
+                if (index === state.activeIndex) classes.push("active");
+                if (item.clipped) classes.push("clipped");
+                point.className = classes.join(" ");
+                point.style.left = `${position.left}%`;
+                point.style.top = `${position.top}px`;
+                point.dataset.label = `x=${formatNumber(item.x, 2)}, q=${item.q}`;
+                elements.pointLayer.appendChild(point);
+            });
+
+            renderErrorLines(data, domain);
+        }
+
+        function renderErrorLines(data, domain) {
+            elements.errorSvg.innerHTML = "";
+            data.results.forEach((item, index) => {
+                const shouldDraw = index < state.activeIndex || (index === state.activeIndex && state.activePhase === "deq");
+                if (!shouldDraw) return;
+
+                const x1 = pctFromValue(item.xHat, domain);
+                const x2 = pctFromValue(item.x, domain);
+                const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                line.setAttribute("x1", x1);
+                line.setAttribute("x2", x2);
+                line.setAttribute("y1", rowY.deq);
+                line.setAttribute("y2", rowY.deq);
+                line.setAttribute("stroke", item.clipped ? "#dc2626" : "#f59e0b");
+                line.setAttribute("stroke-width", item.clipped ? "1.4" : "1");
+                line.setAttribute("stroke-linecap", "round");
+                line.setAttribute("opacity", item.clipped ? "0.82" : "0.62");
+                elements.errorSvg.appendChild(line);
+            });
+        }
+
+        function renderTable(data) {
+            elements.table.innerHTML = "";
+            data.results.forEach((item, index) => {
+                const row = document.createElement("tr");
+                if (index === state.activeIndex) row.classList.add("active-row");
+                if (item.clipped) row.classList.add("clipped-row");
+                row.innerHTML = `
+                    <td>${formatNumber(item.x, 3)}</td>
+                    <td>${item.q}</td>
+                    <td>${formatNumber(item.xHat, 3)}</td>
+                    <td>${formatNumber(item.error, 3)}</td>
+                `;
+                elements.table.appendChild(row);
+            });
+        }
+
+        function renderMemoryCells() {
+            if (!elements.fp32Cells.children.length) {
+                for (let i = 0; i < 8; i += 1) {
+                    const cell = document.createElement("span");
+                    cell.className = "cell fp32";
+                    elements.fp32Cells.appendChild(cell);
+                }
+                for (let i = 0; i < 32; i += 1) {
+                    const cell = document.createElement("span");
+                    cell.className = "cell int8";
+                    elements.int8Cells.appendChild(cell);
+                }
+            }
+
+            Array.from(elements.fp32Cells.children).forEach((cell, index) => {
+                cell.classList.toggle("hot", index === state.memoryTick % 8);
+            });
+            Array.from(elements.int8Cells.children).forEach((cell, index) => {
+                const wave = state.memoryTick % 32;
+                cell.classList.toggle("hot", index >= wave && index < wave + 4);
+            });
+            state.memoryTick = (state.memoryTick + 1) % 32;
+        }
+
+        function renderAll() {
+            const settings = getSettings();
+            updateOutputs(settings);
+            const data = computeResults(settings);
+            state.results = data.results;
+            renderMetrics(data);
+            renderModeNote(settings, data.params);
+            renderPoints(data);
+            renderTable(data);
+            return data;
+        }
+
+        function clearTimers() {
+            state.timers.forEach((timer) => window.clearTimeout(timer));
+            state.timers = [];
+        }
+
+        function animateQuantization() {
+            clearTimers();
+            state.activeIndex = -1;
+            state.activePhase = "idle";
+            const data = renderAll();
+            const stepMs = Math.round(760 / getSettings().speed);
+
+            elements.stageCaption.textContent = "Animating: each activation snaps to an integer q, then returns as x_hat.";
+            elements.animateBtn.disabled = true;
+
+            function schedule(callback, delay) {
+                const timer = window.setTimeout(callback, delay);
+                state.timers.push(timer);
+            }
+
+            function runIndex(index) {
+                if (index >= data.results.length) {
+                    state.activeIndex = data.results.length;
+                    state.activePhase = "done";
+                    renderAll();
+                    elements.stageCaption.textContent = "Done. Red dots and red error bars mark values affected by clipping.";
+                    elements.animateBtn.disabled = false;
+                    return;
+                }
+
+                state.activeIndex = index;
+                state.activePhase = "q";
+                renderAll();
+                elements.stageCaption.textContent = `Value ${index + 1}: FP32 ${formatNumber(data.results[index].x, 3)} maps to q = ${data.results[index].q}.`;
+
+                schedule(() => {
+                    state.activePhase = "deq";
+                    renderAll();
+                    elements.stageCaption.textContent = `Value ${index + 1}: dequantized x_hat = ${formatNumber(data.results[index].xHat, 3)}, error = ${formatNumber(data.results[index].error, 3)}.`;
+                }, stepMs);
+
+                schedule(() => runIndex(index + 1), stepMs * 1.75);
+            }
+
+            schedule(() => runIndex(0), 120);
+        }
+
+        function resetControls() {
+            clearTimers();
+            document.querySelector("input[name='bits'][value='8']").checked = true;
+            document.querySelector("input[name='mode'][value='asymmetric']").checked = true;
+            elements.distribution.value = "normal";
+            elements.rangeMin.value = "-2";
+            elements.rangeMax.value = "2";
+            elements.speed.value = "1.2";
+            state.values = generateValues("normal");
+            state.currentDistribution = "normal";
+            state.activeIndex = -1;
+            state.activePhase = "idle";
+            elements.animateBtn.disabled = false;
+            elements.stageCaption.textContent = "Ready. Press Animate Quantization to step through the values.";
+            renderAll();
+        }
+
+        function handleControlChange() {
+            clearTimers();
+            const settings = getSettings();
+            if (state.values.length === 0 || settings.distribution !== state.currentDistribution) {
+                state.values = generateValues(settings.distribution);
+                state.currentDistribution = settings.distribution;
+            }
+            state.activeIndex = -1;
+            state.activePhase = "idle";
+            elements.animateBtn.disabled = false;
+            elements.stageCaption.textContent = "Updated. Press Animate Quantization to see the new mapping.";
+            renderAll();
+        }
+
+        elements.form.addEventListener("input", handleControlChange);
+        elements.form.addEventListener("change", handleControlChange);
+        elements.animateBtn.addEventListener("click", animateQuantization);
+        elements.resetBtn.addEventListener("click", resetControls);
+        window.addEventListener("resize", renderAll);
+
+        window.setInterval(() => {
+            renderMemoryCells();
+        }, 520);
+
+        state.values = generateValues("normal");
+        state.currentDistribution = "normal";
+        resetControls();
+        renderMemoryCells();
+    </script>
+</body>
+</html>
