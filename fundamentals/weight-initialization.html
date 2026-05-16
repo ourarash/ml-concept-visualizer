@@ -1,0 +1,784 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #52 by Naga Vamsi Ramana Dinavahi (@vamsiramana): Add Interactive Weight Initialization & Hardware Quantization Visualizer ⁠. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Weight Initialization - EE508 Interactive Visualizer</title>
+<style>
+  /* ==========================================================================
+     CSS VARIABLES & BASE STYLES
+     ========================================================================== */
+  :root {
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3250;
+    --accent: #6c63ff;     /* Purple/Indigo */
+    --accent2: #00d4aa;    /* Teal/Green */
+    --accent3: #ff6b6b;    /* Red for Warnings/Exploding */
+    --accent4: #ffd166;    /* Yellow/Amber for Highlights */
+    --text: #e8eaf6;
+    --text-dim: #8b90b8;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    line-height: 1.6;
+  }
+
+  /* ==========================================================================
+     HEADER & NAVIGATION
+     ========================================================================== */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+  }
+
+  .header-icon {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+
+  header h1 { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+  header p { color: var(--text-dim); font-size: 0.85rem; margin-top: 2px; }
+
+  .badge {
+    margin-left: auto;
+    background: rgba(108,99,255,0.15);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .tabs {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    padding: 14px 20px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    font-weight: 500;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  
+  .tab-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.72rem; font-weight: 700;
+  }
+  .tab.active .tab-num { background: var(--accent); color: white; }
+
+  /* ==========================================================================
+     LAYOUT & CARDS
+     ========================================================================== */
+  .content { max-width: 1080px; margin: 0 auto; padding: 32px 24px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; animation: fadeUp 0.4s ease both; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-header { margin-bottom: 24px; }
+  .section-header h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
+  .section-header p { color: var(--text-dim); font-size: 0.95rem; }
+
+  .highlight { color: var(--accent); font-weight: 600; }
+  .highlight2 { color: var(--accent2); font-weight: 600; }
+  .highlight3 { color: var(--accent3); font-weight: 600; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+  }
+  .card h3 { font-size: 1.1rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+  .insight-box {
+    background: rgba(108,99,255,0.08);
+    border: 1px solid rgba(108,99,255,0.3);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 0.92rem;
+  }
+  .insight-box strong { color: var(--accent); }
+
+  /* ==========================================================================
+     MATH FORMATTING (New)
+     ========================================================================== */
+  .math-eq { display: inline-flex; align-items: center; gap: 8px; justify-content: center; }
+  .math-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; font-size: 0.95em; margin: 0 4px; }
+  .math-num { border-bottom: 3px solid currentColor; padding: 0 6px 2px; line-height: 1.1; }
+  .math-den { padding: 2px 6px 0; line-height: 1.1; }
+  .math-var { font-family: 'Georgia', 'Times New Roman', serif; font-style: italic; font-weight: normal; }
+  .math-func { font-family: 'Georgia', 'Times New Roman', serif; font-style: normal; font-weight: normal; }
+
+  /* ==========================================================================
+     TAB 1: THE PROBLEM
+     ========================================================================== */
+  .problem-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px; }
+  .problem-card { background: var(--surface2); border-radius: 12px; padding: 20px; border: 1px solid var(--border); }
+  .problem-card h4 { font-size: 1.05rem; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
+  .problem-card p { font-size: 0.88rem; color: var(--text-dim); margin-bottom: 16px; }
+  
+  .code-block {
+    background: rgba(0,0,0,0.3); padding: 12px 16px; border-radius: 8px;
+    font-family: 'Courier New', monospace; font-size: 0.85rem; color: var(--accent4);
+    border: 1px solid var(--border);
+  }
+
+  /* ==========================================================================
+     TAB 2: THE MATH
+     ========================================================================== */
+  .math-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; }
+  .math-box {
+    background: var(--surface2); border-radius: 12px; padding: 24px;
+    text-align: center; border: 1px solid var(--border); position: relative;
+    overflow: hidden;
+  }
+  .math-box::before {
+    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+  }
+  .math-box.xavier::before { background: var(--accent); }
+  .math-box.he::before { background: var(--accent2); }
+  
+  .math-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
+  .math-formula { font-size: 1.8rem; margin: 24px 0; font-weight: 600; }
+  .math-desc { font-size: 0.85rem; color: var(--text-dim); line-height: 1.5; }
+
+  /* ==========================================================================
+     TAB 3: INTERACTIVE HISTOGRAMS
+     ========================================================================== */
+  .controls {
+    display: flex; gap: 16px; align-items: flex-end; flex-wrap: wrap;
+    background: var(--surface2); padding: 20px; border-radius: 12px; border: 1px solid var(--border);
+    margin-bottom: 24px;
+  }
+  .control-group { display: flex; flex-direction: column; gap: 6px; flex: 1; min-width: 150px; }
+  .control-group label { font-size: 0.8rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.05em; }
+  .control-select {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 10px 14px; border-radius: 8px; font-size: 0.95rem; outline: none;
+    cursor: pointer; transition: border-color 0.2s;
+  }
+  .control-select:focus { border-color: var(--accent); }
+  
+  .run-btn {
+    background: var(--accent); color: white; border: none; padding: 12px 24px;
+    border-radius: 8px; font-size: 0.95rem; font-weight: 600; cursor: pointer;
+    transition: background 0.2s, transform 0.1s; height: 42px; display: flex; align-items: center; gap: 8px;
+  }
+  .run-btn:hover { background: #5a52d6; }
+  .run-btn:active { transform: scale(0.98); }
+
+  .histograms-container {
+    display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px;
+  }
+  .histogram-wrapper {
+    background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 10px; padding: 12px; display: flex; flex-direction: column; align-items: center;
+  }
+  .hist-title { font-size: 0.9rem; font-weight: 700; margin-bottom: 4px; color: var(--text); }
+  .hist-stats { font-size: 0.75rem; font-family: monospace; color: var(--text-dim); margin-bottom: 12px; height: 16px; }
+  canvas.hist-canvas { width: 100%; height: 180px; border-bottom: 1px solid var(--border); }
+  .hist-axis { font-size: 0.65rem; color: var(--text-dim); display: flex; justify-content: space-between; width: 100%; margin-top: 4px; }
+
+  /* ==========================================================================
+     TAB 4: HARDWARE IMPACT
+     ========================================================================== */
+  .hw-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 24px; }
+  .hw-card {
+    background: var(--surface2); border-radius: 12px; padding: 24px;
+    border: 1px solid var(--border); display: flex; flex-direction: column;
+  }
+  .hw-icon { font-size: 2rem; margin-bottom: 12px; }
+  .hw-title { font-size: 1.1rem; font-weight: 700; margin-bottom: 8px; }
+  .hw-desc { font-size: 0.9rem; color: var(--text-dim); flex: 1; }
+
+  .dynamic-range {
+    margin-top: 24px; background: var(--bg); padding: 16px; border-radius: 8px;
+    border: 1px solid var(--border); position: relative;
+  }
+  .dr-bar {
+    height: 12px; background: linear-gradient(90deg, var(--accent3) 0%, var(--accent2) 20%, var(--accent2) 80%, var(--accent3) 100%);
+    border-radius: 6px; margin: 16px 0; position: relative;
+  }
+  .dr-marker {
+    position: absolute; top: -20px; transform: translateX(-50%);
+    font-size: 0.75rem; font-family: monospace; color: var(--text-dim); text-align: center;
+  }
+  .dr-marker::after {
+    content: ''; position: absolute; top: 18px; left: 50%; transform: translateX(-50%);
+    width: 2px; height: 16px; background: var(--text-dim);
+  }
+  .dr-marker.center { left: 50%; }
+  .dr-marker.left { left: 20%; }
+  .dr-marker.right { left: 80%; }
+  
+  .dr-labels { display: flex; justify-content: space-between; font-size: 0.75rem; font-weight: 600; }
+  .dr-labels span:first-child, .dr-labels span:last-child { color: var(--accent3); }
+  .dr-labels span:nth-child(2) { color: var(--accent2); }
+
+  /* Responsive Design */
+  @media(max-width: 900px) {
+    .histograms-container { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  }
+  @media(max-width: 640px) {
+    .problem-grid { grid-template-columns: 1fr; }
+    .content { padding: 20px 16px; }
+    header { padding: 16px; }
+    .tabs { padding: 0 16px; }
+    .controls { flex-direction: column; align-items: stretch; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<header>
+  <div class="header-icon">&#x2696;</div>
+  <div>
+    <h1>Weight Initialization Visualizer</h1>
+    <p>EE508: Hardware Foundations for ML &mdash; Exploding Gradients & Quantization</p>
+  </div>
+  <div class="badge">ML Foundations</div>
+</header>
+
+<!-- Navigation Tabs -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab(0)"><span class="tab-num">1</span> The Problem</button>
+  <button class="tab" onclick="switchTab(1)"><span class="tab-num">2</span> The Math</button>
+  <button class="tab" onclick="switchTab(2)"><span class="tab-num">3</span> Activation Histograms</button>
+  <button class="tab" onclick="switchTab(3)"><span class="tab-num">4</span> Hardware & Quantization</button>
+</div>
+
+<!-- Main Content Area -->
+<div class="content">
+
+  <!-- ==========================================
+       TAB 1: THE PROBLEM
+       ========================================== -->
+  <div class="tab-panel active" id="panel-0">
+    <div class="section-header">
+      <h2>&#x1F6A8; Vanishing & Exploding Gradients</h2>
+      <p>Deep neural networks are effectively long chains of matrix multiplications. If we initialize the weight matrices poorly, the activations will either shrink to zero or grow to infinity as they pass through the layers.</p>
+    </div>
+    
+    <div class="problem-grid">
+      <div class="problem-card" style="border-color: rgba(255, 107, 107, 0.4);">
+        <h4 style="color: var(--accent3);">📉 Vanishing Activations (Too Small)</h4>
+        <p>If the initialized weights are too small (e.g., variance &lt; 1/N), multiplying inputs by weights repeatedly shrinks the values. By Layer 5, all activations collapse to 0.</p>
+        <div class="code-block">
+          L1_Var = 1.0<br>
+          L2_Var = 0.25<br>
+          ...<br>
+          L5_Var = 0.00001 (Gradient signal dies)
+        </div>
+      </div>
+      
+      <div class="problem-card" style="border-color: rgba(255, 107, 107, 0.4);">
+        <h4 style="color: var(--accent3);">🌋 Exploding Activations (Too Big)</h4>
+        <p>If weights are too large (e.g., variance &gt; 1/N), the values multiply exponentially. By Layer 5, activations shoot to infinity, causing numerical overflow.</p>
+        <div class="code-block">
+          L1_Var = 1.0<br>
+          L2_Var = 4.0<br>
+          ...<br>
+          L5_Var = 1024.0 (Overflow to NaN)
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>&#x1F3AF; The Goal of Initialization</h3>
+      <p style="color: var(--text-dim); margin-bottom: 16px;">We want the variance of the activations to remain <strong>constant</strong> across all layers.</p>
+      
+      <!-- Styled Target Variance Formula -->
+      <div class="math-eq" style="font-size: 1.15rem; color: var(--accent4); background: rgba(0,0,0,0.2); padding: 14px; border-radius: 8px; margin-bottom: 16px; border: 1px solid var(--border);">
+        <span class="math-func">Var</span>(<span class="math-var">X</span>) &asymp; <span class="math-func">Var</span>(<span class="math-var">H</span><sub>1</sub>) &asymp; ... &asymp; <span class="math-func">Var</span>(<span class="math-var">H</span><sub>L</sub>)
+      </div>
+
+      <p style="color: var(--text-dim);">If variance is preserved during the forward pass, gradients will be preserved during the backward pass, allowing the network to train efficiently without dying or overflowing.</p>
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 2: THE MATH (Xavier & He)
+       ========================================== -->
+  <div class="tab-panel" id="panel-1">
+    <div class="section-header">
+      <h2>&#x1F4D0; The Mathematics of Stability</h2>
+      <p>How do we guarantee variance stays constant? By scaling the random weights based on the number of input connections (fan-in, denoted as <span class="highlight">N</span>).</p>
+    </div>
+    
+    <div class="math-grid">
+      <!-- Xavier Formula -->
+      <div class="math-box xavier">
+        <div class="math-title" style="color: var(--accent);">Xavier (Glorot) Initialization</div>
+        <p style="font-size: 0.8rem; color: var(--text-dim);">Best for Tanh / Sigmoid / Linear</p>
+        
+        <div class="math-formula" style="color: var(--accent);">
+          <div class="math-eq">
+            <span><span class="math-func">Var</span>(<span class="math-var">W</span>) = </span>
+            <div class="math-frac">
+              <div class="math-num">1</div>
+              <div class="math-den"><span class="math-var">N</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="math-desc">
+          Draw weights from a distribution where the variance is exactly 1 / <span class="math-var">N</span>. Because we sum <span class="math-var">N</span> inputs, multiplying by 1 / <span class="math-var">N</span> keeps the total output variance perfectly equal to 1.0.
+        </div>
+      </div>
+      
+      <!-- He Formula -->
+      <div class="math-box he">
+        <div class="math-title" style="color: var(--accent2);">He Initialization</div>
+        <p style="font-size: 0.8rem; color: var(--text-dim);">Best for ReLU / Leaky ReLU</p>
+        
+        <div class="math-formula" style="color: var(--accent2);">
+          <div class="math-eq">
+            <span><span class="math-func">Var</span>(<span class="math-var">W</span>) = </span>
+            <div class="math-frac">
+              <div class="math-num">2</div>
+              <div class="math-den"><span class="math-var">N</span></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="math-desc">
+          ReLU sets exactly half of the activations to 0, cutting the forward variance in half. To compensate, we multiply the weight variance by <strong>2</strong> to restore balance.
+        </div>
+      </div>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> If you use Xavier initialization with ReLU, the variance will slowly halve at every layer, eventually vanishing. You must pair the initialization method with the correct activation function!
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 3: ACTIVATION HISTOGRAMS (LIVE SIMULATION)
+       ========================================== -->
+  <div class="tab-panel" id="panel-2">
+    <div class="section-header">
+      <h2>&#x1F4CA; Live Forward Pass Simulation</h2>
+      <p>Configure the network and click <strong>Run Forward Pass</strong> to simulate 5,000 data points passing through 5 layers. Watch how the distribution of activations behaves.</p>
+    </div>
+    
+    <div class="controls">
+      <div class="control-group">
+        <label for="init-select">Weight Initialization</label>
+        <select id="init-select" class="control-select">
+          <option value="random_small">Random Normal (Std = 0.05) - Too Small</option>
+          <option value="random_large">Random Normal (Std = 0.25) - Too Large</option>
+          <option value="xavier" selected>Xavier Initialization (Std = &radic;(1/N))</option>
+          <option value="he">He Initialization (Std = &radic;(2/N))</option>
+        </select>
+      </div>
+      
+      <div class="control-group">
+        <label for="act-select">Activation Function</label>
+        <select id="act-select" class="control-select">
+          <option value="linear" selected>Linear (No activation)</option>
+          <option value="tanh">Tanh (S-curve)</option>
+          <option value="relu">ReLU (Rectified Linear Unit)</option>
+        </select>
+      </div>
+      
+      <button class="run-btn" onclick="runSimulation()">
+        <span style="font-size: 1.2rem;">&#x25B6;</span> Run Forward Pass
+      </button>
+    </div>
+    
+    <div class="card" style="padding: 16px;">
+      <div class="histograms-container">
+        <!-- Layer 1 -->
+        <div class="histogram-wrapper">
+          <div class="hist-title">Layer 1</div>
+          <div class="hist-stats" id="stat-l1">Std: --</div>
+          <canvas id="canvas-l1" class="hist-canvas"></canvas>
+          <div class="hist-axis"><span>-3</span><span>0</span><span>3</span></div>
+        </div>
+        <!-- Layer 2 -->
+        <div class="histogram-wrapper">
+          <div class="hist-title">Layer 2</div>
+          <div class="hist-stats" id="stat-l2">Std: --</div>
+          <canvas id="canvas-l2" class="hist-canvas"></canvas>
+          <div class="hist-axis"><span>-3</span><span>0</span><span>3</span></div>
+        </div>
+        <!-- Layer 3 -->
+        <div class="histogram-wrapper">
+          <div class="hist-title">Layer 3</div>
+          <div class="hist-stats" id="stat-l3">Std: --</div>
+          <canvas id="canvas-l3" class="hist-canvas"></canvas>
+          <div class="hist-axis"><span>-3</span><span>0</span><span>3</span></div>
+        </div>
+        <!-- Layer 4 -->
+        <div class="histogram-wrapper">
+          <div class="hist-title">Layer 4</div>
+          <div class="hist-stats" id="stat-l4">Std: --</div>
+          <canvas id="canvas-l4" class="hist-canvas"></canvas>
+          <div class="hist-axis"><span>-3</span><span>0</span><span>3</span></div>
+        </div>
+        <!-- Layer 5 -->
+        <div class="histogram-wrapper">
+          <div class="hist-title" style="color: var(--accent2);">Layer 5 (Output)</div>
+          <div class="hist-stats" id="stat-l5" style="color: var(--accent2);">Std: --</div>
+          <canvas id="canvas-l5" class="hist-canvas" style="border-bottom-color: var(--accent2);"></canvas>
+          <div class="hist-axis"><span>-3</span><span>0</span><span>3</span></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="insight-box" id="sim-feedback">
+      <strong>&#x1F4A1; Simulation Ready:</strong> Choose your settings above and hit run. Try <strong>Xavier + Linear</strong> vs <strong>Xavier + ReLU</strong> to see why He initialization was invented!
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 4: HARDWARE IMPACT & QUANTIZATION
+       ========================================== -->
+  <div class="tab-panel" id="panel-3">
+    <div class="section-header">
+      <h2>&#x26A1; Hardware Systems & Quantization Impact</h2>
+      <p>Weight initialization is not just an algorithmic training trick. For EE508 students, it is the <span class="highlight">first line of defense</span> for hardware efficiency and lower precision quantization.</p>
+    </div>
+    
+    <div class="hw-grid">
+      <div class="hw-card" style="border-top: 4px solid var(--accent3);">
+        <div class="hw-icon">&#x1F4A5;</div>
+        <div class="hw-title">FP16 Overflow (Exploding)</div>
+        <div class="hw-desc">
+          Modern GPUs accelerate training using FP16 (Half Precision) or FP8 Tensor Cores. FP16 has a maximum representable value of <strong>~65,504</strong>. If poor initialization causes activations to explode, the hardware instantly overflows to <code>NaN</code>, permanently halting training.
+        </div>
+      </div>
+      
+      <div class="hw-card" style="border-top: 4px solid var(--text-dim);">
+        <div class="hw-icon">&#x269B;&#xFE0F;</div>
+        <div class="hw-title">INT8 Underflow (Vanishing)</div>
+        <div class="hw-desc">
+          When deploying to edge devices, we quantize weights and activations to INT8 (range [-128, 127]). If activations vanish to near-zero (e.g., std = 0.001), quantizing them to integers destroys all signal, collapsing the entire network output to a dead zero state.
+        </div>
+      </div>
+      
+      <div class="hw-card" style="border-top: 4px solid var(--accent2);">
+        <div class="hw-icon">&#x1F50B;</div>
+        <div class="hw-title">Wasted Compute Epochs</div>
+        <div class="hw-desc">
+          If gradients are unstable, the network requires orders of magnitude more epochs to converge (or requires smaller learning rates). In a cloud setting, wasting 50 epochs due to bad initialization equates to thousands of dollars in wasted GPU power and memory bandwidth.
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F3DF; Hardware Dynamic Range</h3>
+      <p style="color: var(--text-dim); font-size: 0.9rem;">Proper initialization (Xavier/He) perfectly bounds activations within the <strong>safe representable range</strong> of the hardware format, allowing safe scale-factors for INT8 quantization without clipping or underflow.</p>
+      
+      <div class="dynamic-range">
+        <div class="dr-marker left">Underflow</div>
+        <div class="dr-marker center">Ideal Range (Std &asymp; 1.0)</div>
+        <div class="dr-marker right">Overflow (NaN)</div>
+        
+        <div class="dr-bar"></div>
+        
+        <div class="dr-labels">
+          <span>&lt; 0.001</span>
+          <span>[-3.0, 3.0]</span>
+          <span>&gt; 65,504 (FP16 Max)</span>
+        </div>
+      </div>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> Before you can even attempt advanced EE508 techniques like Post-Training Quantization (PTQ) or Knowledge Distillation, the base model must be numerically stable. Stable variance = Hardware friendly ranges.
+    </div>
+  </div>
+
+</div>
+
+<!-- ==========================================================================
+     JAVASCRIPT LOGIC
+     ========================================================================== -->
+<script>
+  // --- Tab Switching Logic ---
+  function switchTab(index) {
+    document.querySelectorAll('.tab').forEach((t, j) => t.classList.toggle('active', index === j));
+    document.querySelectorAll('.tab-panel').forEach((p, j) => p.classList.toggle('active', index === j));
+    
+    // Auto-run simulation when opening the histograms tab for the first time
+    if (index === 2 && !window.simulationRunOnce) {
+      setTimeout(runSimulation, 200);
+      window.simulationRunOnce = true;
+    }
+  }
+
+  // --- Neural Network Simulation Math ---
+  const NUM_SAMPLES = 4000;
+  const FAN_IN = 100;
+  let animationTimeouts = []; // Add this to track and clear timeouts
+  
+  // Box-Muller transform for normal distribution N(0,1)
+  function generateNormal() {
+    let u = 0, v = 0;
+    while(u === 0) u = Math.random(); // Converting [0,1) to (0,1)
+    while(v === 0) v = Math.random();
+    return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+  }
+
+  function runSimulation() {
+    // Clear any currently running animation timeouts to prevent glitching on double-clicks
+    animationTimeouts.forEach(clearTimeout);
+    animationTimeouts = [];
+
+    const initType = document.getElementById('init-select').value;
+    const actType = document.getElementById('act-select').value;
+    
+    // Determine Weight Standard Deviation
+    let weightStd = 1.0;
+    if (initType === 'random_small') weightStd = 0.05;          // Variance = 0.0025
+    else if (initType === 'random_large') weightStd = 0.25;     // Variance = 0.0625
+    else if (initType === 'xavier') weightStd = Math.sqrt(1.0 / FAN_IN); // Variance = 0.01
+    else if (initType === 'he') weightStd = Math.sqrt(2.0 / FAN_IN);     // Variance = 0.02
+    
+    // Initialize Input Data X ~ N(0,1)
+    let X = new Float32Array(NUM_SAMPLES);
+    for (let i = 0; i < NUM_SAMPLES; i++) {
+      X[i] = generateNormal();
+    }
+    
+    // Process 5 Layers
+    const layersData = [];
+    
+    for (let layer = 0; layer < 5; layer++) {
+      let nextX = new Float32Array(NUM_SAMPLES);
+      let sumSq = 0;
+      
+      // OPTIMIZED FAST PATH:
+      // Since X_i are independent and E[W]=0, Var(Sum) = FAN_IN * E[X^2] * Var(W)
+      // We need the Root Mean Square (RMS) of X, not just the central standard deviation!
+      
+      let rmsSqX = 0;
+      for (let i=0; i<NUM_SAMPLES; i++) {
+        rmsSqX += X[i] * X[i];
+      }
+      let rmsX = Math.sqrt(rmsSqX / NUM_SAMPLES);
+      
+      // Pre-activation std
+      let preActStd = Math.sqrt(FAN_IN) * rmsX * weightStd;
+      
+      let currentLayerData = new Float32Array(NUM_SAMPLES);
+      let layerSumSq = 0;
+      
+      for (let i = 0; i < NUM_SAMPLES; i++) {
+        // Generate pre-activation value
+        let val = generateNormal() * preActStd;
+        
+        // Apply Activation Function
+        if (actType === 'relu') {
+          val = Math.max(0, val);
+        } else if (actType === 'tanh') {
+          val = Math.tanh(val);
+        }
+        // linear does nothing
+        
+        currentLayerData[i] = val;
+        layerSumSq += val * val;
+      }
+      
+      // Calculate resulting std
+      let finalStd = Math.sqrt(layerSumSq / NUM_SAMPLES);
+      layersData.push({
+        data: currentLayerData,
+        std: finalStd
+      });
+      
+      // Set X for next layer
+      X = currentLayerData;
+    }
+    
+    // Draw the histograms sequentially for animation effect
+    drawHistograms(layersData, actType);
+    updateFeedbackText(initType, actType);
+  }
+
+  function drawHistograms(layersData, actType) {
+    const BIN_COUNT = 40;
+    const X_MIN = -3.0;
+    const X_MAX = 3.0;
+    const RANGE = X_MAX - X_MIN;
+    
+    layersData.forEach((layer, layerIdx) => {
+      // Delay drawing for animation cascade
+      let timeoutId = setTimeout(() => {
+        const canvasId = `canvas-l${layerIdx + 1}`;
+        const statId = `stat-l${layerIdx + 1}`;
+        const canvas = document.getElementById(canvasId);
+        const ctx = canvas.getContext('2d');
+        
+        // Handle CSS sizing
+        canvas.width = canvas.offsetWidth;
+        canvas.height = canvas.offsetHeight;
+        const W = canvas.width;
+        const H = canvas.height;
+        
+        ctx.clearRect(0, 0, W, H);
+        
+        // Create Bins
+        let bins = new Array(BIN_COUNT).fill(0);
+        let overflow = 0;
+        let underflow = 0;
+        let zeroCount = 0;
+        
+        layer.data.forEach(val => {
+          if (val === 0) zeroCount++;
+          
+          if (val < X_MIN) underflow++;
+          else if (val > X_MAX) overflow++;
+          else {
+            let binIdx = Math.floor(((val - X_MIN) / RANGE) * BIN_COUNT);
+            if (binIdx >= BIN_COUNT) binIdx = BIN_COUNT - 1;
+            bins[binIdx]++;
+          }
+        });
+        
+        // Find max bin for scaling
+        let maxBin = Math.max(...bins);
+        if (maxBin === 0) maxBin = 1; // Prevent div by zero
+        
+        // Special visual cap if ReLU zeroes out exactly half
+        let displayMaxBin = maxBin;
+        if (actType === 'relu' && zeroCount > NUM_SAMPLES * 0.4) {
+          // If it's relu, the 0 bin is massive. Cap it so other bars are visible
+          let tempBins = [...bins];
+          let zeroBinIdx = Math.floor(((0 - X_MIN) / RANGE) * BIN_COUNT);
+          tempBins[zeroBinIdx] = 0;
+          displayMaxBin = Math.max(...tempBins) * 1.5; // Scale relative to non-zero max
+        }
+        
+        // Set Color
+        let barColor = '#6c63ff'; // Default Accent
+        if (layerIdx === 4) barColor = '#00d4aa'; // Output layer accent2
+        
+        // Draw Bars
+        const binW = W / BIN_COUNT;
+        
+        ctx.fillStyle = barColor;
+        for (let i = 0; i < BIN_COUNT; i++) {
+          let binH = (bins[i] / displayMaxBin) * (H - 10);
+          if (binH > H - 10) binH = H - 10; // Cap visual height
+          
+          ctx.fillRect(i * binW + 1, H - binH, binW - 2, binH);
+        }
+        
+        // Draw Overflow/Underflow visual indicators if needed
+        if (overflow > NUM_SAMPLES * 0.1) {
+           ctx.fillStyle = '#ff6b6b';
+           ctx.fillRect(W - 4, 0, 4, H);
+        }
+        if (underflow > NUM_SAMPLES * 0.1) {
+           ctx.fillStyle = '#ff6b6b';
+           ctx.fillRect(0, 0, 4, H);
+        }
+        
+        // Update Stats Text
+        const statEl = document.getElementById(statId);
+        let stdText = layer.std.toFixed(3);
+        if (layer.std > 10.0) stdText = "EXPLODED";
+        else if (layer.std < 0.001) stdText = "VANISHED";
+        
+        statEl.textContent = `Std: ${stdText}`;
+        
+        // Color code bad stats
+        if (layer.std > 2.0 || layer.std < 0.1) {
+          statEl.style.color = 'var(--accent3)';
+        } else {
+          statEl.style.color = (layerIdx === 4) ? 'var(--accent2)' : 'var(--text-dim)';
+        }
+        
+      }, layerIdx * 150); // 150ms stagger per layer
+      
+      animationTimeouts.push(timeoutId); // Store timeout so it can be cleared if re-run
+    });
+  }
+
+  function updateFeedbackText(initType, actType) {
+    const fb = document.getElementById('sim-feedback');
+    let msg = "";
+    
+    if (initType === 'random_small') {
+      msg = "<strong style='color:var(--accent3)'>&#x274C; Vanishing Gradients:</strong> Weights are too small. By Layer 5, the signal has completely died (Std &asymp; 0.00). INT8 hardware quantization would output pure zeros.";
+    } else if (initType === 'random_large') {
+      msg = "<strong style='color:var(--accent3)'>&#x274C; Exploding Gradients:</strong> Weights are too large. Variance multiplies rapidly. In hardware, this overflows FP16 max ranges, throwing NaNs and crashing training.";
+    } else if (initType === 'xavier' && actType === 'relu') {
+      msg = "<strong style='color:var(--accent4)'>&#x26A0;&#xFE0F; Mismatched Init:</strong> Xavier was designed for linear/symmetric activations. Notice how ReLU cuts the variance in half at every layer, slowly vanishing the signal.";
+    } else if (initType === 'xavier' && (actType === 'linear' || actType === 'tanh')) {
+      msg = "<strong style='color:var(--accent2)'>&#x2705; Stable Variance:</strong> Perfect match! Xavier preserves variance (Std &asymp; 1.0) through all layers. Hardware datatypes are maximally utilized.";
+    } else if (initType === 'he' && actType === 'relu') {
+      msg = "<strong style='color:var(--accent2)'>&#x2705; He + ReLU Harmony:</strong> The extra factor of 2 in He initialization perfectly compensates for ReLU zeroing out half the data. Variance stays beautifully stable around 1.0.";
+    } else if (initType === 'he' && actType !== 'relu') {
+      msg = "<strong style='color:var(--accent4)'>&#x26A0;&#xFE0F; Mismatched Init:</strong> He init provides too much variance for non-ReLU functions, causing the signal to slowly expand.";
+    }
+    
+    // Update after animations finish
+    let textTimeout = setTimeout(() => {
+      fb.innerHTML = msg;
+    }, 800);
+    animationTimeouts.push(textTimeout);
+  }
+
+  // --- Initialization ---
+  function initVisualizer() {
+    // Run simulation is handled by tab switch logic to prevent off-screen canvas rendering bugs
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initVisualizer);
+  } else {
+    initVisualizer();
+  }
+</script>
+</body>
+</html>

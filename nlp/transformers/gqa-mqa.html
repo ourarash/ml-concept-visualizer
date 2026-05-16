@@ -1,0 +1,554 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #40 by Zhe Chen (@KillerQueen-Z): feat: add GQA / MQA visualization (Grouped & Multi-Query Attention). -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GQA vs MQA vs MHA — Grouped Query Attention</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #e2e8f0;
+            margin: 0;
+            padding: 0;
+            min-height: 100vh;
+        }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-track { background: #1e293b; }
+        ::-webkit-scrollbar-thumb { background: #475569; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        input[type=range] { accent-color: #8b5cf6; }
+
+        .mode-btn {
+            transition: all 0.2s ease;
+            border: 1px solid rgba(255,255,255,0.1);
+        }
+        .mode-btn.active {
+            background: linear-gradient(135deg, #8b5cf6, #ec4899);
+            border-color: transparent;
+            box-shadow: 0 4px 14px rgba(139, 92, 246, 0.4);
+        }
+
+        .head-q {
+            fill: #8b5cf6;
+            stroke: #c4b5fd;
+            stroke-width: 1.5;
+            transition: all 0.4s ease;
+        }
+        .head-kv {
+            fill: #10b981;
+            stroke: #6ee7b7;
+            stroke-width: 1.5;
+            transition: all 0.4s ease;
+        }
+        .head-link {
+            stroke: rgba(148, 163, 184, 0.4);
+            stroke-width: 1.5;
+            fill: none;
+            transition: all 0.4s ease;
+        }
+        .head-link.highlighted {
+            stroke: #fbbf24;
+            stroke-width: 2.5;
+        }
+        .head-label {
+            fill: #e2e8f0;
+            font-size: 11px;
+            font-weight: 600;
+            text-anchor: middle;
+            pointer-events: none;
+        }
+        .group-bracket {
+            fill: none;
+            stroke: rgba(251, 191, 36, 0.5);
+            stroke-width: 1.5;
+            stroke-dasharray: 4 3;
+            transition: all 0.4s ease;
+        }
+
+        .memory-bar {
+            transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body class="flex flex-col lg:flex-row min-h-screen">
+
+    <!-- Left Control Panel -->
+    <aside class="glass-panel lg:w-96 lg:flex-shrink-0 p-6 lg:h-screen lg:overflow-y-auto">
+        <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-violet-400 to-pink-400 mb-1">
+            GQA · MQA · MHA
+        </h1>
+        <p class="text-xs text-gray-400 mb-5">
+            Grouped & Multi-Query Attention — how Llama, Mistral, and PaLM shrink the KV cache.
+        </p>
+
+        <!-- Mode Toggle -->
+        <div class="mb-5">
+            <div class="text-xs text-gray-400 uppercase tracking-wider mb-2">Attention Variant</div>
+            <div class="grid grid-cols-3 gap-2">
+                <button data-mode="mha" class="mode-btn active px-2 py-2 rounded text-sm font-semibold">MHA</button>
+                <button data-mode="gqa" class="mode-btn px-2 py-2 rounded text-sm font-semibold">GQA</button>
+                <button data-mode="mqa" class="mode-btn px-2 py-2 rounded text-sm font-semibold">MQA</button>
+            </div>
+        </div>
+
+        <!-- Q heads slider -->
+        <div class="mb-4">
+            <div class="flex justify-between items-baseline">
+                <label class="text-xs text-gray-400 uppercase tracking-wider">Query heads</label>
+                <span id="qheads-val" class="text-violet-300 font-mono font-semibold">8</span>
+            </div>
+            <input id="qheads-slider" type="range" min="2" max="32" step="1" value="8" class="w-full mt-1">
+        </div>
+
+        <!-- KV heads slider (GQA only) -->
+        <div class="mb-4" id="kv-control">
+            <div class="flex justify-between items-baseline">
+                <label class="text-xs text-gray-400 uppercase tracking-wider">KV heads <span id="kv-mode-tag" class="text-[10px] text-amber-400 normal-case">(GQA group size)</span></label>
+                <span id="kvheads-val" class="text-emerald-300 font-mono font-semibold">8</span>
+            </div>
+            <input id="kvheads-slider" type="range" min="1" max="32" step="1" value="8" class="w-full mt-1">
+            <div class="text-[10px] text-gray-500 mt-1">Q heads per group: <span id="group-size" class="text-amber-300 font-mono">1</span></div>
+        </div>
+
+        <!-- Sequence length -->
+        <div class="mb-5">
+            <div class="flex justify-between items-baseline">
+                <label class="text-xs text-gray-400 uppercase tracking-wider">Sequence length</label>
+                <span id="seqlen-val" class="text-pink-300 font-mono font-semibold">1024</span>
+            </div>
+            <input id="seqlen-slider" type="range" min="64" max="32768" step="64" value="1024" class="w-full mt-1">
+            <div class="text-[10px] text-gray-500 mt-1">batch=1, head_dim=128, fp16 (2 bytes)</div>
+        </div>
+
+        <!-- Mode explanation -->
+        <div id="mode-explain" class="text-xs text-gray-300 p-3 rounded bg-gradient-to-br from-slate-800/60 to-slate-900/60 border border-slate-700 leading-relaxed"></div>
+    </aside>
+
+    <!-- Main visualization -->
+    <main class="flex-1 p-6 lg:p-10 lg:overflow-y-auto">
+
+        <!-- Head grouping diagram -->
+        <section class="mb-8">
+            <div class="flex items-baseline justify-between mb-3">
+                <h2 class="text-lg font-bold text-violet-300">Head grouping</h2>
+                <span id="diagram-summary" class="text-sm text-gray-400 font-mono"></span>
+            </div>
+            <div class="bg-slate-800/40 rounded-xl border border-slate-700 p-4">
+                <svg id="heads-svg" viewBox="0 0 800 280" class="w-full h-auto" preserveAspectRatio="xMidYMid meet"></svg>
+            </div>
+            <p class="text-xs text-gray-500 mt-2 italic">
+                Each query head still computes its own attention. Queries in the same group share <em>K</em> and <em>V</em>,
+                so we cache fewer copies — that is the whole trick.
+            </p>
+        </section>
+
+        <!-- Streaming KV cache comparison -->
+        <section class="mb-8">
+            <div class="flex flex-wrap items-baseline justify-between gap-2 mb-3">
+                <h2 class="text-lg font-bold text-emerald-300">KV cache growth as tokens stream in</h2>
+                <div class="flex gap-2">
+                    <button id="btn-stream" class="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 rounded text-xs font-semibold transition">▶ Stream tokens</button>
+                    <button id="btn-stream-reset" class="px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded text-xs font-semibold transition">↺ Reset</button>
+                </div>
+            </div>
+            <div class="bg-slate-800/40 rounded-xl border border-slate-700 p-5 space-y-4">
+                <div id="stream-rows"></div>
+                <div class="text-xs text-gray-500 italic leading-relaxed">
+                    Each square is one cached K/V vector. Every new token writes <span class="font-mono text-amber-300">n_kv</span>
+                    squares per layer. After the same number of tokens, MHA's row is much longer than GQA's, and GQA's much longer than MQA's
+                    — that gap <em>is</em> the memory savings.
+                </div>
+            </div>
+        </section>
+
+        <!-- Memory comparison -->
+        <section class="mb-8">
+            <h2 class="text-lg font-bold text-pink-300 mb-3">KV cache memory at this sequence length</h2>
+            <div class="bg-slate-800/40 rounded-xl border border-slate-700 p-5 space-y-3" id="memory-bars"></div>
+            <div class="mt-3 text-xs text-gray-500 leading-relaxed">
+                <span class="font-mono text-amber-300">cache = 2 × n_layers × n_kv_heads × head_dim × seq_len × bytes</span><br>
+                The factor of 2 covers both K and V. Q is recomputed every step, so it does <em>not</em> count.
+                Reducing <span class="font-mono text-emerald-300">n_kv_heads</span> is the only knob GQA/MQA touch.
+            </div>
+        </section>
+
+        <!-- Real-world models -->
+        <section class="mb-8">
+            <h2 class="text-lg font-bold text-emerald-300 mb-3">Real-world models</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div class="bg-slate-800/40 rounded-lg border border-slate-700 p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-violet-300">MHA</span>
+                        <span class="badge bg-violet-900/50 text-violet-200">classic</span>
+                    </div>
+                    <div class="text-xs text-gray-400 mb-1">n_kv = n_q</div>
+                    <div class="text-sm text-gray-200">GPT-2, GPT-3, BERT, original Transformer</div>
+                </div>
+                <div class="bg-slate-800/40 rounded-lg border border-amber-700/50 p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-amber-300">GQA</span>
+                        <span class="badge bg-amber-900/50 text-amber-200">sweet spot</span>
+                    </div>
+                    <div class="text-xs text-gray-400 mb-1">1 &lt; n_kv &lt; n_q</div>
+                    <div class="text-sm text-gray-200">Llama 2-70B (8), Llama 3 (8), Mistral 7B (8), Mixtral</div>
+                </div>
+                <div class="bg-slate-800/40 rounded-lg border border-emerald-700/50 p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <span class="font-bold text-emerald-300">MQA</span>
+                        <span class="badge bg-emerald-900/50 text-emerald-200">most aggressive</span>
+                    </div>
+                    <div class="text-xs text-gray-400 mb-1">n_kv = 1</div>
+                    <div class="text-sm text-gray-200">PaLM, Falcon, StarCoder, Gemini Nano</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tradeoff -->
+        <section class="mb-8">
+            <h2 class="text-lg font-bold text-amber-300 mb-3">The tradeoff</h2>
+            <div class="bg-slate-800/40 rounded-xl border border-slate-700 p-5 grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div>
+                    <div class="text-emerald-300 font-semibold text-sm mb-1">✓ Smaller KV cache</div>
+                    <div class="text-xs text-gray-400">Lower memory → larger batch → higher inference throughput. The whole reason GQA exists.</div>
+                </div>
+                <div>
+                    <div class="text-emerald-300 font-semibold text-sm mb-1">✓ Faster decoding</div>
+                    <div class="text-xs text-gray-400">Less data to load from HBM each token. Memory bandwidth is the bottleneck in autoregressive decode.</div>
+                </div>
+                <div>
+                    <div class="text-pink-300 font-semibold text-sm mb-1">✗ Quality drop</div>
+                    <div class="text-xs text-gray-400">MQA loses noticeable quality. GQA recovers most of MHA's quality while keeping the memory win — that is why it became the default.</div>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+<script>
+'use strict';
+
+const state = {
+    mode: 'mha',       // 'mha' | 'gqa' | 'mqa'
+    nQ: 8,
+    nKV: 8,            // tracked separately for GQA; auto-set for MHA/MQA
+    seqLen: 1024,
+    headDim: 128,
+    nLayers: 32,
+    bytesPerElem: 2,   // fp16
+    streamPos: 0,
+    streamTimer: null,
+};
+
+// Derive nKV based on mode
+function deriveKV() {
+    if (state.mode === 'mha') return state.nQ;
+    if (state.mode === 'mqa') return 1;
+    // gqa: clamp slider value to [1, nQ] and require nQ % nKV == 0 (round down)
+    let kv = Math.min(state.nKV, state.nQ);
+    kv = Math.max(1, kv);
+    // snap to a divisor of nQ
+    while (state.nQ % kv !== 0 && kv > 1) kv--;
+    return kv;
+}
+
+function memoryBytes(nKV) {
+    return 2 * state.nLayers * nKV * state.headDim * state.seqLen * state.bytesPerElem;
+}
+function fmtBytes(b) {
+    if (b >= 1e9) return (b / 1e9).toFixed(2) + ' GB';
+    if (b >= 1e6) return (b / 1e6).toFixed(1) + ' MB';
+    if (b >= 1e3) return (b / 1e3).toFixed(1) + ' KB';
+    return b + ' B';
+}
+
+// ---------- Head diagram ----------
+function renderHeads() {
+    const svg = document.getElementById('heads-svg');
+    const W = 800, H = 280;
+    const nKV = deriveKV();
+    const groupSize = state.nQ / nKV;
+
+    const padX = 40;
+    const qY = 60;
+    const kvY = 220;
+    const qSpacing = (W - 2 * padX) / Math.max(state.nQ - 1, 1);
+    const kvSpacing = (W - 2 * padX) / Math.max(nKV - 1, 1);
+    const qX = i => state.nQ === 1 ? W / 2 : padX + i * qSpacing;
+    const kvX = j => nKV === 1 ? W / 2 : padX + j * kvSpacing;
+
+    const r = Math.min(16, (W - 2 * padX) / (state.nQ * 2.4));
+
+    let html = '';
+
+    // Group brackets (only meaningful for GQA, but harmless to draw for MQA)
+    if (state.mode !== 'mha') {
+        for (let g = 0; g < nKV; g++) {
+            const firstQ = g * groupSize;
+            const lastQ = firstQ + groupSize - 1;
+            const x1 = qX(firstQ) - r - 4;
+            const x2 = qX(lastQ) + r + 4;
+            const y = qY - r - 14;
+            html += `<path class="group-bracket" d="M ${x1} ${y + 8} L ${x1} ${y} L ${x2} ${y} L ${x2} ${y + 8}"></path>`;
+        }
+    }
+
+    // Links from each Q to its assigned KV
+    for (let i = 0; i < state.nQ; i++) {
+        const groupIdx = Math.floor(i / groupSize);
+        const x1 = qX(i), y1 = qY + r;
+        const x2 = kvX(groupIdx), y2 = kvY - r;
+        const cy = (y1 + y2) / 2;
+        html += `<path class="head-link" d="M ${x1} ${y1} C ${x1} ${cy}, ${x2} ${cy}, ${x2} ${y2}"></path>`;
+    }
+
+    // Q heads
+    for (let i = 0; i < state.nQ; i++) {
+        const x = qX(i);
+        html += `<circle class="head-q" cx="${x}" cy="${qY}" r="${r}"></circle>`;
+        html += `<text class="head-label" x="${x}" y="${qY + 4}">Q${i + 1}</text>`;
+    }
+
+    // KV heads
+    for (let j = 0; j < nKV; j++) {
+        const x = kvX(j);
+        html += `<rect class="head-kv" x="${x - r}" y="${kvY - r}" width="${r * 2}" height="${r * 2}" rx="4"></rect>`;
+        html += `<text class="head-label" x="${x}" y="${kvY + 4}">KV${j + 1}</text>`;
+    }
+
+    // Row labels
+    html += `<text x="20" y="${qY + 4}" fill="#94a3b8" font-size="11" font-weight="600">Q</text>`;
+    html += `<text x="20" y="${kvY + 4}" fill="#94a3b8" font-size="11" font-weight="600">K,V</text>`;
+
+    svg.innerHTML = html;
+
+    // summary text under diagram heading
+    const ratio = state.nQ / nKV;
+    document.getElementById('diagram-summary').textContent =
+        `${state.nQ} query heads · ${nKV} KV head${nKV > 1 ? 's' : ''} · ${ratio}:1 sharing`;
+}
+
+// ---------- Memory bars ----------
+function renderMemory() {
+    const variants = [
+        { id: 'mha', label: 'MHA', kv: state.nQ, color: 'from-violet-500 to-violet-600' },
+        { id: 'gqa', label: 'GQA', kv: state.mode === 'gqa' ? deriveKV() : Math.max(1, Math.floor(state.nQ / 4)), color: 'from-amber-500 to-amber-600' },
+        { id: 'mqa', label: 'MQA', kv: 1, color: 'from-emerald-500 to-emerald-600' },
+    ];
+    const maxBytes = memoryBytes(state.nQ);  // MHA is always the max
+    const container = document.getElementById('memory-bars');
+    container.innerHTML = variants.map(v => {
+        const bytes = memoryBytes(v.kv);
+        const pct = (bytes / maxBytes) * 100;
+        const savings = v.id === 'mha' ? '' :
+            `<span class="text-xs text-gray-400 ml-2">−${(100 - pct).toFixed(1)}%</span>`;
+        const isActive = v.id === state.mode;
+        return `
+        <div>
+            <div class="flex justify-between items-baseline mb-1">
+                <span class="text-sm font-semibold ${isActive ? 'text-white' : 'text-gray-400'}">
+                    ${v.label}
+                    <span class="text-xs text-gray-500 font-mono ml-1">(n_kv=${v.kv})</span>
+                    ${isActive ? '<span class="badge bg-violet-900/50 text-violet-200 ml-1">active</span>' : ''}
+                </span>
+                <span class="text-sm font-mono ${isActive ? 'text-white' : 'text-gray-400'}">
+                    ${fmtBytes(bytes)}${savings}
+                </span>
+            </div>
+            <div class="h-3 bg-slate-900 rounded-full overflow-hidden">
+                <div class="memory-bar h-full bg-gradient-to-r ${v.color} rounded-full" style="width: ${pct}%"></div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ---------- Streaming KV cache comparison ----------
+const STREAM_MAX = 16;  // tokens streamed
+const CELL_W = 6, CELL_H = 16, CELL_GAP = 1, TOKEN_GAP = 4;
+
+function renderStream() {
+    const variants = [
+        { id: 'mha', label: 'MHA', kv: state.nQ, color: '#8b5cf6' },
+        { id: 'gqa', label: 'GQA', kv: state.mode === 'gqa' ? deriveKV() : Math.max(1, Math.floor(state.nQ / 4)), color: '#f59e0b' },
+        { id: 'mqa', label: 'MQA', kv: 1, color: '#10b981' },
+    ];
+    const container = document.getElementById('stream-rows');
+    container.innerHTML = variants.map(v => {
+        const totalCells = STREAM_MAX * v.kv;
+        const filledCells = state.streamPos * v.kv;
+        const isActive = v.id === state.mode;
+
+        // Build cells: one square per K/V vector cached, with extra gap between tokens
+        let cellsHtml = '';
+        for (let t = 0; t < STREAM_MAX; t++) {
+            for (let k = 0; k < v.kv; k++) {
+                const filled = t < state.streamPos;
+                const isLastInToken = (k === v.kv - 1);
+                const mr = isLastInToken ? TOKEN_GAP : CELL_GAP;
+                const opacity = filled ? 1 : 0.12;
+                cellsHtml += `<span style="display:inline-block;width:${CELL_W}px;height:${CELL_H}px;background:${v.color};margin-right:${mr}px;border-radius:1px;opacity:${opacity};transition:opacity 0.2s"></span>`;
+            }
+        }
+
+        return `
+        <div>
+            <div class="flex justify-between items-baseline mb-1.5 flex-wrap gap-1">
+                <span class="text-sm font-semibold ${isActive ? 'text-white' : 'text-gray-400'}">
+                    ${v.label}
+                    <span class="text-xs text-gray-500 font-mono ml-1">${v.kv} KV / token</span>
+                    ${isActive ? '<span class="badge bg-violet-900/50 text-violet-200 ml-1">active</span>' : ''}
+                </span>
+                <span class="text-xs font-mono text-gray-400">
+                    <span style="color:${v.color}">${filledCells}</span> / ${totalCells} cached
+                </span>
+            </div>
+            <div class="bg-slate-900/70 rounded p-2 overflow-x-auto whitespace-nowrap">
+                ${cellsHtml}
+            </div>
+        </div>`;
+    }).join('');
+}
+
+function startStream() {
+    if (state.streamTimer) return;
+    state.streamPos = 0;
+    renderStream();
+    state.streamTimer = setInterval(() => {
+        state.streamPos++;
+        renderStream();
+        if (state.streamPos >= STREAM_MAX) {
+            clearInterval(state.streamTimer);
+            state.streamTimer = null;
+        }
+    }, 220);
+}
+function resetStream() {
+    if (state.streamTimer) { clearInterval(state.streamTimer); state.streamTimer = null; }
+    state.streamPos = 0;
+    renderStream();
+}
+
+// ---------- Mode explanation text ----------
+function renderExplain() {
+    const nKV = deriveKV();
+    const explanations = {
+        mha: `<strong class="text-violet-300">Multi-Head Attention.</strong>
+              Every query head has its own dedicated K and V. Maximum representational power,
+              but the KV cache scales linearly with <code class="text-amber-300">n_q</code>.
+              This is the original Transformer (Vaswani 2017).`,
+        gqa: `<strong class="text-amber-300">Grouped-Query Attention.</strong>
+              ${state.nQ} query heads are split into ${nKV} group${nKV > 1 ? 's' : ''} of ${state.nQ / nKV},
+              and each group <em>shares</em> one K and one V. Cache shrinks by ${(state.nQ / nKV).toFixed(0)}×
+              with almost no quality loss — the modern default (Llama 2/3, Mistral).`,
+        mqa: `<strong class="text-emerald-300">Multi-Query Attention.</strong>
+              All ${state.nQ} query heads share a <em>single</em> K and V. Cache shrinks by ${state.nQ}×.
+              Cheapest option, but quality drops noticeably — used when memory dominates everything else
+              (PaLM, Falcon).`,
+    };
+    document.getElementById('mode-explain').innerHTML = explanations[state.mode];
+}
+
+// ---------- Wiring ----------
+function update() {
+    // Adjust kv-control visibility / behavior per mode
+    const kvCtrl = document.getElementById('kv-control');
+    const kvSlider = document.getElementById('kvheads-slider');
+    const kvVal = document.getElementById('kvheads-val');
+    const kvTag = document.getElementById('kv-mode-tag');
+
+    if (state.mode === 'mha') {
+        kvSlider.disabled = true;
+        kvSlider.value = state.nQ;
+        kvVal.textContent = state.nQ;
+        kvCtrl.style.opacity = '0.45';
+        kvTag.textContent = '(= Q heads)';
+    } else if (state.mode === 'mqa') {
+        kvSlider.disabled = true;
+        kvSlider.value = 1;
+        kvVal.textContent = '1';
+        kvCtrl.style.opacity = '0.45';
+        kvTag.textContent = '(fixed = 1)';
+    } else {
+        kvSlider.disabled = false;
+        kvSlider.max = state.nQ;
+        // Snap slider value to a divisor of nQ
+        const snapped = deriveKV();
+        kvSlider.value = snapped;
+        state.nKV = snapped;
+        kvVal.textContent = snapped;
+        kvCtrl.style.opacity = '1';
+        kvTag.textContent = '(GQA group size)';
+    }
+
+    document.getElementById('group-size').textContent = (state.nQ / deriveKV()).toFixed(0);
+
+    renderHeads();
+    renderMemory();
+    renderStream();
+    renderExplain();
+}
+
+// Mode buttons
+document.querySelectorAll('.mode-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        state.mode = btn.dataset.mode;
+        // When entering GQA, pick a non-degenerate default (≈ nQ/4) so it visually
+        // differs from MHA on first click.
+        if (state.mode === 'gqa' && state.nKV >= state.nQ) {
+            state.nKV = Math.max(1, Math.floor(state.nQ / 4));
+        }
+        document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        update();
+    });
+});
+
+// Q heads
+document.getElementById('qheads-slider').addEventListener('input', e => {
+    state.nQ = parseInt(e.target.value);
+    document.getElementById('qheads-val').textContent = state.nQ;
+    // Re-clamp nKV
+    if (state.nKV > state.nQ) state.nKV = state.nQ;
+    update();
+});
+
+// KV heads
+document.getElementById('kvheads-slider').addEventListener('input', e => {
+    state.nKV = parseInt(e.target.value);
+    update();
+});
+
+// Sequence length
+document.getElementById('seqlen-slider').addEventListener('input', e => {
+    state.seqLen = parseInt(e.target.value);
+    document.getElementById('seqlen-val').textContent = state.seqLen.toLocaleString();
+    renderMemory();
+});
+
+// Stream buttons
+document.getElementById('btn-stream').addEventListener('click', startStream);
+document.getElementById('btn-stream-reset').addEventListener('click', resetStream);
+
+// Initial render
+update();
+</script>
+</body>
+</html>

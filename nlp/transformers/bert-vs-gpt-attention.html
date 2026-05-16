@@ -1,0 +1,672 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #34 by leonlee1125 (@leonlee1125): Feature: Interactive BERT vs GPT Attention Visualizer. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>BERT vs GPT Attention Visualizer</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --text-color: #f8fafc;
+            --matrix-bg: #1e293b;
+            --cell-bg: #334155;
+            --cell-hover: #3b82f6;
+            --cell-mask: #0f172a;
+            --accent-bert: #10b981;
+            --accent-gpt: #f59e0b;
+            --line-default: rgba(148, 163, 184, 0.15); 
+            --line-active: #3b82f6;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 2rem 1rem;
+            margin: 0;
+            overflow-x: hidden;
+        }
+
+        .header { text-align: center; margin-bottom: 2rem; }
+        .header h1 { margin-bottom: 0.5rem; font-size: 2.2rem; }
+        .header p.subtitle { color: #94a3b8; margin-top: 0; font-size: 1.1rem; }
+
+        .toggle-container { display: flex; gap: 1rem; justify-content: center; margin-bottom: 2rem; flex-wrap: wrap; }
+
+        button {
+            padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: bold;
+            border: 2px solid #475569; background: transparent; color: #94a3b8;
+            border-radius: 0.5rem; cursor: pointer; transition: all 0.3s ease;
+        }
+
+        button.active-bert { border-color: var(--accent-bert); background: rgba(16, 185, 129, 0.1); color: var(--accent-bert); }
+        button.active-gpt { border-color: var(--accent-gpt); background: rgba(245, 158, 11, 0.1); color: var(--accent-gpt); }
+
+        .viz-container { width: 100%; max-width: 1000px; display: flex; flex-direction: column; gap: 1.5rem; }
+
+        .graph-section {
+            position: relative; height: 240px; display: flex; align-items: flex-end;
+            justify-content: space-between; padding: 0 4rem; margin-top: 1rem;
+        }
+
+        svg { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none; z-index: 0; overflow: visible; }
+        path { fill: none; stroke: var(--line-default); stroke-width: 2; transition: stroke 0.3s ease, stroke-width 0.3s ease, opacity 0.3s ease; }
+        path.active { stroke: var(--line-active); stroke-width: 3.5; z-index: 10; }
+
+        .token {
+            background: var(--matrix-bg); padding: 0.75rem 1.5rem; border-radius: 0.5rem;
+            font-size: 1.2rem; font-weight: bold; z-index: 1; border: 2px solid transparent; transition: all 0.3s ease;
+            text-align: center;
+        }
+        .token.active-target { border-color: var(--line-active); box-shadow: 0 0 15px rgba(59, 130, 246, 0.4); }
+        .token.active-source { background: #1e3a8a; border-color: var(--line-active); }
+
+        .content-row { display: flex; gap: 1.5rem; align-items: stretch; }
+
+        .matrix-section {
+            flex: 1.1; background: var(--matrix-bg); padding: 1.5rem; border-radius: 0.5rem;
+            display: flex; flex-direction: column; align-items: center; overflow-x: auto;
+        }
+        .matrix-section h3 { color: #cbd5e1; margin-top: 0; margin-bottom: 0.5rem; text-align: center; }
+        .matrix-instruction { font-size: 0.9rem; color: var(--accent-bert); margin-bottom: 1.5rem; font-weight: bold; text-align: center; }
+        
+        .matrix-grid { display: grid; grid-template-columns: auto repeat(5, 1fr) 65px; gap: 4px; }
+        .matrix-label { display: flex; align-items: center; justify-content: center; font-weight: bold; color: #94a3b8; padding: 0.5rem; font-size: 0.95rem; }
+        .matrix-cell {
+            width: 55px; height: 55px; background: var(--cell-bg); border-radius: 0.25rem;
+            display: flex; align-items: center; justify-content: center; font-size: 0.85rem;
+            cursor: pointer; transition: all 0.2s ease; position: relative; user-select: none;
+        }
+        .matrix-cell:hover, .matrix-cell:active { background: var(--cell-hover); transform: scale(1.1); z-index: 2; }
+        .matrix-cell.masked {
+            background: repeating-linear-gradient(45deg, var(--cell-mask), var(--cell-mask) 8px, #1e293b 8px, #1e293b 16px);
+            color: #475569; pointer-events: none; opacity: 0.3;
+        }
+        .sum-cell {
+            display: flex; align-items: center; justify-content: center; font-weight: bold;
+            color: #38bdf8; background: rgba(56, 189, 248, 0.1); border-radius: 0.25rem;
+            font-size: 0.85rem; border: 1px dashed #38bdf8;
+        }
+
+        .info-section { flex: 1.2; display: flex; flex-direction: column; gap: 1.5rem; }
+        .explanation-box { background: var(--matrix-bg); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid var(--line-active); flex: 1; }
+        .explanation-box h3 { margin-top: 0; color: #cbd5e1; border-bottom: 1px solid #334155; padding-bottom: 0.5rem; }
+        .dynamic-text { font-size: 1.05rem; line-height: 1.6; color: #e2e8f0; min-height: 160px; }
+
+        .demo-box { background: var(--matrix-bg); padding: 1.5rem; border-radius: 0.5rem; border-left: 4px solid; transition: border-color 0.3s ease; }
+        .demo-box.bert-theme { border-color: var(--accent-bert); }
+        .demo-box.gpt-theme { border-color: var(--accent-gpt); }
+        .demo-box h3 { margin-top: 0; color: #cbd5e1; margin-bottom: 1rem; }
+        .demo-text-box {
+            background: #0f172a; padding: 1rem; border-radius: 0.25rem; font-size: 1.2rem;
+            font-family: monospace; min-height: 2.5rem; display: flex; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1rem;
+        }
+
+        .demo-word { padding: 0.3rem 0.6rem; border-radius: 0.25rem; transition: all 0.3s ease; border: 1px solid transparent; }
+        .demo-word.mask { background: #475569; color: #cbd5e1; border: 1px dashed #94a3b8; }
+        .demo-word.predicted { background: rgba(16, 185, 129, 0.2); color: var(--accent-bert); border: 1px solid var(--accent-bert); }
+        .demo-word.generated { background: rgba(245, 158, 11, 0.2); color: var(--accent-gpt); border: 1px solid var(--accent-gpt); animation: fadeIn 0.4s ease-out; }
+
+        .demo-highlight { transform: scale(1.15); z-index: 10; position: relative; box-shadow: 0 0 12px rgba(255, 255, 255, 0.1); }
+        .bert-theme .demo-highlight { border-color: var(--accent-bert); color: var(--accent-bert); background: rgba(16, 185, 129, 0.1); }
+        .gpt-theme .demo-highlight { border-color: var(--accent-gpt); color: var(--accent-gpt); background: rgba(245, 158, 11, 0.1); }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: translateY(0); } }
+
+        .button-group { display: flex; gap: 0.75rem; align-items: center; }
+        .action-btn { background: #3b82f6; color: white; border: none; padding: 0.6rem 1.2rem; font-weight: bold; border-radius: 0.25rem; cursor: pointer; transition: background 0.2s; min-width: 160px; flex: 1;}
+        .action-btn:hover { background: #2563eb; }
+        .action-btn:disabled { background: #475569; cursor: not-allowed; }
+        .reset-btn { background: transparent; color: #ef4444; border: 1px solid #ef4444; padding: 0.6rem 1rem; font-weight: bold; border-radius: 0.25rem; cursor: pointer; transition: all 0.2s; text-align: center;}
+        .reset-btn:hover { background: #ef4444; color: #ffffff; border-color: #ef4444; box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+
+        .model-overview { display: flex; gap: 1.5rem; margin-top: 1rem; width: 100%; }
+        .model-card { flex: 1; background: var(--matrix-bg); padding: 1.8rem; border-radius: 0.5rem; border-top: 5px solid; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+        .model-card.bert { border-color: var(--accent-bert); }
+        .model-card.gpt { border-color: var(--accent-gpt); }
+        .model-card h3 { margin-top: 0; color: #f8fafc; border-bottom: 1px solid #334155; padding-bottom: 0.8rem; font-size: 1.3rem; }
+        .model-card ul { padding-left: 1.2rem; color: #cbd5e1; line-height: 1.7; margin-bottom: 0; }
+        .model-card li { margin-bottom: 0.8rem; }
+        .model-card strong { color: #f8fafc; }
+
+        .semantic-note { margin-top: 0.5rem; padding: 0.5rem 0.8rem; background: rgba(15, 23, 42, 0.5); border-left: 3px solid; font-size: 0.95rem; color: #cbd5e1; font-style: italic; }
+        .bert-theme-text { border-color: var(--accent-bert); }
+        .gpt-theme-text { border-color: var(--accent-gpt); }
+
+        .hidden { display: none !important; }
+
+        /* =========================================
+           行動裝置適配 (Responsive Design for Mobile)
+           ========================================= */
+        @media (max-width: 850px) {
+            body { padding: 1rem; }
+            .header h1 { font-size: 1.8rem; }
+            
+            /* 將左右排列改為上下堆疊 */
+            .content-row { flex-direction: column; }
+            
+            /* 調整上方連線圖的高度與間距 */
+            .graph-section { padding: 0 1rem; height: 160px; margin-top: 2rem; }
+            .token { padding: 0.4rem 0.8rem; font-size: 1rem; }
+            
+            /* 縮小矩陣格子，讓手機不必左右滑動 */
+            .matrix-section { padding: 1rem; }
+            .matrix-grid { grid-template-columns: auto repeat(5, 1fr) 55px; gap: 2px; }
+            .matrix-cell { width: 40px; height: 40px; font-size: 0.75rem; }
+            .matrix-label { font-size: 0.8rem; padding: 0.2rem; }
+            .sum-cell { font-size: 0.75rem; }
+            
+            /* 按鈕滿版排列 */
+            .button-group { flex-direction: column; width: 100%; }
+            .action-btn, .reset-btn { width: 100%; }
+            
+            /* 底部解說卡片改為上下堆疊 */
+            .model-overview { flex-direction: column; }
+            .dynamic-text { min-height: auto; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>Self-Attention: Encoder vs Decoder</h1>
+        <p class="subtitle">Interactive Tutorial: Understanding Bidirectional vs. Causal Masking</p>
+    </div>
+
+    <div class="toggle-container">
+        <button id="btn-bert" class="active-bert" onclick="setMode('BERT')">BERT (Encoder / Bidirectional)</button>
+        <button id="btn-gpt" onclick="setMode('GPT')">GPT (Decoder / Masked)</button>
+    </div>
+
+    <div class="viz-container">
+        <div class="graph-section" id="graph-container">
+            <svg id="lines-svg"></svg>
+            <div class="token" id="token-0">The</div>
+            <div class="token" id="token-1">cat</div>
+            <div class="token" id="token-2">sat</div>
+            <div class="token" id="token-3">on</div>
+            <div class="token" id="token-4">mat</div>
+        </div>
+
+        <div class="content-row">
+            <div class="matrix-section">
+                <h3>Attention Matrix</h3>
+                <div class="matrix-instruction" id="matrix-instruction">💡 Softmax applied: Each Target row sums to 1.00</div>
+                <div class="matrix-grid" id="matrix"></div>
+            </div>
+
+            <div class="info-section">
+                <div class="explanation-box">
+                    <h3>Step-by-Step Logic</h3>
+                    <div id="dynamic-explanation" class="dynamic-text">
+                        Hover or tap over any cell in the Attention Matrix to see how tokens gather information based on the current architecture.
+                    </div>
+                </div>
+
+                <div id="demo-bert" class="demo-box bert-theme">
+                    <h3>Application: Masked Language Modeling</h3>
+                    <div class="demo-text-box" id="bert-words">
+                        <span class="demo-word">The</span>
+                        <span class="demo-word">cat</span>
+                        <span class="demo-word mask" id="bert-mask-token">[MASK]</span>
+                        <span class="demo-word">on</span>
+                        <span class="demo-word">mat</span>
+                    </div>
+                    <div class="button-group">
+                        <button class="action-btn" id="btn-predict-bert" onclick="handleBertAction()">Predict [MASK]</button>
+                        <button class="reset-btn" onclick="resetDemos()">Reset</button>
+                    </div>
+                </div>
+
+                <div id="demo-gpt" class="demo-box gpt-theme hidden">
+                    <h3>Application: Autoregressive Generation</h3>
+                    <div class="demo-text-box" id="gpt-text">
+                        <span class="demo-word">The</span>
+                        <span class="demo-word">cat</span>
+                    </div>
+                    <div class="button-group">
+                        <button class="action-btn" style="background:var(--accent-gpt);" id="btn-predict-gpt" onclick="handleGptAction()">Generate Next Token</button>
+                        <button class="reset-btn" onclick="resetDemos()">Reset</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="model-overview">
+            <div class="model-card bert">
+                <h3>BERT (Encoder-Only)</h3>
+                <ul>
+                    <li><strong>Architecture:</strong> Stack of Transformer Encoders.</li>
+                    <li><strong>Attention Mechanism:</strong> Unmasked Bidirectional Self-Attention. Each token computes its representation by actively attending to all past and future tokens in the sequence simultaneously.</li>
+                    <li><strong>Training Objective:</strong> Masked Language Modeling (MLM). The model learns to reconstruct hidden words by deeply analyzing the surrounding global context.</li>
+                    <li><strong>Best For:</strong> Natural Language Understanding (NLU) tasks such as text classification, sentiment analysis, and extractive question answering.</li>
+                </ul>
+            </div>
+            
+            <div class="model-card gpt">
+                <h3>GPT (Decoder-Only)</h3>
+                <ul>
+                    <li><strong>Architecture:</strong> Stack of Transformer Decoders.</li>
+                    <li><strong>Attention Mechanism:</strong> Causal (Masked) Self-Attention. An upper-triangular mask restricts tokens from seeing future information, preventing data leakage during generation.</li>
+                    <li><strong>Training Objective:</strong> Autoregressive Next-Token Prediction. The model is trained to probabilistically predict the upcoming word using only the historical context.</li>
+                    <li><strong>Best For:</strong> Natural Language Generation (NLG) tasks such as document summarization, coding assistance, and conversational AI.</li>
+                </ul>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const tokens = ['The', 'cat', 'sat', 'on', 'mat'];
+        let currentMode = 'BERT';
+        let isAnimating = false;
+        let demoSessionId = 0; 
+
+        const matrixContainer = document.getElementById('matrix');
+        const svg = document.getElementById('lines-svg');
+        const instructionEl = document.getElementById('matrix-instruction');
+        const explanationEl = document.getElementById('dynamic-explanation');
+
+        const gptTargetSequence = ['sat', 'on', 'mat'];
+        let gptCurrentStep = 0;
+
+        let bertState = 'idle'; 
+        let resolveBertStep = null;
+
+        let gptState = 'idle'; 
+        let resolveGptStep = null;
+
+        function initMatrix() {
+            matrixContainer.innerHTML = '';
+            matrixContainer.appendChild(document.createElement('div'));
+            
+            tokens.forEach(t => {
+                const el = document.createElement('div');
+                el.className = 'matrix-label';
+                el.innerText = t;
+                matrixContainer.appendChild(el);
+            });
+
+            const sumHeader = document.createElement('div');
+            sumHeader.className = 'matrix-label';
+            sumHeader.style.color = '#38bdf8';
+            sumHeader.innerText = 'Σ Sum';
+            matrixContainer.appendChild(sumHeader);
+
+            for (let t = 0; t < tokens.length; t++) {
+                const rowLabel = document.createElement('div');
+                rowLabel.className = 'matrix-label';
+                rowLabel.innerText = tokens[t];
+                matrixContainer.appendChild(rowLabel);
+
+                for (let s = 0; s < tokens.length; s++) {
+                    const cell = document.createElement('div');
+                    cell.className = 'matrix-cell';
+                    cell.id = `cell-${t}-${s}`;
+                    
+                    // 觸發事件優化：同時支援滑鼠與手機觸控
+                    cell.addEventListener('mouseenter', () => handleHover(t, s));
+                    cell.addEventListener('mouseleave', () => clearHover(false));
+                    cell.addEventListener('touchstart', (e) => {
+                        e.preventDefault(); // 避免觸控時觸發螢幕滾動
+                        handleHover(t, s);
+                    }, {passive: false});
+
+                    matrixContainer.appendChild(cell);
+                }
+
+                const sumCell = document.createElement('div');
+                sumCell.className = 'sum-cell';
+                sumCell.id = `sum-${t}`;
+                matrixContainer.appendChild(sumCell);
+            }
+            updateModeVisuals(); 
+        }
+
+        // 點擊空白處取消觸控高亮
+        document.addEventListener('touchstart', (e) => {
+            if (!e.target.closest('.matrix-cell') && !isAnimating) {
+                clearHover(false);
+            }
+        });
+
+        function drawLines() {
+            svg.innerHTML = ''; 
+            const containerRect = document.getElementById('graph-container').getBoundingClientRect();
+            
+            for (let t = 0; t < tokens.length; t++) {
+                for (let s = 0; s < tokens.length; s++) {
+                    if (currentMode === 'GPT' && s > t) continue;
+
+                    const targetEl = document.getElementById(`token-${t}`);
+                    const sourceEl = document.getElementById(`token-${s}`);
+                    const tx = targetEl.getBoundingClientRect().left - containerRect.left + targetEl.getBoundingClientRect().width / 2;
+                    const ty = targetEl.getBoundingClientRect().top - containerRect.top - 10;
+                    const sx = sourceEl.getBoundingClientRect().left - containerRect.left + sourceEl.getBoundingClientRect().width / 2;
+                    const sy = sourceEl.getBoundingClientRect().top - containerRect.top - 10;
+
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    path.id = `path-${t}-${s}`;
+
+                    if (t === s) {
+                        path.setAttribute("d", `M ${tx-8},${ty} C ${tx-20},${ty-35} ${tx+20},${ty-35} ${tx+8},${ty}`);
+                    } else {
+                        const span = Math.abs(t - s);
+                        const isForward = s > t; 
+                        const heightOffset = isForward ? 12 : -12; 
+                        
+                        // 動態計算控制點高度，因應手機版容器變小
+                        const containerHeight = containerRect.height;
+                        const scaleFactor = containerHeight / 240; 
+                        const controlY = Math.min(ty, sy) - (span * 20 * scaleFactor) - 15 + (heightOffset * scaleFactor);
+                        
+                        const shiftX = isForward ? 10 : -10;
+                        const controlX = (tx + sx) / 2 + shiftX;
+                        path.setAttribute("d", `M ${tx},${ty} Q ${controlX},${controlY} ${sx},${sy}`);
+                    }
+                    svg.appendChild(path);
+                }
+            }
+        }
+
+        function setMode(mode) {
+            if (isAnimating) return; 
+            currentMode = mode;
+            document.getElementById('btn-bert').className = mode === 'BERT' ? 'active-bert' : '';
+            document.getElementById('btn-gpt').className = mode === 'GPT' ? 'active-gpt' : '';
+            document.getElementById('demo-bert').classList.toggle('hidden', mode !== 'BERT');
+            document.getElementById('demo-gpt').classList.toggle('hidden', mode !== 'GPT');
+            instructionEl.style.color = mode === 'BERT' ? 'var(--accent-bert)' : 'var(--accent-gpt)';
+            
+            resetDemos();
+            updateModeVisuals(); 
+            drawLines();         
+        }
+
+        function updateModeVisuals() {
+            for (let t = 0; t < tokens.length; t++) {
+                let rawValues = [];
+                let rowSum = 0;
+                for (let s = 0; s < tokens.length; s++) {
+                    if (currentMode === 'GPT' && s > t) {
+                        rawValues.push(0); 
+                    } else {
+                        let val = Math.random() * 0.8 + 0.2; 
+                        rawValues.push(val);
+                        rowSum += val;
+                    }
+                }
+                for (let s = 0; s < tokens.length; s++) {
+                    const cell = document.getElementById(`cell-${t}-${s}`);
+                    if (currentMode === 'GPT' && s > t) {
+                        cell.classList.add('masked');
+                        cell.innerText = '-∞';
+                    } else {
+                        cell.classList.remove('masked');
+                        cell.innerText = (rawValues[s] / rowSum).toFixed(2);
+                    }
+                }
+                document.getElementById(`sum-${t}`).innerText = "1.00";
+            }
+        }
+
+        function handleHover(targetIdx, sourceIdx) {
+            if (isAnimating) return; 
+            if (currentMode === 'GPT' && sourceIdx > targetIdx) return;
+
+            for(let i=0; i<tokens.length; i++) {
+                const c = document.getElementById(`cell-${targetIdx}-${i}`);
+                if(!c.classList.contains('masked')) c.style.backgroundColor = '#475569';
+            }
+            document.getElementById(`cell-${targetIdx}-${sourceIdx}`).style.backgroundColor = 'var(--cell-hover)';
+
+            for(let i=0; i<tokens.length; i++) {
+                const p = document.getElementById(`path-${targetIdx}-${i}`);
+                if(p) p.classList.add('active');
+            }
+
+            document.getElementById(`token-${targetIdx}`).classList.add('active-target');
+            document.getElementById(`token-${sourceIdx}`).classList.add('active-source');
+
+            let containerId = currentMode === 'BERT' ? 'bert-words' : 'gpt-text';
+            let demoWords = document.getElementById(containerId).getElementsByClassName('demo-word');
+            if (demoWords[targetIdx]) {
+                demoWords[targetIdx].classList.add('demo-highlight');
+            }
+
+            let influenceList = [];
+            for (let i = 0; i < tokens.length; i++) {
+                if (currentMode === 'GPT' && i > targetIdx) continue;
+                let val = document.getElementById(`cell-${targetIdx}-${i}`).innerText;
+                influenceList.push(`${tokens[i]} (${val})`);
+            }
+            let influenceText = influenceList.join(', ');
+
+            const targetWord = tokens[targetIdx];
+            if (currentMode === 'BERT') {
+                explanationEl.innerHTML = `<strong>Bidirectional Context:</strong><br><br>Target Token: <strong>[${targetWord}]</strong><br><strong>[${targetWord}]</strong> is influenced by:<br><span style="font-family:monospace; font-size:1.15rem; color:#f8fafc;">${influenceText}</span><br><br><span style="color:var(--accent-bert); font-size:0.95rem;">Notice it gathers context from both past and future words simultaneously.</span>`;
+            } else {
+                let futureContext = tokens.slice(targetIdx + 1).join(' ');
+                let text = `<strong>Causal Masking in Action:</strong><br><br>Target Token: <strong>[${targetWord}]</strong><br><strong>[${targetWord}]</strong> is influenced by:<br><span style="font-family:monospace; font-size:1.15rem; color:#f8fafc;">${influenceText}</span><br><br>`;
+                if (futureContext) text += `<span style="color:var(--accent-gpt); font-size:0.95rem;">Connections to future words [${futureContext}] are masked (-∞) and omitted.</span>`;
+                else text += `<span style="color:var(--accent-gpt); font-size:0.95rem;">This is the end of the current sequence.</span>`;
+                explanationEl.innerHTML = text;
+            }
+        }
+
+        function clearHover(keepExplanation = false) {
+            if (isAnimating) return; 
+            document.querySelectorAll('.matrix-cell').forEach(c => {
+                c.style.backgroundColor = '';
+                c.style.boxShadow = '';
+                c.style.color = '';
+            });
+            document.querySelectorAll('path').forEach(p => p.classList.remove('active'));
+            document.querySelectorAll('.token').forEach(t => t.classList.remove('active-target', 'active-source'));
+            document.querySelectorAll('.demo-word').forEach(w => w.classList.remove('demo-highlight'));
+            
+            if (!keepExplanation) {
+                explanationEl.innerHTML = `Hover or tap over any cell in the Attention Matrix to see how tokens gather information in the ${currentMode} architecture.`;
+            }
+        }
+
+        function getStrongestSignalsHtml(targetIdx, targetColor, nextWord, isGpt) {
+            let weights = [];
+            for (let i = 0; i < tokens.length; i++) {
+                if (currentMode === 'GPT' && i > targetIdx) continue;
+                let val = parseFloat(document.getElementById(`cell-${targetIdx}-${i}`).innerText);
+                weights.push({ word: tokens[i], val: val });
+            }
+            
+            weights.sort((a, b) => b.val - a.val);
+            
+            let titleText = isGpt ? "Top influences for next prediction:" : "Top influences for prediction:";
+            let html = `<br><br><strong>Step 3: Predict</strong><br><span style="font-size:0.95rem; color:#cbd5e1;">${titleText}</span><br>`;
+            
+            let topN = weights.slice(0, 2); 
+            let lines = topN.map(w => {
+                return `<span style="font-family:monospace; color:#94a3b8; font-size:1.05rem;">→ ${w.word} (${w.val.toFixed(2)})</span>`;
+            });
+            
+            html += lines.join('<br>');
+
+            let finalLine = isGpt ? `→ Next token likely: ${nextWord}` : `→ Predicted token: ${nextWord}`;
+            html += `<br><br><span style="font-family:monospace; color:${targetColor}; font-size:1.1rem; font-weight:bold;">${finalLine}</span>`;
+
+            let semanticNote = "";
+            if (isGpt) {
+                if (nextWord === 'sat') semanticNote = `These words suggest a subject ("The cat"), making a verb like "sat" highly probable.`;
+                else if (nextWord === 'on') semanticNote = `The phrase "The cat sat" indicates an action that often requires a preposition like "on" to describe location.`;
+                else if (nextWord === 'mat') semanticNote = `The preposition "on" usually precedes an object. Given the context of a cat, "mat" is a strong candidate.`;
+                
+                if(semanticNote) {
+                    html += `<div class="semantic-note gpt-theme-text">${semanticNote}</div>`;
+                }
+            } else {
+                if (nextWord === 'sat') {
+                    html += `<div class="semantic-note bert-theme-text">The model looks at both sides: the subject ("The cat") and the prepositional phrase ("on mat"), correctly deducing the missing verb "sat" that connects them.</div>`;
+                }
+            }
+
+            return html;
+        }
+
+        function handleBertAction() {
+            if (bertState === 'idle') {
+                runBertPrediction();
+            } else if (bertState === 'waiting') {
+                if (resolveBertStep) resolveBertStep(); 
+            }
+        }
+
+        async function runBertPrediction() {
+            demoSessionId++;
+            let currentSession = demoSessionId;
+            bertState = 'waiting';
+            isAnimating = true; 
+            const btn = document.getElementById('btn-predict-bert');
+
+            isAnimating = false; clearHover(); isAnimating = true;
+
+            const targetIdx = 2; // [MASK]
+            const targetColor = 'var(--accent-bert)';
+
+            for(let i=0; i<tokens.length; i++) {
+                let cell = document.getElementById(`cell-${targetIdx}-${i}`);
+                let path = document.getElementById(`path-${targetIdx}-${i}`);
+                if(cell && !cell.classList.contains('masked')) {
+                    cell.style.backgroundColor = targetColor;
+                    cell.style.color = '#fff';
+                    cell.style.boxShadow = `0 0 12px ${targetColor}`;
+                    if(path) path.classList.add('active');
+                }
+            }
+            document.getElementById(`token-${targetIdx}`).classList.add('active-target');
+
+            explanationEl.innerHTML = `<strong>Step 1: Gather context</strong><br><span style="font-family:monospace; color:#cbd5e1;">→ The cat + on mat</span>`;
+            btn.innerText = 'Next Step ⏭️';
+            await new Promise(r => resolveBertStep = r); 
+            if (currentSession !== demoSessionId) return;
+
+            explanationEl.innerHTML += `<br><br><strong>Step 2: Combine (weighted by attention)</strong><br><span style="font-family:monospace; color:#cbd5e1;">→ representation of [MASK]</span>`;
+            await new Promise(r => resolveBertStep = r);
+            if (currentSession !== demoSessionId) return;
+
+            explanationEl.innerHTML += getStrongestSignalsHtml(targetIdx, targetColor, 'sat', false);
+            
+            isAnimating = false;
+            clearHover(true); 
+            const maskEl = document.getElementById('bert-mask-token');
+            maskEl.innerText = 'sat';
+            maskEl.className = 'demo-word predicted';
+            
+            btn.innerText = 'Predicted!';
+            btn.disabled = true;
+            bertState = 'done';
+        }
+
+        function handleGptAction() {
+            if (gptState === 'idle') {
+                runGptGeneration();
+            } else if (gptState === 'waiting') {
+                if (resolveGptStep) resolveGptStep(); 
+            }
+        }
+
+        async function runGptGeneration() {
+            if (gptCurrentStep >= gptTargetSequence.length) return;
+            
+            demoSessionId++;
+            let currentSession = demoSessionId;
+            gptState = 'waiting';
+            isAnimating = true;
+            const btn = document.getElementById('btn-predict-gpt');
+
+            isAnimating = false; clearHover(); isAnimating = true;
+
+            const targetIdx = gptCurrentStep + 2; 
+            const targetColor = 'var(--accent-gpt)';
+
+            for(let i=0; i<tokens.length; i++) {
+                let cell = document.getElementById(`cell-${targetIdx}-${i}`);
+                let path = document.getElementById(`path-${targetIdx}-${i}`);
+                if(cell && !cell.classList.contains('masked') && i <= targetIdx) {
+                    cell.style.backgroundColor = targetColor;
+                    cell.style.color = '#fff';
+                    cell.style.boxShadow = `0 0 12px ${targetColor}`;
+                    if(path) path.classList.add('active');
+                }
+            }
+            document.getElementById(`token-${targetIdx}`).classList.add('active-target');
+
+            let pastWords = tokens.slice(0, targetIdx).join(' ');
+            let nextWord = gptTargetSequence[gptCurrentStep];
+
+            explanationEl.innerHTML = `<strong>Step 1: Gather past context</strong><br><span style="font-family:monospace; color:#cbd5e1;">→ ${pastWords}</span>`;
+            btn.innerText = 'Next Step ⏭️';
+            await new Promise(r => resolveGptStep = r);
+            if (currentSession !== demoSessionId) return;
+
+            explanationEl.innerHTML += `<br><br><strong>Step 2: Combine (weighted by causal attention)</strong><br><span style="font-family:monospace; color:#cbd5e1;">→ representation of next token</span>`;
+            await new Promise(r => resolveGptStep = r);
+            if (currentSession !== demoSessionId) return;
+
+            explanationEl.innerHTML += getStrongestSignalsHtml(targetIdx, targetColor, nextWord, true);
+
+            isAnimating = false;
+            clearHover(true); 
+
+            const textContainer = document.getElementById('gpt-text');
+            const newWordEl = document.createElement('span');
+            newWordEl.className = 'demo-word generated';
+            newWordEl.innerText = nextWord;
+            textContainer.appendChild(newWordEl);
+            
+            gptCurrentStep++;
+            
+            if (gptCurrentStep >= gptTargetSequence.length) {
+                btn.innerText = 'Generation Complete';
+                btn.disabled = true;
+                gptState = 'done';
+            } else {
+                btn.innerText = 'Generate Next Token';
+                gptState = 'idle';
+            }
+        }
+
+        function resetDemos() {
+            demoSessionId++; 
+            bertState = 'idle';
+            gptState = 'idle';
+            isAnimating = false;
+            clearHover();
+
+            const maskEl = document.getElementById('bert-mask-token');
+            maskEl.innerText = '[MASK]';
+            maskEl.className = 'demo-word mask';
+            const bertBtn = document.getElementById('btn-predict-bert');
+            bertBtn.disabled = false;
+            bertBtn.innerText = 'Predict [MASK]';
+
+            const gptContainer = document.getElementById('gpt-text');
+            gptContainer.innerHTML = '<span class="demo-word">The</span><span class="demo-word">cat</span>';
+            gptCurrentStep = 0;
+            const gptBtn = document.getElementById('btn-predict-gpt');
+            gptBtn.disabled = false;
+            gptBtn.innerText = 'Generate Next Token';
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            initMatrix();
+            drawLines();
+        });
+
+        window.addEventListener('resize', drawLines);
+
+    </script>
+</body>
+</html>

@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #14 by Kyle Misa (@kylemisa20): Federated Learning Visualization Learning Tool. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Federated Learning Explorer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a; /* Slate 900 */
+            color: #f8fafc; /* Slate 50 */
+            overflow-x: hidden;
+        }
+
+        /* Custom Animations */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        .glow-effect {
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.5); /* Sky 400 */
+        }
+        
+        .glow-success {
+            box-shadow: 0 0 20px rgba(74, 222, 128, 0.5); /* Green 400 */
+        }
+
+        .spin-slow {
+            animation: spin 3s linear infinite;
+        }
+
+        .pulse-border {
+            position: relative;
+        }
+        
+        .pulse-border::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 2px solid #38bdf8;
+            animation: pulse-ring 2s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
+            z-index: -1;
+        }
+
+        .particle {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background-color: #38bdf8;
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 8px #38bdf8;
+            z-index: 10;
+            display: none;
+        }
+
+        .particle.update {
+            background-color: #a78bfa; /* Purple 400 */
+            box-shadow: 0 0 8px #a78bfa;
+        }
+
+        .particle.malicious {
+            background-color: #f43f5e !important; /* Rose 500 */
+            box-shadow: 0 0 8px #f43f5e !important;
+        }
+
+        /* Connecting Lines */
+        .svg-layer {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            pointer-events: none;
+        }
+
+        .connection-line {
+            stroke: #334155; /* Slate 700 */
+            stroke-width: 2;
+            stroke-dasharray: 4 4;
+            transition: stroke 0.3s ease;
+        }
+        
+        .connection-line.active {
+            stroke: #38bdf8;
+            animation: dash 20s linear infinite;
+        }
+        
+        @keyframes dash {
+            to { stroke-dashoffset: -1000; }
+        }
+
+        .device-card {
+            transition: all 0.3s ease;
+        }
+        
+        .device-card.training {
+            transform: scale(1.05);
+            border-color: #38bdf8;
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+        }
+
+        .device-card.offline {
+            opacity: 0.4;
+            filter: grayscale(100%);
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569; 
+        }
+    </style>
+</head>
+<body class="antialiased selection:bg-sky-500 selection:text-white pb-20">
+
+    <!-- Header -->
+    <header class="border-b border-slate-800 bg-slate-900/80 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-2">
+                <i data-lucide="network" class="text-sky-400 w-8 h-8"></i>
+                <h1 class="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-sky-400 to-purple-400">
+                    FedLearn Explorer
+                </h1>
+            </div>
+            <nav class="hidden md:flex gap-6 text-sm font-medium text-slate-300">
+                <a href="#simulation" class="hover:text-white transition">Simulation</a>
+                <a href="#how-it-works" class="hover:text-white transition">How it Works</a>
+                <a href="#benefits" class="hover:text-white transition">Benefits & Challenges</a>
+            </nav>
+        </div>
+    </header>
+
+    <!-- Hero / Intro -->
+    <section class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-12 mb-16 text-center">
+        <h2 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-4">
+            Bring the Model to the Data. <br/>
+            <span class="text-transparent bg-clip-text bg-gradient-to-r from-sky-400 to-purple-400">Not the Data to the Model.</span>
+        </h2>
+        <p class="text-lg text-slate-400 max-w-2xl mx-auto leading-relaxed">
+            Federated Learning is a decentralized approach to machine learning. It allows AI models to learn from data located on millions of devices (like your phone) <strong>without that raw data ever leaving the device</strong>.
+        </p>
+    </section>
+
+    <!-- Simulation Section -->
+    <section id="simulation" class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 mb-24">
+        <div class="bg-slate-800/50 border border-slate-700 rounded-2xl p-6 shadow-2xl overflow-hidden relative flex flex-col items-center">
+            
+            <!-- Controls & Status -->
+            <div class="w-full flex flex-col md:flex-row justify-between items-center gap-4 mb-8 z-20">
+                <div class="bg-slate-900 border border-slate-700 rounded-lg p-4 flex-1 w-full flex items-center gap-4">
+                    <div id="status-icon" class="w-10 h-10 rounded-full bg-slate-800 flex items-center justify-center text-slate-400">
+                        <i data-lucide="play" class="w-5 h-5"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-sm font-bold text-slate-300 uppercase tracking-wider">Current Phase</h3>
+                        <p id="status-text" class="text-lg font-semibold text-sky-400">Ready to simulate</p>
+                    </div>
+                </div>
+                
+                <div class="flex gap-3 w-full md:w-auto">
+                    <button id="btn-next" class="flex-1 md:flex-none flex items-center justify-center gap-2 bg-sky-500 hover:bg-sky-400 text-white px-6 py-3 rounded-lg font-semibold transition shadow-lg shadow-sky-500/20">
+                        <i data-lucide="step-forward" class="w-5 h-5"></i> <span id="btn-next-text">Start Round</span>
+                    </button>
+                    <button id="btn-reset" class="flex-1 md:flex-none flex items-center justify-center gap-2 bg-slate-700 hover:bg-slate-600 text-white px-6 py-3 rounded-lg font-semibold transition">
+                        <i data-lucide="rotate-ccw" class="w-5 h-5"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Settings / Toggles -->
+            <div class="w-full flex justify-end mb-6 z-20">
+                <label class="flex items-center cursor-pointer gap-2 hover:opacity-80 transition">
+                    <div class="relative">
+                        <input type="checkbox" id="toggle-challenges" class="sr-only peer">
+                        <div class="block bg-slate-700 peer-checked:bg-rose-500 w-10 h-6 rounded-full transition-colors duration-300"></div>
+                        <div class="absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-300 transform peer-checked:translate-x-4"></div>
+                    </div>
+                    <span class="text-sm font-medium text-slate-300 flex items-center gap-1">
+                        <i data-lucide="activity" class="w-4 h-4 text-rose-400"></i> Simulate Real-World Conditions
+                    </span>
+                </label>
+            </div>
+
+            <!-- Visualization Canvas -->
+            <div id="sim-container" class="relative w-full aspect-square md:aspect-[2/1] max-w-4xl mx-auto z-10">
+                <!-- SVG Layer for Lines -->
+                <svg class="svg-layer" id="connection-svg">
+                    <!-- Lines will be injected by JS -->
+                </svg>
+
+                <!-- Server (Center) -->
+                <div class="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 z-20 flex flex-col items-center">
+                    <div id="server-node" class="w-24 h-24 bg-slate-900 border-4 border-slate-600 rounded-full flex items-center justify-center shadow-xl transition-all duration-500 relative">
+                        <i data-lucide="server" id="server-icon" class="w-10 h-10 text-slate-300"></i>
+                        <!-- Particles for downloading -->
+                        <div id="server-particles"></div>
+                    </div>
+                    <div class="mt-3 text-center">
+                        <span class="block font-bold text-slate-200">Central Server</span>
+                        <span class="text-xs text-slate-400" id="global-model-version">Global Model v1.0</span>
+                    </div>
+                </div>
+
+                <!-- Devices will be injected by JS -->
+                <div id="devices-container"></div>
+            </div>
+            
+            <!-- Explanation Panel under simulation -->
+            <div class="w-full mt-6 bg-slate-900/80 border border-slate-700 p-4 rounded-lg text-slate-300 text-sm">
+                <i data-lucide="info" class="inline w-4 h-4 mr-1 text-sky-400 mb-1"></i>
+                <span id="explanation-text">Click "Start Round" to observe the first step of the Federated Learning cycle.</span>
+            </div>
+        </div>
+    </section>
+
+    <!-- How it Works (Detailed) -->
+    <section id="how-it-works" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-24">
+        <div class="text-center mb-12">
+            <h2 class="text-3xl font-bold mb-4">How It Works</h2>
+            <p class="text-slate-400">The lifecycle of a single Federated Learning round.</p>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 relative">
+            <!-- Connecting Line (Desktop) -->
+            <div class="hidden md:block absolute top-1/2 left-0 w-full h-0.5 bg-slate-700 -z-10 transform -translate-y-1/2"></div>
+
+            <!-- Step 1 -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 relative">
+                <div class="w-10 h-10 rounded-full bg-sky-500/20 text-sky-400 flex items-center justify-center font-bold text-lg mb-4 border border-sky-500/50 md:mx-auto">1</div>
+                <h3 class="text-lg font-bold text-white mb-2 md:text-center">Initialization</h3>
+                <p class="text-slate-400 text-sm md:text-center">The central server initializes a baseline machine learning model and sends this <strong>Global Model</strong> to participating edge devices.</p>
+            </div>
+
+            <!-- Step 2 -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 relative">
+                <div class="w-10 h-10 rounded-full bg-purple-500/20 text-purple-400 flex items-center justify-center font-bold text-lg mb-4 border border-purple-500/50 md:mx-auto">2</div>
+                <h3 class="text-lg font-bold text-white mb-2 md:text-center">Local Training</h3>
+                <p class="text-slate-400 text-sm md:text-center">Each device trains the model locally using its own private, raw data. The data <strong>never leaves</strong> the device.</p>
+            </div>
+
+            <!-- Step 3 -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 relative">
+                <div class="w-10 h-10 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-lg mb-4 border border-emerald-500/50 md:mx-auto">3</div>
+                <h3 class="text-lg font-bold text-white mb-2 md:text-center">Model Update</h3>
+                <p class="text-slate-400 text-sm md:text-center">Devices send back only what they've learned (model weights/gradients), not the data itself. This update is often encrypted.</p>
+            </div>
+
+            <!-- Step 4 -->
+            <div class="bg-slate-800 border border-slate-700 rounded-xl p-6 relative">
+                <div class="w-10 h-10 rounded-full bg-amber-500/20 text-amber-400 flex items-center justify-center font-bold text-lg mb-4 border border-amber-500/50 md:mx-auto">4</div>
+                <h3 class="text-lg font-bold text-white mb-2 md:text-center">Aggregation</h3>
+                <p class="text-slate-400 text-sm md:text-center">The server aggregates the updates (e.g., via Federated Averaging) to create a smarter, new Global Model. The cycle repeats.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Benefits and Challenges -->
+    <section id="benefits" class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-24">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-12">
+            
+            <!-- Benefits -->
+            <div>
+                <div class="flex items-center gap-3 mb-8">
+                    <i data-lucide="shield-check" class="w-8 h-8 text-emerald-400"></i>
+                    <h2 class="text-3xl font-bold">Key Benefits</h2>
+                </div>
+                
+                <div class="space-y-4">
+                    <div class="bg-slate-800/50 border border-slate-700/50 rounded-lg p-5 flex gap-4 hover:border-emerald-500/30 transition">
+                        <div class="mt-1"><i data-lucide="lock" class="w-5 h-5 text-emerald-400"></i></div>
+                        <div>
+                            <h4 class="text-white font-semibold text-lg">Enhanced Data Privacy</h4>
+                            <p class="text-slate-400 text-sm mt-1">Raw personal data (photos, messages, health stats) remains on your device. The server only sees anonymous mathematical updates.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-800/50 border border-slate-700/50 rounded-lg p-5 flex gap-4 hover:border-emerald-500/30 transition">
+                        <div class="mt-1"><i data-lucide="zap" class="w-5 h-5 text-emerald-400"></i></div>
+                        <div>
+                            <h4 class="text-white font-semibold text-lg">Lower Latency & Offline AI</h4>
+                            <p class="text-slate-400 text-sm mt-1">Because the model lives on your device, predictions happen instantly locally, without needing an internet connection to send data to the cloud.</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-800/50 border border-slate-700/50 rounded-lg p-5 flex gap-4 hover:border-emerald-500/30 transition">
+                        <div class="mt-1"><i data-lucide="users" class="w-5 h-5 text-emerald-400"></i></div>
+                        <div>
+                            <h4 class="text-white font-semibold text-lg">Personalization</h4>
+                            <p class="text-slate-400 text-sm mt-1">While contributing to the global model, the local model on a specific device can be fine-tuned to uniquely fit that specific user's habits.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Challenges -->
+            <div>
+                <div class="flex items-center gap-3 mb-8">
+                    <i data-lucide="alert-triangle" class="w-8 h-8 text-rose-400"></i>
+                    <h2 class="text-3xl font-bold">Major Challenges</h2>
+                </div>
+                
+                <div class="space-y-4">
+                    <div class="bg-slate-800/50 border border-slate-700/50 rounded-lg p-5 flex gap-4 hover:border-rose-500/30 transition">
+                        <div class="mt-1"><i data-lucide="pie-chart" class="w-5 h-5 text-rose-400"></i></div>
+                        <div>
+                            <h4 class="text-white font-semibold text-lg">Non-IID Data</h4>
+                            <p class="text-slate-400 text-sm mt-1">Data across devices isn't uniformly distributed (Independent and Identically Distributed). One user might only type in Spanish, another in English, skewing local models.</p>
+                        </div>
+                    </div>
+                    
+                    <div class="bg-slate-800/50 border border-slate-700/50 rounded-lg p-5 flex gap-4 hover:border-rose-500/30 transition">
+                        <div class="mt-1"><i data-lucide="battery-warning" class="w-5 h-5 text-rose-400"></i></div>
+                        <div>
+                            <h4 class="text-white font-semibold text-lg">Systems Heterogeneity</h4>
+                            <p class="text-slate-400 text-sm mt-1">Devices have vastly different compute power, memory, battery levels, and network connectivity. Devices dropping out mid-training is a constant issue (Straggler Effect).</p>
+                        </div>
+                    </div>
+
+                    <div class="bg-slate-800/50 border border-slate-700/50 rounded-lg p-5 flex gap-4 hover:border-rose-500/30 transition">
+                        <div class="mt-1"><i data-lucide="shield-alert" class="w-5 h-5 text-rose-400"></i></div>
+                        <div>
+                            <h4 class="text-white font-semibold text-lg">Security & Poisoning</h4>
+                            <p class="text-slate-400 text-sm mt-1">Malicious actors could spoof devices and send fake, manipulated model updates to deliberately ruin or backdoor the global model.</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 py-8 text-center text-slate-500 text-sm">
+        <p>Interactive visualization built to explore the fundamentals of Federated Learning.</p>
+    </footer>
+
+    <!-- Script for Logic -->
+    <script>
+        // Initialize Icons
+        lucide.createIcons();
+
+        // Simulation State
+        const SIM_STATES = {
+            READY: 0,
+            DISTRIBUTED: 1,
+            TRAINED: 2,
+            UPLOADED: 3
+        };
+
+        let currentStep = SIM_STATES.READY;
+        let globalModelVersion = 1.0;
+        let isAnimating = false;
+        let simulateChallenges = false;
+
+        // Configuration
+        const numDevices = 5;
+        const devices = [];
+        const simContainer = document.getElementById('sim-container');
+        const devicesContainer = document.getElementById('devices-container');
+        const svgLayer = document.getElementById('connection-svg');
+        const serverNode = document.getElementById('server-node');
+        
+        // Status UI
+        const statusText = document.getElementById('status-text');
+        const statusIcon = document.getElementById('status-icon');
+        const explanationText = document.getElementById('explanation-text');
+        const versionText = document.getElementById('global-model-version');
+        const btnNext = document.getElementById('btn-next');
+        const btnNextText = document.getElementById('btn-next-text');
+        const btnReset = document.getElementById('btn-reset');
+        const toggleChallenges = document.getElementById('toggle-challenges');
+
+        const deviceTypes = [
+            { icon: 'smartphone', name: 'Phone A' },
+            { icon: 'laptop', name: 'Laptop B' },
+            { icon: 'watch', name: 'Watch C' },
+            { icon: 'smartphone', name: 'Phone D' },
+            { icon: 'tablet', name: 'Tablet E' }
+        ];
+
+        // Layout Geometry
+        function setupLayout() {
+            // Clear existing
+            devicesContainer.innerHTML = '';
+            svgLayer.innerHTML = '';
+            devices.length = 0;
+
+            const containerWidth = simContainer.clientWidth;
+            const containerHeight = simContainer.clientHeight;
+            const centerX = containerWidth / 2;
+            const centerY = containerHeight / 2;
+            
+            // Radius responsive logic
+            const radiusX = containerWidth * (window.innerWidth < 768 ? 0.35 : 0.35);
+            const radiusY = containerHeight * (window.innerWidth < 768 ? 0.40 : 0.40);
+
+            for (let i = 0; i < numDevices; i++) {
+                const angle = (i / numDevices) * (2 * Math.PI) - (Math.PI / 2); // Start at top
+                
+                // Elliptical distribution
+                const x = centerX + radiusX * Math.cos(angle);
+                const y = centerY + radiusY * Math.sin(angle);
+
+                // Add to array
+                devices.push({
+                    id: i,
+                    x: x,
+                    y: y,
+                    type: deviceTypes[i % deviceTypes.length],
+                    isStraggler: false, // Determines if it drops out
+                    isMalicious: false  // Determines if it sends poisoned data
+                });
+
+                // Create SVG Line
+                const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                line.setAttribute('x1', centerX);
+                line.setAttribute('y1', centerY);
+                line.setAttribute('x2', x);
+                line.setAttribute('y2', y);
+                line.setAttribute('class', 'connection-line');
+                line.setAttribute('id', `line-${i}`);
+                svgLayer.appendChild(line);
+
+                // Create Device DOM element
+                const deviceEl = document.createElement('div');
+                deviceEl.className = 'absolute transform -translate-x-1/2 -translate-y-1/2 flex flex-col items-center z-20 device-card';
+                deviceEl.style.left = `${x}px`;
+                deviceEl.style.top = `${y}px`;
+                deviceEl.id = `device-${i}`;
+                
+                deviceEl.innerHTML = `
+                    <div class="relative">
+                        <!-- State Label -->
+                        <div id="device-label-${i}" class="absolute bottom-full mb-3 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded shadow-lg opacity-0 transition-all duration-300 pointer-events-none z-50 backdrop-blur-md border"></div>
+                        
+                        <div class="w-16 h-16 bg-slate-800 border-2 border-slate-600 rounded-2xl flex items-center justify-center shadow-lg transition-all duration-300" id="device-box-${i}">
+                            <i data-lucide="${deviceTypes[i % deviceTypes.length].icon}" class="w-6 h-6 text-slate-300" id="device-icon-${i}"></i>
+                        </div>
+                        <!-- Data Badge -->
+                        <div class="absolute -bottom-2 -right-2 bg-slate-700 border border-slate-600 text-xs px-2 py-0.5 rounded-full flex items-center gap-1">
+                            <i data-lucide="database" class="w-3 h-3 text-emerald-400"></i>
+                        </div>
+                        <!-- Model Version Badge -->
+                        <div class="absolute -top-2 -left-2 bg-sky-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full shadow hidden" id="model-badge-${i}">
+                            v${globalModelVersion.toFixed(1)}
+                        </div>
+                    </div>
+                    <span class="mt-3 text-xs font-medium text-slate-400 bg-slate-900/80 px-2 py-1 rounded">${deviceTypes[i % deviceTypes.length].name}</span>
+                `;
+                
+                devicesContainer.appendChild(deviceEl);
+            }
+            lucide.createIcons();
+        }
+
+        // Device Label Helper
+        function setDeviceLabel(id, text, type) {
+            const label = document.getElementById(`device-label-${id}`);
+            if (!label) return;
+            
+            label.innerText = text;
+            
+            const baseClasses = "absolute bottom-full mb-3 left-1/2 transform -translate-x-1/2 whitespace-nowrap text-[10px] uppercase tracking-wider font-bold px-2 py-1 rounded shadow-lg transition-all duration-300 pointer-events-none z-50 backdrop-blur-md border";
+            
+            if (type === 'hidden') {
+                label.className = `${baseClasses} opacity-0 translate-y-2`;
+                return;
+            }
+
+            let typeClasses = "";
+            switch(type) {
+                case 'info': typeClasses = "bg-sky-500/20 text-sky-300 border-sky-500/50"; break;
+                case 'training': typeClasses = "bg-purple-500/20 text-purple-300 border-purple-500/50"; break;
+                case 'success': typeClasses = "bg-emerald-500/20 text-emerald-300 border-emerald-500/50"; break;
+                case 'error': typeClasses = "bg-rose-500/20 text-rose-300 border-rose-500/50"; break;
+                case 'offline': typeClasses = "bg-slate-800 text-slate-400 border-slate-600"; break;
+            }
+            
+            label.className = `${baseClasses} opacity-100 translate-y-0 ${typeClasses}`;
+        }
+
+        // Handle window resize
+        let resizeTimer;
+        window.addEventListener('resize', () => {
+            clearTimeout(resizeTimer);
+            resizeTimer = setTimeout(() => {
+                if(!isAnimating) setupLayout();
+            }, 200);
+        });
+
+        // Animation Particles Logic
+        function createParticleAnimation(startX, startY, endX, endY, isUpdate = false, duration = 1500, isMalicious = false) {
+            return new Promise(resolve => {
+                const particle = document.createElement('div');
+                particle.className = `particle ${isUpdate ? 'update' : ''} ${isMalicious ? 'malicious' : ''}`;
+                simContainer.appendChild(particle);
+
+                // Ensure visibility
+                particle.style.display = 'block';
+
+                const startTime = performance.now();
+
+                function animate(currentTime) {
+                    const elapsed = currentTime - startTime;
+                    const progress = Math.min(elapsed / duration, 1);
+                    
+                    // Easing (ease-in-out)
+                    const easeProgress = progress < 0.5 ? 2 * progress * progress : -1 + (4 - 2 * progress) * progress;
+
+                    const currentX = startX + (endX - startX) * easeProgress;
+                    const currentY = startY + (endY - startY) * easeProgress;
+
+                    particle.style.left = `${currentX}px`;
+                    particle.style.top = `${currentY}px`;
+
+                    if (progress < 1) {
+                        requestAnimationFrame(animate);
+                    } else {
+                        particle.remove();
+                        resolve();
+                    }
+                }
+
+                requestAnimationFrame(animate);
+            });
+        }
+
+        // UI Update Helper
+        function updateStatusUI(title, text, icon, colorClass, explanation) {
+            statusText.innerText = title;
+            statusText.className = `text-lg font-semibold text-${colorClass}`;
+            
+            statusIcon.innerHTML = `<i data-lucide="${icon}" class="w-5 h-5 text-${colorClass}"></i>`;
+            statusIcon.className = `w-10 h-10 rounded-full bg-slate-800 border border-${colorClass}/30 flex items-center justify-center`;
+            
+            explanationText.innerHTML = explanation;
+            lucide.createIcons();
+        }
+
+        // Simulation Steps
+        async function handleNextStep() {
+            if (isAnimating) return;
+            isAnimating = true;
+            btnNext.disabled = true;
+            btnNext.classList.add('opacity-50', 'cursor-not-allowed');
+
+            const cx = simContainer.clientWidth / 2;
+            const cy = simContainer.clientHeight / 2;
+
+            if (currentStep === SIM_STATES.READY) {
+                // Initialize round states
+                devices.forEach(d => {
+                    d.isStraggler = false;
+                    d.isMalicious = false;
+                });
+                
+                if (simulateChallenges) {
+                    // Guaranteed 1 dropout (straggler) and 1 poisoned (malicious) device when enabled
+                    let stragglerIdx = Math.floor(Math.random() * numDevices);
+                    let maliciousIdx = Math.floor(Math.random() * numDevices);
+                    while (maliciousIdx === stragglerIdx) {
+                        maliciousIdx = Math.floor(Math.random() * numDevices);
+                    }
+                    devices[stragglerIdx].isStraggler = true;
+                    devices[maliciousIdx].isMalicious = true;
+                }
+
+                // STEP 1: DISTRIBUTING
+                serverNode.classList.add('pulse-border');
+                updateStatusUI(
+                    "1. Distributing Model", 
+                    "Server is sending the global model to available devices.", 
+                    "download-cloud", 
+                    "sky-400",
+                    "<strong>Step 1:</strong> The central server distributes the current version of the model to edge devices over the network."
+                );
+
+                const downloadPromises = devices.map(d => {
+                    setDeviceLabel(d.id, "Downloading", "info");
+                    document.getElementById(`line-${d.id}`).classList.add('active');
+                    return createParticleAnimation(cx, cy, d.x, d.y, false, 2000);
+                });
+
+                await Promise.all(downloadPromises);
+                
+                devices.forEach(d => {
+                    setDeviceLabel(d.id, "", "hidden");
+                    document.getElementById(`line-${d.id}`).classList.remove('active');
+                    const badge = document.getElementById(`model-badge-${d.id}`);
+                    badge.classList.remove('hidden');
+                    badge.innerText = `v${globalModelVersion.toFixed(1)}`;
+                });
+                serverNode.classList.remove('pulse-border');
+
+                currentStep = SIM_STATES.DISTRIBUTED;
+                btnNextText.innerText = "Train Locally";
+
+            } else if (currentStep === SIM_STATES.DISTRIBUTED) {
+                // STEP 2: TRAINING
+                updateStatusUI(
+                    "2. Local Training", 
+                    simulateChallenges ? "Devices are training... One device dropped offline!" : "Devices are training on local data...", 
+                    "cpu", 
+                    "purple-400",
+                    simulateChallenges ? "<strong>Step 2 (Challenge):</strong> A device started training but lost connection or battery (Straggler). The others continue." : "<strong>Step 2:</strong> Devices train the model locally. Notice the data icons stay put; <em>raw data never leaves the device</em>."
+                );
+
+                // Start training for ALL devices first
+                devices.forEach(d => {
+                    setDeviceLabel(d.id, "Training", "training");
+                    const box = document.getElementById(`device-box-${d.id}`);
+                    if (d.isMalicious) {
+                        box.classList.add('border-rose-500', 'shadow-[0_0_15px_rgba(244,63,94,0.3)]');
+                        document.getElementById(`device-icon-${d.id}`).classList.add('spin-slow', 'text-rose-400');
+                    } else {
+                        box.classList.add('border-purple-500', 'shadow-[0_0_15px_rgba(168,85,247,0.3)]');
+                        document.getElementById(`device-icon-${d.id}`).classList.add('spin-slow', 'text-purple-400');
+                    }
+                });
+
+                // Simulate training for a short time
+                await new Promise(r => setTimeout(r, 1200));
+
+                // If simulating challenges, the straggler drops out mid-training
+                if (simulateChallenges) {
+                    devices.forEach(d => {
+                        if (d.isStraggler) {
+                            setDeviceLabel(d.id, "Battery Died!", "offline");
+                            const box = document.getElementById(`device-box-${d.id}`);
+                            // Stop training animations
+                            box.classList.remove('border-purple-500', 'shadow-[0_0_15px_rgba(168,85,247,0.3)]', 'border-rose-500', 'shadow-[0_0_15px_rgba(244,63,94,0.3)]');
+                            document.getElementById(`device-icon-${d.id}`).classList.remove('spin-slow', 'text-purple-400', 'text-rose-400');
+                            // Add offline state
+                            box.classList.add('offline');
+                        } else if (d.isMalicious) {
+                            setDeviceLabel(d.id, "Poisoning Data!", "error");
+                        }
+                    });
+                }
+
+                // Finish training time for the rest
+                await new Promise(r => setTimeout(r, 1300)); 
+
+                devices.forEach(d => {
+                    if(!d.isStraggler && !d.isMalicious) setDeviceLabel(d.id, "", "hidden");
+                    if(!d.isStraggler) {
+                        const box = document.getElementById(`device-box-${d.id}`);
+                        if (d.isMalicious) {
+                            box.classList.remove('border-rose-500', 'shadow-[0_0_15px_rgba(244,63,94,0.3)]');
+                            document.getElementById(`device-icon-${d.id}`).classList.remove('spin-slow', 'text-rose-400');
+                        } else {
+                            box.classList.remove('border-purple-500', 'shadow-[0_0_15px_rgba(168,85,247,0.3)]');
+                            document.getElementById(`device-icon-${d.id}`).classList.remove('spin-slow', 'text-purple-400');
+                        }
+                        const badge = document.getElementById(`model-badge-${d.id}`);
+                        badge.classList.remove('bg-sky-500');
+                        badge.classList.add(d.isMalicious ? 'bg-rose-500' : 'bg-purple-500');
+                        badge.innerHTML = '<i data-lucide="arrow-up" class="w-3 h-3"></i>';
+                    }
+                });
+                lucide.createIcons();
+
+                currentStep = SIM_STATES.TRAINED;
+                btnNextText.innerText = "Upload Updates";
+
+            } else if (currentStep === SIM_STATES.TRAINED) {
+                // STEP 3: UPLOADING
+                updateStatusUI(
+                    "3. Uploading Updates", 
+                    simulateChallenges ? "Sending updates... Notice the offline and malicious (red) devices." : "Sending learned weights/gradients back to server.", 
+                    "upload-cloud", 
+                    simulateChallenges ? "rose-400" : "emerald-400",
+                    simulateChallenges ? "<strong>Step 3 (Challenge):</strong> One device is offline (Straggler) and skipped. Another is uploading a corrupted update (Poisoning - Red). The server must handle these!" : "<strong>Step 3:</strong> Devices send back a mathematical summary (weights/gradients) of what they learned. If a device drops offline, the system ignores it."
+                );
+
+                const uploadPromises = devices.map(d => {
+                    if(d.isStraggler) {
+                        setDeviceLabel(d.id, "Skipped", "offline");
+                        return Promise.resolve();
+                    }
+                    document.getElementById(`line-${d.id}`).classList.add('active');
+                    if (d.isMalicious) {
+                        setDeviceLabel(d.id, "Uploading Poison", "error");
+                        document.getElementById(`line-${d.id}`).style.stroke = '#f43f5e'; // Rose line
+                        return createParticleAnimation(d.x, d.y, cx, cy, true, 2000, true);
+                    } else {
+                        setDeviceLabel(d.id, "Uploading", "success");
+                        document.getElementById(`line-${d.id}`).style.stroke = '#a78bfa'; // Purple line
+                        return createParticleAnimation(d.x, d.y, cx, cy, true, 2000, false);
+                    }
+                });
+
+                await Promise.all(uploadPromises);
+
+                devices.forEach(d => {
+                    setDeviceLabel(d.id, "", "hidden");
+                    document.getElementById(`line-${d.id}`).classList.remove('active');
+                    document.getElementById(`line-${d.id}`).style.stroke = '#334155'; // Reset line
+                    document.getElementById(`model-badge-${d.id}`).classList.add('hidden'); // hide badge
+                    document.getElementById(`model-badge-${d.id}`).classList.remove('bg-purple-500', 'bg-rose-500');
+                    document.getElementById(`model-badge-${d.id}`).classList.add('bg-sky-500');
+                });
+
+                currentStep = SIM_STATES.UPLOADED;
+                btnNextText.innerText = "Aggregate Updates";
+
+            } else if (currentStep === SIM_STATES.UPLOADED) {
+                // STEP 4: AGGREGATING
+                updateStatusUI(
+                    "4. Aggregation", 
+                    simulateChallenges ? "Server filtering malicious update & averaging..." : "Server is combining updates (FedAvg)...", 
+                    "layers", 
+                    "amber-400",
+                    simulateChallenges ? "<strong>Step 4:</strong> Robust aggregation algorithms detect and discard the poisoned (red) data, averaging only the valid updates to improve the Global Model safely." : "<strong>Step 4:</strong> The server averages the updates together (Federated Averaging). The global model gets smarter!"
+                );
+
+                serverNode.classList.add('glow-success', 'border-amber-400');
+                document.getElementById('server-icon').classList.add('text-amber-400', 'spin-slow');
+
+                await new Promise(r => setTimeout(r, 2500));
+
+                // Wrap up
+                globalModelVersion += 0.1;
+                versionText.innerText = `Global Model v${globalModelVersion.toFixed(1)}`;
+                
+                serverNode.classList.remove('glow-success', 'border-amber-400');
+                document.getElementById('server-icon').classList.remove('text-amber-400', 'spin-slow');
+                serverNode.classList.add('border-slate-600');
+                document.getElementById('server-icon').classList.add('text-slate-300');
+
+                devices.forEach(d => {
+                    document.getElementById(`device-box-${d.id}`).classList.remove('offline');
+                });
+
+                updateStatusUI(
+                    "Round Complete", 
+                    `Model updated to v${globalModelVersion.toFixed(1)}. Ready for next round.`, 
+                    "check-circle", 
+                    "emerald-400",
+                    "The round is complete! Click 'Start Next Round' to begin the cycle again."
+                );
+
+                currentStep = SIM_STATES.READY;
+                btnNextText.innerText = "Start Next Round";
+            }
+
+            isAnimating = false;
+            btnNext.disabled = false;
+            btnNext.classList.remove('opacity-50', 'cursor-not-allowed');
+            lucide.createIcons();
+        }
+
+        // Reset
+        function resetSimulation() {
+            if(isAnimating) return;
+            globalModelVersion = 1.0;
+            currentStep = SIM_STATES.READY;
+            btnNextText.innerText = "Start Round";
+            versionText.innerText = `Global Model v1.0`;
+            setupLayout();
+            updateStatusUI(
+                "Ready", 
+                "System initialized and ready.", 
+                "play", 
+                "sky-400",
+                "Click 'Start Round' to observe the first step of the Federated Learning cycle."
+            );
+        }
+
+        // Event Listeners
+        btnNext.addEventListener('click', handleNextStep);
+        btnReset.addEventListener('click', resetSimulation);
+        toggleChallenges.addEventListener('change', (e) => {
+            simulateChallenges = e.target.checked;
+        });
+
+        // Init
+        setupLayout();
+
+    </script>
+</body>
+</html>

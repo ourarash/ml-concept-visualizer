@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #16 by Haiyang Li (@haiyangliee): feat: add Gradient Descent Explorer (full-batch GD, batch-size trade-off, learning-rate sensitivity). -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Gradient Descent Explorer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  @keyframes flash { 0%,100% { background: transparent; } 50% { background: #bbf7d0; } }
+  .flash-anim { animation: flash 0.5s ease-out; }
+  .codeline { display: block; padding: 0.25rem 0.75rem; border-radius: 0.25rem; transition: background 0.3s, color 0.3s; }
+  .codeline.active-init   { background: #f1f5f9; color: #475569; font-weight: 600; }
+  .codeline.active-loop   { background: #dbeafe; color: #1e40af; font-weight: 600; }
+  .codeline.active-grad   { background: #fef3c7; color: #92400e; font-weight: 600; }
+  .codeline.active-update { background: #dcfce7; color: #166534; font-weight: 600; }
+  .toc-link.active { background: #d1fae5; color: #065f46; }
+  input[type=range] { accent-color: #059669; }
+  .hbar { background: #e2e8f0; border-radius: 4px; height: 14px; overflow: hidden; }
+  .hbar-fill { height: 100%; border-radius: 4px; transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); }
+  .stat-row { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+  .data-dot { display: inline-block; width: 0.6rem; height: 0.6rem; background: #059669; border-radius: 50%; margin: 0 0.05rem; vertical-align: middle; }
+  .data-batch { display: inline-block; padding: 0.15rem 0.3rem; border: 1px solid #94a3b8; border-radius: 0.25rem; margin: 0 0.15rem; }
+  @media (max-width: 540px) {
+    .stat-row { font-size: 0.7rem; }
+  }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<header class="max-w-5xl mx-auto px-4 pt-10 pb-6">
+  <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Gradient Descent Explorer</h1>
+  <p class="text-slate-600 mt-2 max-w-3xl">Step through full-batch gradient descent line by line, see why mini-batch sits in the sweet spot between SGD and full batch, watch all three converge on the loss landscape, and feel the effect of the learning rate α.</p>
+  <div class="mt-3 text-xs font-mono text-slate-500 bg-white border border-slate-200 rounded-md px-3 py-2 inline-block">
+    Linear regression on n = 20 synthetic points <span class="text-emerald-700">y ≈ 2x + noise</span>. The exam formulas <code class="text-emerald-700">dL/dw = (1/n)Σ(ŷᵢ − yᵢ)xᵢ</code> and <code class="text-emerald-700">w ← w − α · dL/dw</code> drive every animation on this page.
+  </div>
+</header>
+
+<nav class="sticky top-0 z-10 bg-slate-50/95 backdrop-blur border-b border-slate-200">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap gap-2 text-sm">
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#stepper">📝 Algorithm Stepper</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#batchsize">⚖ Batch Size</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#landscape">🏔 Loss Landscape</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#lr">🎛 Learning Rate α</a>
+  </div>
+</nav>
+
+<main class="max-w-5xl mx-auto px-4 py-8 space-y-14">
+
+  <!-- ============================ §1 ALGORITHM STEPPER ============================ -->
+  <section id="stepper" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-emerald-700 mb-1">📝 Full-Batch Gradient Descent — Step by Step</h2>
+    <p class="text-sm text-slate-600 mb-4">Click <span class="font-mono">▶ Next Step</span> to walk through one iteration phase by phase. The pseudo-code line currently executing lights up; the right panel shows the actual numbers being plugged into the exam formula.</p>
+
+    <div class="grid md:grid-cols-2 gap-6 items-start">
+      <div>
+        <pre class="font-mono text-sm bg-slate-50 p-4 rounded-md border border-slate-200 leading-relaxed"><span id="line-init"   class="codeline">Initialize w = w₀  (here: 4.5)</span><span id="line-loop"   class="codeline">for iteration in range(m):</span><span id="line-grad"   class="codeline">    dL/dw = (1/n) Σ(ŷᵢ − yᵢ)xᵢ</span><span id="line-update" class="codeline">    w = w − α · dL/dw</span><span                  class="codeline">return w</span></pre>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-md p-4 stat-row">
+        <div class="flex justify-between mb-2 text-slate-700">
+          <span>Iteration:</span>
+          <span><span id="alg-iter" class="font-bold">0</span> / <span id="alg-max">20</span></span>
+        </div>
+        <div class="text-slate-500 mb-3">Currently executing: <span id="alg-current" class="text-slate-800 font-semibold">—</span></div>
+        <div class="border-t border-slate-100 pt-2 space-y-1">
+          <div class="flex justify-between"><span class="text-slate-500">n</span><span>20</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">α</span><span id="alg-alpha-show">0.10</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">dL/dw</span><span id="alg-grad" class="text-amber-700 font-semibold">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">w (before)</span><span id="alg-w-before">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">w (after)</span><span id="alg-w-after" class="text-emerald-700 font-semibold">—</span></div>
+          <div class="flex justify-between"><span class="text-slate-500">Loss</span><span><span id="alg-loss-before">—</span> → <span id="alg-loss-after" class="text-emerald-700 font-semibold">—</span></span></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-4 mt-4">
+      <label for="alg-alpha" class="text-sm text-slate-700">α = <span id="alg-alpha-label" class="font-mono font-semibold">0.10</span></label>
+      <input id="alg-alpha" type="range" min="0.01" max="0.5" step="0.01" value="0.10" oninput="algSyncAlpha()" class="flex-1 min-w-[160px]">
+      <label for="alg-m" class="text-sm text-slate-700">m = <span id="alg-m-label" class="font-mono font-semibold">20</span></label>
+      <input id="alg-m" type="range" min="1" max="50" step="1" value="20" oninput="algSyncM()" class="flex-1 min-w-[120px]">
+      <button onclick="algNext()"  class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶ Next Step</button>
+      <button onclick="algRunAll()" class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶▶ Run All</button>
+      <button onclick="algReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">dL/dw = (1/n) Σ(ŷᵢ − yᵢ)xᵢ <span class="text-blue-600">// where ŷᵢ = w·xᵢ</span><br>w ← w − α · dL/dw</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Full-batch GD scans <em>all n samples</em> before each weight update, so the gradient is exact (zero variance) — but every update costs O(n) work.</div>
+    </div>
+  </section>
+
+  <!-- ============================ §2 BATCH SIZE EXPLORER ============================ -->
+  <section id="batchsize" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-emerald-700 mb-1">⚖ Why Not Size = 1 or Size = n? — Batch Size Trade-offs</h2>
+    <p class="text-sm text-slate-600 mb-4">Drag the slider to feel the trade-off the exam asked about. The two ends are bad for opposite reasons; the sweet spot in the middle is why production training uses mini-batch.</p>
+
+    <div class="flex flex-wrap items-center gap-4 mb-4">
+      <label class="text-sm text-slate-700">Batch size B = <span id="bs-label" class="font-mono font-semibold">8</span> <span class="text-slate-400 text-xs">(n = 20)</span></label>
+      <input id="bs-slider" type="range" min="1" max="20" step="1" value="8" oninput="updateBatchSize()" class="flex-1 min-w-[200px]">
+    </div>
+
+    <div class="grid md:grid-cols-2 gap-6">
+      <div class="space-y-3">
+        <div>
+          <div class="flex justify-between text-xs text-slate-500 mb-1"><span>GPU utilization (approx.)</span><span id="bs-gpu-pct" class="font-mono">63 %</span></div>
+          <div class="hbar"><div id="bs-gpu-bar" class="hbar-fill bg-emerald-500" style="width: 63%"></div></div>
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Gradient noise <span class="text-slate-400">(1 / √B, normalised)</span></span><span id="bs-noise-pct" class="font-mono">35 %</span></div>
+          <div class="hbar"><div id="bs-noise-bar" class="hbar-fill bg-rose-500" style="width: 35%"></div></div>
+        </div>
+        <div>
+          <div class="flex justify-between text-xs text-slate-500 mb-1"><span>Updates per epoch</span><span id="bs-updates-pct" class="font-mono">3</span></div>
+          <div class="hbar"><div id="bs-updates-bar" class="hbar-fill bg-indigo-500" style="width: 0%"></div></div>
+        </div>
+      </div>
+
+      <div id="bs-hint" class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-900">
+        <!-- populated by JS -->
+      </div>
+    </div>
+
+    <div class="mt-5">
+      <div class="text-xs uppercase tracking-wide text-slate-500 mb-1">Updates per epoch — visual layout of n = 20 samples</div>
+      <div id="bs-layout" class="p-3 bg-slate-50 border border-slate-200 rounded-md font-mono text-sm leading-loose break-words">
+        <!-- populated by JS: dots split into batches with bracket separators -->
+      </div>
+      <div class="text-xs text-slate-500 mt-1">Each <span class="data-batch">[ ● ● ● ]</span> processes together; the weights update <strong>once</strong> per group. <button onclick="bsAnimate()" class="ml-2 px-2 py-0.5 bg-emerald-600 text-white rounded text-xs hover:bg-emerald-500">▶ Animate one epoch</button></div>
+
+      <div class="mt-3 text-xs text-slate-600 bg-slate-50 border border-slate-200 rounded-md px-3 py-2 leading-relaxed">
+        <strong class="text-slate-800">When n isn't divisible by B</strong> (e.g. <span class="font-mono">B = 8, n = 20 → groups of 8, 8, 4</span>), the last batch is smaller. PyTorch's <code class="font-mono">drop_last=False</code> (default) processes the partial batch normally and runs <code class="font-mono">⌈n/B⌉</code> updates per epoch; <code class="font-mono">drop_last=True</code> skips it for an integer <code class="font-mono">⌊n/B⌋</code> updates. <span class="text-slate-500">§3 below uses a slightly different scheme — each step picks a fresh random subset of size B rather than walking a shuffled epoch — so its SGD path is genuinely stochastic across Resets, which is the whole point of demonstrating gradient noise.</span>
+      </div>
+    </div>
+
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">B = 1 (SGD): high noise, no SIMD<br>B = n (Batch GD): exact, slow, memory-heavy<br>B ∈ [32, 256] (mini-batch): the production sweet spot</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 The numbers above are illustrative — real GPU utilisation depends on architecture, kernel, and dtype. The qualitative trade-off (noise ↓ as B ↑, updates / epoch ↓ as B ↑) is universal.</div>
+    </div>
+  </section>
+
+  <!-- ============================ §3 LOSS LANDSCAPE ============================ -->
+  <section id="landscape" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-emerald-700 mb-1">🏔 Convergence Paths on the Loss Surface</h2>
+    <p class="text-sm text-slate-600 mb-4">All three strategies start at the same w₀ = 4.5 and chase the optimum w* = 2.0. Watch how full-batch GD slides smoothly, mini-batch wobbles a little, and SGD zig-zags loudly on its way down.</p>
+
+    <div class="flex flex-wrap items-center gap-4 mb-3">
+      <label class="text-sm text-slate-700">α = <span id="ls-alpha-label" class="font-mono font-semibold">0.10</span></label>
+      <input id="ls-alpha" type="range" min="0.01" max="0.5" step="0.01" value="0.10" oninput="lsSyncAlpha()" class="flex-1 min-w-[160px]">
+      <label class="text-sm text-slate-700">Mini-batch B = <span id="ls-b-label" class="font-mono font-semibold">8</span></label>
+      <input id="ls-b" type="range" min="2" max="19" step="1" value="8" oninput="lsSyncB()" class="flex-1 min-w-[120px]">
+      <button onclick="lsRun()"   class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶ Run</button>
+      <button onclick="lsPause()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">⏸ Pause</button>
+      <button onclick="lsReset()" class="px-3 py-2 bg-slate-100 border border-slate-200 rounded-md text-sm hover:bg-slate-200">↺ Reset</button>
+    </div>
+
+    <canvas id="landscape-canvas"     class="w-full rounded-md border border-slate-200 bg-slate-50" style="height: 300px"></canvas>
+    <canvas id="loss-history-canvas"  class="w-full rounded-md border border-slate-200 bg-slate-50 mt-3" style="height: 180px"></canvas>
+
+    <div class="mt-3 grid grid-cols-3 gap-2 stat-row">
+      <div class="bg-emerald-50 border border-emerald-200 rounded-md p-2">
+        <div class="text-emerald-700 font-semibold text-xs">● Batch GD (B = n)</div>
+        <div>w = <span id="ls-w-batch">4.500</span></div>
+        <div>Loss = <span id="ls-loss-batch">—</span></div>
+      </div>
+      <div class="bg-blue-50 border border-blue-200 rounded-md p-2">
+        <div class="text-blue-700 font-semibold text-xs">● Mini-batch (B = <span id="ls-b-show">8</span>)</div>
+        <div>w = <span id="ls-w-mini">4.500</span></div>
+        <div>Loss = <span id="ls-loss-mini">—</span></div>
+      </div>
+      <div class="bg-rose-50 border border-rose-200 rounded-md p-2">
+        <div class="text-rose-700 font-semibold text-xs">● SGD (B = 1)</div>
+        <div>w = <span id="ls-w-sgd">4.500</span></div>
+        <div>Loss = <span id="ls-loss-sgd">—</span></div>
+      </div>
+    </div>
+
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">w_{t+1} = w_t − α · ĝ_t,&nbsp; ĝ_t = (1/B) Σ_{i ∈ batch} (w·xᵢ − yᵢ)·xᵢ</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 Every strategy has the same long-run target. SGD's noisier path actually <em>helps</em> escape sharp minima in deep networks — but here on a smooth quadratic the wobble is pure cost.</div>
+    </div>
+  </section>
+
+  <!-- ============================ §4 LR EFFECTS ============================ -->
+  <section id="lr" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+    <h2 class="text-xl font-bold text-emerald-700 mb-1">🎛 Effect of Learning Rate α</h2>
+    <p class="text-sm text-slate-600 mb-4">Three full-batch runs with three different α values, animated side by side. The y-axis is loss, the x-axis is iteration.</p>
+
+    <div class="grid md:grid-cols-3 gap-3">
+      <div>
+        <div class="text-sm font-semibold text-amber-700 mb-1">α = 0.01 — too small</div>
+        <canvas id="lr-small-canvas" class="w-full rounded-md border border-slate-200 bg-slate-50" style="height: 180px"></canvas>
+        <div class="text-xs text-slate-600 mt-1">Steps are tiny; loss <em>still drifting down</em> after 50 iterations.</div>
+      </div>
+      <div>
+        <div class="text-sm font-semibold text-emerald-700 mb-1">α = 0.10 — just right</div>
+        <canvas id="lr-good-canvas"  class="w-full rounded-md border border-slate-200 bg-slate-50" style="height: 180px"></canvas>
+        <div class="text-xs text-slate-600 mt-1">Loss drops fast, then settles cleanly at the optimum.</div>
+      </div>
+      <div>
+        <div class="text-sm font-semibold text-rose-700 mb-1">α = 0.45 — too large</div>
+        <canvas id="lr-large-canvas" class="w-full rounded-md border border-slate-200 bg-slate-50" style="height: 180px"></canvas>
+        <div class="text-xs text-slate-600 mt-1">Step overshoots the minimum and the error grows — <strong>diverging</strong>.</div>
+      </div>
+    </div>
+
+    <div class="mt-4 flex flex-wrap items-center gap-3">
+      <button onclick="lrRunAll()" class="px-3 py-2 bg-emerald-600 text-white rounded-md text-sm font-semibold hover:bg-emerald-500">▶ Replay all three</button>
+    </div>
+
+    <div class="mt-4 grid md:grid-cols-2 gap-3">
+      <div class="bg-blue-50 border border-blue-100 rounded-lg p-3 text-sm font-mono text-blue-900">For a 1-D quadratic loss with curvature E[x²]:<br>α &lt; 1 / E[x²] → smooth descent<br>α &gt; 2 / E[x²] → divergent</div>
+      <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-sm text-emerald-900">💡 In practice: start at α = 0.1, halve it whenever loss bumps up. Adam and friends adapt α per parameter, sparing you most of the manual tuning.</div>
+    </div>
+  </section>
+
+</main>
+
+<aside class="max-w-5xl mx-auto px-4 pb-8">
+  <div class="bg-white border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+    <div class="font-semibold text-slate-900 mb-2">📊 Where do the numbers come from?</div>
+    Every animation on this page runs against the same <strong>n = 20 synthetic linear-regression dataset</strong>: <code class="font-mono text-emerald-700">y = 2·x + ε</code> with x evenly spaced in [−4, 4] and a small deterministic noise term ε. The true slope is therefore <code class="font-mono">w* = 2.0</code>; every strategy starts at <code class="font-mono">w₀ = 4.5</code>. The loss is the standard MSE <code class="font-mono">L(w) = (1/2n) Σ(w·xᵢ − yᵢ)²</code>, and the gradient is exactly the exam formula <code class="font-mono">dL/dw = (1/n) Σ(ŷᵢ − yᵢ)·xᵢ</code>.
+    <div class="mt-2 text-xs text-slate-500">
+      Nothing on this page calls a real model — it's pure JavaScript arithmetic on the formulas above, so the numbers in the right-hand panels are genuinely the gradients and losses an exam grader would compute by hand.<br>
+      Want to see how the gradient itself is <em>derived</em> via the chain rule? See the sibling page → <a href="back-propagation.html" class="underline hover:text-emerald-700">Backpropagation & Chain Rule</a>.
+    </div>
+  </div>
+</aside>
+
+<footer class="max-w-5xl mx-auto px-4 pb-10 text-center text-xs text-slate-400">
+  Part of <a href="../index.html" class="hover:text-emerald-700">ML Concept Visualizer</a>
+</footer>
+
+<script>
+// ─────────────────────────── DATA + MATH ───────────────────────────
+
+// Deterministic toy linear-regression dataset: y = 2x + ε with seeded noise.
+// x ∈ [-4, 4] is wider than [-2, 2] so that E[x²] ≈ 5.9, which makes α = 0.45 visibly diverge in §4
+// (the divergence threshold is α > 2/E[x²] ≈ 0.34 for this 1-D quadratic).
+const N = 20;
+const TRUE_W = 2.0;
+const W0 = 4.5;
+
+// Tiny seeded PRNG so the dataset (and therefore the visuals) is reproducible.
+let _seed = 42;
+function rand() {
+  _seed = (_seed * 9301 + 49297) % 233280;
+  return _seed / 233280;
+}
+
+const DATA = [];
+for (let i = 0; i < N; i++) {
+  const x = -4 + (8 * i) / (N - 1);          // 20 points evenly spaced in [-4, 4]
+  const y = TRUE_W * x + (rand() - 0.5) * 0.6;
+  DATA.push({ x: x, y: y });
+}
+
+// Exam formulas, implemented literally.
+function gradient(w, data) {
+  // dL/dw = (1/n) Σ (ŷᵢ - yᵢ) xᵢ      where ŷᵢ = w·xᵢ
+  let g = 0;
+  for (let i = 0; i < data.length; i++) {
+    g += (w * data[i].x - data[i].y) * data[i].x;
+  }
+  return g / data.length;
+}
+function lossVal(w, data) {
+  // L(w) = (1/2n) Σ (w·xᵢ - yᵢ)²
+  let s = 0;
+  for (let i = 0; i < data.length; i++) {
+    const r = w * data[i].x - data[i].y;
+    s += r * r;
+  }
+  return s / (2 * data.length);
+}
+function updateW(w, alpha, data) {
+  // w ← w - α · dL/dw
+  return w - alpha * gradient(w, data);
+}
+function sampleBatch(data, B) {
+  // For B ≥ data.length we just return everything.
+  if (B >= data.length) return data;
+  // INTENTIONAL: Math.random() rather than the seeded rand() above.
+  // The synthetic dataset is reproducible across reloads (so students always see the
+  // same loss curve and the same exam-aligned numbers), but mini-batch / SGD sampling
+  // is meant to be genuinely stochastic — every ▶ Run in §3 should produce a different
+  // SGD path, which is the whole point of demonstrating gradient noise. Seeding this
+  // call would defeat that lesson.
+  const idx = data.map(function (_, i) { return i; });
+  for (let i = idx.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));   // ← see comment above
+    const tmp = idx[i]; idx[i] = idx[j]; idx[j] = tmp;
+  }
+  const out = [];
+  for (let k = 0; k < B; k++) out.push(data[idx[k]]);
+  return out;
+}
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+function fmt(v, d) { if (isNaN(v)) return 'NaN'; if (!isFinite(v)) return '∞'; return v.toFixed(d == null ? 3 : d); }
+
+// ─────────────────────────── §1 ALGORITHM STEPPER ───────────────────────────
+const alg = {
+  iter: 0,
+  phase: 0,             // 0 = idle, 1 = init, 2 = loop, 3 = grad, 4 = update
+  w: W0,
+  lossBefore: 0,
+  lossAfter: 0,
+  gradVal: 0,
+  wBefore: W0,
+  running: false,
+  rafId: null
+};
+
+function algSyncAlpha() {
+  const a = parseFloat(document.getElementById('alg-alpha').value);
+  document.getElementById('alg-alpha-label').textContent = a.toFixed(2);
+  document.getElementById('alg-alpha-show').textContent  = a.toFixed(2);
+}
+function algSyncM() {
+  const m = parseInt(document.getElementById('alg-m').value, 10);
+  document.getElementById('alg-m-label').textContent = m;
+  document.getElementById('alg-max').textContent     = m;
+}
+function algClearLines() {
+  ['line-init', 'line-loop', 'line-grad', 'line-update'].forEach(function (id) {
+    const el = document.getElementById(id);
+    el.classList.remove('active-init', 'active-loop', 'active-grad', 'active-update');
+  });
+}
+function algReset() {
+  alg.iter = 0; alg.phase = 0;
+  alg.w = W0; alg.wBefore = W0;
+  alg.lossBefore = lossVal(W0, DATA); alg.lossAfter = alg.lossBefore;
+  alg.gradVal = 0;
+  alg.running = false;
+  if (alg.rafId) { cancelAnimationFrame(alg.rafId); alg.rafId = null; }
+  algClearLines();
+  document.getElementById('alg-iter').textContent       = 0;
+  document.getElementById('alg-current').textContent    = '—';
+  document.getElementById('alg-grad').textContent       = '—';
+  document.getElementById('alg-w-before').textContent   = '—';
+  document.getElementById('alg-w-after').textContent    = '—';
+  document.getElementById('alg-loss-before').textContent = '—';
+  document.getElementById('alg-loss-after').textContent  = '—';
+}
+function algNext() {
+  const m = parseInt(document.getElementById('alg-m').value, 10);
+  const a = parseFloat(document.getElementById('alg-alpha').value);
+
+  // Phase 0 → 1: initialise (only once, then jump straight to loop on subsequent clicks).
+  if (alg.phase === 0) {
+    alg.phase = 1;
+    algClearLines();
+    document.getElementById('line-init').classList.add('active-init');
+    document.getElementById('alg-current').textContent = 'Initialise w';
+    document.getElementById('alg-w-before').textContent = fmt(W0);
+    document.getElementById('alg-w-after').textContent  = fmt(W0);
+    return;
+  }
+
+  // Phase 1 → 2 OR Phase 4 → 2: enter loop (header line).
+  if (alg.phase === 1 || alg.phase === 4) {
+    if (alg.iter >= m) {
+      document.getElementById('alg-current').textContent = 'Loop finished — return w';
+      algClearLines();
+      return;
+    }
+    alg.phase = 2;
+    algClearLines();
+    document.getElementById('line-loop').classList.add('active-loop');
+    document.getElementById('alg-current').textContent = 'Enter loop iteration ' + (alg.iter + 1);
+    return;
+  }
+
+  // Phase 2 → 3: compute gradient.
+  if (alg.phase === 2) {
+    alg.phase = 3;
+    alg.gradVal = gradient(alg.w, DATA);
+    alg.wBefore = alg.w;
+    alg.lossBefore = lossVal(alg.w, DATA);
+    algClearLines();
+    document.getElementById('line-grad').classList.add('active-grad');
+    document.getElementById('alg-current').textContent = 'Compute dL/dw';
+    document.getElementById('alg-grad').textContent     = fmt(alg.gradVal);
+    document.getElementById('alg-w-before').textContent = fmt(alg.wBefore);
+    document.getElementById('alg-loss-before').textContent = fmt(alg.lossBefore);
+    return;
+  }
+
+  // Phase 3 → 4: update weight.
+  if (alg.phase === 3) {
+    alg.phase = 4;
+    alg.w = alg.wBefore - a * alg.gradVal;
+    alg.lossAfter = lossVal(alg.w, DATA);
+    alg.iter++;
+    algClearLines();
+    document.getElementById('line-update').classList.add('active-update');
+    document.getElementById('alg-current').textContent = 'Update w  (w ← w − α · dL/dw)';
+    document.getElementById('alg-w-after').textContent  = fmt(alg.w);
+    document.getElementById('alg-loss-after').textContent = fmt(alg.lossAfter);
+    document.getElementById('alg-iter').textContent     = alg.iter;
+    return;
+  }
+}
+function algRunAll() {
+  if (alg.running) return;
+  // Reset to a fresh start before running.
+  algReset();
+  alg.running = true;
+  // Step through phases on a fixed cadence (~150 ms per phase). 4 phases per iter.
+  const stepMs = 150;
+  let last = 0;
+  function tick(t) {
+    if (!alg.running) return;
+    if (t - last < stepMs) { alg.rafId = requestAnimationFrame(tick); return; }
+    last = t;
+    const m = parseInt(document.getElementById('alg-m').value, 10);
+    if (alg.iter >= m && alg.phase >= 4) {
+      alg.running = false;
+      algClearLines();
+      document.getElementById('alg-current').textContent = 'Done — w converged';
+      return;
+    }
+    algNext();
+    alg.rafId = requestAnimationFrame(tick);
+  }
+  alg.rafId = requestAnimationFrame(tick);
+}
+
+// ─────────────────────────── §2 BATCH SIZE EXPLORER ───────────────────────────
+function gpuUtil(B)   { return 1 - Math.exp(-B / 8); }                   // empirical sigmoid-like
+function gradNoise(B) { return 1 / Math.sqrt(B); }                       // SE of mean ∝ 1/√B
+
+function bsRender(B) {
+  const util = gpuUtil(B);
+  const noise = gradNoise(B);
+  const updates = Math.ceil(N / B);
+
+  document.getElementById('bs-label').textContent       = B;
+  document.getElementById('bs-gpu-pct').textContent     = (util * 100).toFixed(0) + ' %';
+  document.getElementById('bs-noise-pct').textContent   = (noise * 100).toFixed(0) + ' %';
+  document.getElementById('bs-updates-pct').textContent = updates;
+  document.getElementById('bs-gpu-bar').style.width     = (util * 100).toFixed(1) + '%';
+  document.getElementById('bs-noise-bar').style.width   = (noise * 100).toFixed(1) + '%';
+  // Updates-bar uses log scale so 1 looks short and 20 looks full.
+  document.getElementById('bs-updates-bar').style.width = (Math.log(updates + 1) / Math.log(N + 1) * 100).toFixed(1) + '%';
+
+  // Hint text — three regimes from the exam answer.
+  const hint = document.getElementById('bs-hint');
+  if (B === 1) {
+    hint.innerHTML = '<div class="font-semibold text-rose-700 mb-1">⚠ Size = 1 (SGD)</div>'
+      + 'Loses GPU SIMD / vectorisation acceleration. Gradient is based on a single point, so it is high-variance — weights jitter, and you typically need many more iterations to reach the optimum.';
+    hint.className = 'bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-900';
+  } else if (B >= N) {
+    hint.innerHTML = '<div class="font-semibold text-rose-700 mb-1">⚠ Size = n (Full-batch GD)</div>'
+      + 'Gradient is the most accurate (lowest variance), but each update has to scan the entire dataset, so updates are slow and memory-heavy.';
+    hint.className = 'bg-rose-50 border border-rose-200 rounded-lg p-3 text-sm text-rose-900';
+  } else {
+    hint.innerHTML = '<div class="font-semibold text-emerald-700 mb-1">✓ Mini-batch (B = ' + B + ')</div>'
+      + 'GPU is utilised efficiently in parallel; gradient is stable; weights update frequently. Production training typically uses B ∈ [32, 256].';
+    hint.className = 'bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm text-emerald-900';
+  }
+
+  // Visual layout of n=20 dots split into batches.
+  const layout = document.getElementById('bs-layout');
+  layout.innerHTML = '';
+  let i = 0;
+  while (i < N) {
+    const groupSize = Math.min(B, N - i);
+    const grp = document.createElement('span');
+    grp.className = 'data-batch';
+    grp.dataset.idx = String(layout.children.length);
+    for (let k = 0; k < groupSize; k++) {
+      const dot = document.createElement('span');
+      dot.className = 'data-dot';
+      grp.appendChild(dot);
+    }
+    layout.appendChild(grp);
+    i += groupSize;
+  }
+}
+function updateBatchSize() {
+  const B = parseInt(document.getElementById('bs-slider').value, 10);
+  bsRender(B);
+}
+var bsAnimating = false;
+function bsAnimate() {
+  if (bsAnimating) return;   // prevent stacked animation chains on rapid clicks
+  bsAnimating = true;
+  const groups = document.querySelectorAll('#bs-layout .data-batch');
+  groups.forEach(function (g, idx) {
+    setTimeout(function () {
+      g.classList.add('flash-anim');
+      setTimeout(function () { g.classList.remove('flash-anim'); }, 500);
+    }, idx * 600);
+  });
+  setTimeout(function () { bsAnimating = false; }, groups.length * 600 + 600);
+}
+
+// ─────────────────────────── §3 LOSS LANDSCAPE ───────────────────────────
+const ls = {
+  wBatch: W0, wMini: W0, wSGD: W0,
+  step: 0,
+  maxSteps: 60,
+  running: false,
+  rafId: null,
+  history: { batch: [], mini: [], sgd: [] }
+};
+function lsSyncAlpha() {
+  const a = parseFloat(document.getElementById('ls-alpha').value);
+  document.getElementById('ls-alpha-label').textContent = a.toFixed(2);
+}
+function lsSyncB() {
+  // Live-update the two B readouts as the user drags the mini-batch slider.
+  // The running animation, if any, picks up the new B value at its next step.
+  const B = document.getElementById('ls-b').value;
+  document.getElementById('ls-b-label').textContent = B;
+  document.getElementById('ls-b-show').textContent  = B;
+}
+function lsReset() {
+  ls.wBatch = W0; ls.wMini = W0; ls.wSGD = W0;
+  ls.step = 0;
+  ls.history = { batch: [], mini: [], sgd: [] };
+  ls.running = false;
+  if (ls.rafId) { cancelAnimationFrame(ls.rafId); ls.rafId = null; }
+  lsRefreshReadout();
+  drawLandscape();
+  drawLossHistory();
+}
+function lsRefreshReadout() {
+  document.getElementById('ls-w-batch').textContent    = fmt(ls.wBatch);
+  document.getElementById('ls-w-mini').textContent     = fmt(ls.wMini);
+  document.getElementById('ls-w-sgd').textContent      = fmt(ls.wSGD);
+  document.getElementById('ls-loss-batch').textContent = fmt(lossVal(ls.wBatch, DATA));
+  document.getElementById('ls-loss-mini').textContent  = fmt(lossVal(ls.wMini, DATA));
+  document.getElementById('ls-loss-sgd').textContent   = fmt(lossVal(ls.wSGD, DATA));
+  document.getElementById('ls-b-show').textContent     = document.getElementById('ls-b').value;
+  document.getElementById('ls-b-label').textContent    = document.getElementById('ls-b').value;
+}
+function lsRun() {
+  if (ls.running) return;
+  ls.running = true;
+  const stepMs = 80;
+  let last = 0;
+  function tick(t) {
+    if (!ls.running) return;
+    if (t - last < stepMs) { ls.rafId = requestAnimationFrame(tick); return; }
+    last = t;
+    if (ls.step >= ls.maxSteps) { ls.running = false; return; }
+
+    const a = parseFloat(document.getElementById('ls-alpha').value);
+    const B = parseInt(document.getElementById('ls-b').value, 10);
+
+    ls.wBatch = updateW(ls.wBatch, a, DATA);
+    ls.wMini  = updateW(ls.wMini,  a, sampleBatch(DATA, B));
+    ls.wSGD   = updateW(ls.wSGD,   a, sampleBatch(DATA, 1));
+
+    // Clamp to a sane range so divergence doesn't blow the canvas.
+    ls.wBatch = clamp(ls.wBatch, -50, 50);
+    ls.wMini  = clamp(ls.wMini,  -50, 50);
+    ls.wSGD   = clamp(ls.wSGD,   -50, 50);
+
+    ls.history.batch.push({ w: ls.wBatch, loss: lossVal(ls.wBatch, DATA) });
+    ls.history.mini.push( { w: ls.wMini,  loss: lossVal(ls.wMini,  DATA) });
+    ls.history.sgd.push(  { w: ls.wSGD,   loss: lossVal(ls.wSGD,   DATA) });
+
+    ls.step++;
+    lsRefreshReadout();
+    drawLandscape();
+    drawLossHistory();
+    ls.rafId = requestAnimationFrame(tick);
+  }
+  ls.rafId = requestAnimationFrame(tick);
+}
+function lsPause() {
+  ls.running = false;
+  if (ls.rafId) { cancelAnimationFrame(ls.rafId); ls.rafId = null; }
+}
+
+function drawLandscape() {
+  const c = document.getElementById('landscape-canvas');
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = c.width / dpr, H = c.height / dpr;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  // Coordinate mapping
+  const wMin = -1, wMax = 5;
+  const lMin = 0;
+  // Estimate lMax from corners of the visible w range.
+  const lMax = Math.max(lossVal(wMin, DATA), lossVal(wMax, DATA), 30);
+  const padL = 36, padR = 12, padT = 14, padB = 24;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  function X(w) { return padL + ((w - wMin) / (wMax - wMin)) * plotW; }
+  function Y(l) { return padT + (1 - (l - lMin) / (lMax - lMin)) * plotH; }
+
+  // Axes
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, H - padB); ctx.lineTo(W - padR, H - padB); ctx.stroke();
+  ctx.fillStyle = '#64748b'; ctx.font = '11px ui-monospace, Menlo, monospace';
+  ctx.fillText('Loss', 4, padT + 10);
+  ctx.fillText('w',    W - padR - 8, H - 6);
+
+  // Loss curve L(w)
+  ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  let first = true;
+  const samples = 200;
+  for (let i = 0; i <= samples; i++) {
+    const w = wMin + (wMax - wMin) * (i / samples);
+    const l = lossVal(w, DATA);
+    if (l > lMax) continue;
+    const x = X(w), y = Y(l);
+    if (first) { ctx.moveTo(x, y); first = false; } else { ctx.lineTo(x, y); }
+  }
+  ctx.stroke();
+
+  // Optimum w*
+  ctx.strokeStyle = '#94a3b8'; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(X(TRUE_W), padT); ctx.lineTo(X(TRUE_W), H - padB); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#475569';
+  ctx.fillText('w* = ' + TRUE_W, X(TRUE_W) + 4, padT + 10);
+
+  // Three runners. Trail for visibility.
+  function drawRunner(history, color, currentW) {
+    if (history.length > 1) {
+      ctx.strokeStyle = color + '40';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      for (let i = 0; i < history.length; i++) {
+        const w = clamp(history[i].w, wMin, wMax);
+        const l = clamp(history[i].loss, lMin, lMax);
+        const x = X(w), y = Y(l);
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+      }
+      ctx.stroke();
+    }
+    const wDraw = clamp(currentW, wMin, wMax);
+    const lDraw = clamp(lossVal(currentW, DATA), lMin, lMax);
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(X(wDraw), Y(lDraw), 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  drawRunner(ls.history.batch, '#16a34a', ls.wBatch);
+  drawRunner(ls.history.mini,  '#2563eb', ls.wMini);
+  drawRunner(ls.history.sgd,   '#e11d48', ls.wSGD);
+
+  // Legend
+  ctx.font = '11px ui-monospace, Menlo, monospace';
+  const legend = [
+    ['● Batch GD', '#16a34a'],
+    ['● Mini-batch', '#2563eb'],
+    ['● SGD',     '#e11d48'],
+  ];
+  legend.forEach(function (item, idx) {
+    ctx.fillStyle = item[1];
+    ctx.fillText(item[0], W - padR - 110, padT + 14 + idx * 14);
+  });
+}
+
+function drawLossHistory() {
+  const c = document.getElementById('loss-history-canvas');
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = c.width / dpr, H = c.height / dpr;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const padL = 36, padR = 12, padT = 14, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const maxStep = ls.maxSteps;
+  const allLosses = ls.history.batch.concat(ls.history.mini, ls.history.sgd).map(function (h) { return h.loss; });
+  const lMax = allLosses.length ? Math.max(Math.max.apply(null, allLosses), 1) * 1.05 : 30;
+
+  function X(s) { return padL + (s / maxStep) * plotW; }
+  function Y(l) { return padT + (1 - clamp(l, 0, lMax) / lMax) * plotH; }
+
+  // Axes
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, H - padB); ctx.lineTo(W - padR, H - padB); ctx.stroke();
+  ctx.fillStyle = '#64748b'; ctx.font = '11px ui-monospace, Menlo, monospace';
+  ctx.fillText('Loss',          4, padT + 10);
+  ctx.fillText('iteration',     W - padR - 60, H - 6);
+
+  function drawSeries(arr, color) {
+    if (arr.length < 2) return;
+    ctx.strokeStyle = color; ctx.lineWidth = 1.6;
+    ctx.beginPath();
+    for (let i = 0; i < arr.length; i++) {
+      const x = X(i), y = Y(arr[i].loss);
+      if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+  }
+  drawSeries(ls.history.batch, '#16a34a');
+  drawSeries(ls.history.mini,  '#2563eb');
+  drawSeries(ls.history.sgd,   '#e11d48');
+}
+
+// ─────────────────────────── §4 LR EFFECTS ───────────────────────────
+const LR_RUNS = [
+  { id: 'lr-small-canvas', alpha: 0.01, color: '#d97706', tag: 'too small'  },
+  { id: 'lr-good-canvas',  alpha: 0.10, color: '#059669', tag: 'just right' },
+  { id: 'lr-large-canvas', alpha: 0.45, color: '#e11d48', tag: 'too large'  },
+];
+const LR_STEPS = 50;
+const lrState = {};   // id → { step, history, rafId, running, last }
+
+function lrInitOne(run) {
+  lrState[run.id] = {
+    step: 0,
+    history: [{ step: 0, loss: lossVal(W0, DATA), w: W0 }],
+    rafId: null,
+    running: false,
+    last: 0,
+  };
+}
+function lrRunOne(run) {
+  const st = lrState[run.id];
+  if (!st || st.running) return;
+  st.running = true;
+  let w = st.history[st.history.length - 1].w;
+  const stepMs = 50;
+  function tick(t) {
+    if (!st.running) return;
+    if (t - st.last < stepMs) { st.rafId = requestAnimationFrame(tick); return; }
+    st.last = t;
+    if (st.step >= LR_STEPS) { st.running = false; return; }
+    w = clamp(updateW(w, run.alpha, DATA), -1e6, 1e6);
+    st.step++;
+    st.history.push({ step: st.step, w: w, loss: lossVal(w, DATA) });
+    drawLR(run);
+    st.rafId = requestAnimationFrame(tick);
+  }
+  st.rafId = requestAnimationFrame(tick);
+}
+function drawLR(run) {
+  const c = document.getElementById(run.id);
+  if (!c) return;
+  const dpr = window.devicePixelRatio || 1;
+  const W = c.width / dpr, H = c.height / dpr;
+  const ctx = c.getContext('2d');
+  ctx.clearRect(0, 0, W, H);
+
+  const padL = 30, padR = 8, padT = 10, padB = 22;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const st = lrState[run.id];
+  const initialLoss = st && st.history.length ? st.history[0].loss : 1;
+  const losses = st ? st.history.map(function (h) { return h.loss; }) : [];
+  const rawMax = losses.length ? Math.max.apply(null, losses) : initialLoss;
+  // Cap y-axis so early oscillations stay visible; diverging runs simply exit the top edge.
+  const lMax = Math.max(initialLoss * 2, Math.min(rawMax * 1.05, initialLoss * 10));
+
+  function X(s) { return padL + (s / LR_STEPS) * plotW; }
+  function Y(l) { return padT + (1 - clamp(l, 0, lMax) / lMax) * plotH; }
+
+  // Axes
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(padL, padT); ctx.lineTo(padL, H - padB); ctx.lineTo(W - padR, H - padB); ctx.stroke();
+  ctx.fillStyle = '#64748b'; ctx.font = '10px ui-monospace, Menlo, monospace';
+  ctx.fillText('Loss',  4, padT + 10);
+  ctx.fillText('step', W - padR - 28, H - 6);
+  ctx.fillStyle = '#94a3b8';
+  ctx.fillText('α = ' + run.alpha, padL + 6, padT + 10);
+
+  if (!st || st.history.length < 1) return;
+
+  ctx.strokeStyle = run.color; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i < st.history.length; i++) {
+    const h = st.history[i];
+    const x = X(h.step), y = Y(h.loss);
+    if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+  }
+  ctx.stroke();
+
+  // Final marker dot (clamped to chart; add "↑ diverging" label when off-chart)
+  const last = st.history[st.history.length - 1];
+  ctx.fillStyle = run.color;
+  const dotY = Y(last.loss);
+  ctx.beginPath(); ctx.arc(X(last.step), Math.max(dotY, padT + 4), 3, 0, Math.PI * 2); ctx.fill();
+  if (last.loss > lMax) {
+    ctx.fillStyle = run.color;
+    ctx.font = 'bold 10px ui-monospace, Menlo, monospace';
+    ctx.textAlign = 'right';
+    ctx.fillText('↑ diverging', W - padR - 2, padT + 10);
+    ctx.textAlign = 'left';
+  }
+}
+function lrRunAll() {
+  LR_RUNS.forEach(function (run) {
+    if (lrState[run.id] && lrState[run.id].rafId) cancelAnimationFrame(lrState[run.id].rafId);
+    lrInitOne(run);
+    drawLR(run);
+    lrRunOne(run);
+  });
+}
+
+// ─────────────────────────── CANVAS RESIZE ───────────────────────────
+const CANVASES = [
+  { id: 'landscape-canvas',    h: 300, draw: drawLandscape },
+  { id: 'loss-history-canvas', h: 180, draw: drawLossHistory },
+  { id: 'lr-small-canvas',     h: 180, draw: function () { drawLR(LR_RUNS[0]); } },
+  { id: 'lr-good-canvas',      h: 180, draw: function () { drawLR(LR_RUNS[1]); } },
+  { id: 'lr-large-canvas',     h: 180, draw: function () { drawLR(LR_RUNS[2]); } },
+];
+function resizeAll() {
+  CANVASES.forEach(function (cfg) {
+    const c = document.getElementById(cfg.id);
+    if (!c) return;
+    const dpr = window.devicePixelRatio || 1;
+    const rect = c.getBoundingClientRect();
+    const w = Math.max(rect.width, 1);
+    c.width  = Math.round(w * dpr);
+    c.height = Math.round(cfg.h * dpr);
+    c.style.width  = w + 'px';
+    c.style.height = cfg.h + 'px';
+    const ctx = c.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.scale(dpr, dpr);
+    cfg.draw(ctx, w, cfg.h);
+  });
+}
+
+// ─────────────────────────── TOC HIGHLIGHT ───────────────────────────
+function setupTocHighlight() {
+  const all = document.querySelectorAll('.toc-link');
+  const links = {};
+  all.forEach(function (a) {
+    const hash = a.getAttribute('href');
+    if (hash && hash.charAt(0) === '#') links[hash.slice(1)] = a;
+  });
+  const observer = new IntersectionObserver(function (entries) {
+    entries.forEach(function (entry) {
+      if (entry.isIntersecting) {
+        all.forEach(function (a) { a.classList.remove('active'); });
+        const link = links[entry.target.id];
+        if (link) link.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-40% 0px -55% 0px', threshold: 0 });
+  ['stepper', 'batchsize', 'landscape', 'lr'].forEach(function (id) {
+    const sec = document.getElementById(id);
+    if (sec) observer.observe(sec);
+  });
+}
+
+// ─────────────────────────── INIT ───────────────────────────
+document.addEventListener('DOMContentLoaded', function () {
+  algReset();
+  algSyncAlpha();
+  algSyncM();
+  bsRender(8);
+  lsReset();
+  LR_RUNS.forEach(function (run) { lrInitOne(run); });
+  setupTocHighlight();
+});
+
+// Canvas sizing must wait for full layout (Tailwind CDN is JIT and may inject styles
+// after DOMContentLoaded fires).
+window.addEventListener('load', function () {
+  resizeAll();
+  // Auto-start the LR effects animation so the page is "alive" on first view.
+  setTimeout(lrRunAll, 200);
+});
+window.addEventListener('resize', resizeAll);
+</script>
+</body>
+</html>

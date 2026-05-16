@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #3 by Jin Hao Hong (@hongjinhao): feat: add naive bayes classifier. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Naive Bayes Visualizer</title>
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f8fafc;
+        }
+
+        .math-font {
+            font-family: 'JetBrains Mono', monospace;
+        }
+
+        .fruit-enter {
+            animation: popIn 0.5s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        }
+
+        @keyframes popIn {
+            0% { opacity: 0; transform: scale(0.5) translateY(-20px); }
+            100% { opacity: 1; transform: scale(1) translateY(0); }
+        }
+
+        .highlight-box {
+            transition: all 0.3s ease;
+        }
+
+        .active-step {
+            box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.3);
+            border-color: #3b82f6;
+            transform: scale(1.02);
+            background-color: #eff6ff;
+        }
+
+        .bar-transition {
+            transition: width 1s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.5s ease;
+        }
+
+        .custom-scroll::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .custom-scroll::-webkit-scrollbar-track {
+            background: #f1f1f1;
+        }
+
+        .custom-scroll::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useMemo } = React;
+
+        const INITIAL_DATA = [
+            { id: 1, type: 'Apple', color: 'Red', shape: 'Round' },
+            { id: 2, type: 'Apple', color: 'Red', shape: 'Round' },
+            { id: 3, type: 'Apple', color: 'Red', shape: 'Round' },
+            { id: 4, type: 'Apple', color: 'Green', shape: 'Round' },
+            { id: 5, type: 'Apple', color: 'Green', shape: 'Irregular' },
+            { id: 6, type: 'Banana', color: 'Yellow', shape: 'Long' },
+            { id: 7, type: 'Banana', color: 'Yellow', shape: 'Long' },
+            { id: 8, type: 'Banana', color: 'Yellow', shape: 'Curved' },
+            { id: 9, type: 'Banana', color: 'Green', shape: 'Long' },
+            { id: 10, type: 'Banana', color: 'Green', shape: 'Curved' },
+        ];
+
+        const FEATURES = {
+            color: ['Red', 'Green', 'Yellow'],
+            shape: ['Round', 'Long', 'Curved', 'Irregular']
+        };
+
+        const CLASSES = ['Apple', 'Banana'];
+
+        const AppleIcon = ({ color, className }) => (
+            <svg viewBox="0 0 24 24" fill={color === 'Red' ? '#ef4444' : (color === 'Green' ? '#22c55e' : '#eab308')} className={className} stroke="currentColor" strokeWidth="1.5">
+                <path d="M12 20.94c1.5 0 2.75 1.06 4 1.06 3 0 6-8 6-12.22A4.91 4.91 0 0 0 17 5c-2.22 0-4 1.44-5 2-1-.56-2.78-2-5-2a4.9 4.9 0 0 0-5 4.78C2 14 5 22 8 22c1.25 0 2.5-1.06 4-1.06Z" strokeLinecap="round" strokeLinejoin="round"/>
+                <path d="M10 2c1 .5 2 2 2 5" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+        );
+
+        const BananaIcon = ({ color, className }) => (
+            <svg viewBox="0 0 24 24" fill={color === 'Yellow' ? '#eab308' : (color === 'Green' ? '#84cc16' : '#ef4444')} className={className} stroke="currentColor" strokeWidth="1.5">
+                <path d="M4 13c0-5.52 4.48-10 10-10a6 6 0 0 1 6 6v3a4 4 0 0 1-4 4h-2a8 8 0 0 1-8-8" strokeLinecap="round" strokeLinejoin="round"/>
+            </svg>
+        );
+
+        const calculateProbabilities = (data, testItem) => {
+            const total = data.length;
+            const classCounts = {};
+            const featureCounts = {};
+
+            CLASSES.forEach((className) => {
+                classCounts[className] = 0;
+                featureCounts[className] = { color: {}, shape: {} };
+                FEATURES.color.forEach((feature) => {
+                    featureCounts[className].color[feature] = 0;
+                });
+                FEATURES.shape.forEach((feature) => {
+                    featureCounts[className].shape[feature] = 0;
+                });
+            });
+
+            data.forEach((item) => {
+                classCounts[item.type]++;
+                featureCounts[item.type].color[item.color]++;
+                featureCounts[item.type].shape[item.shape]++;
+            });
+
+            const steps = {};
+
+            CLASSES.forEach((className) => {
+                const priorRaw = classCounts[className] / total;
+                const countColor = featureCounts[className].color[testItem.color] || 0;
+                const likelihoodColor = (countColor + 1) / (classCounts[className] + FEATURES.color.length);
+                const countShape = featureCounts[className].shape[testItem.shape] || 0;
+                const likelihoodShape = (countShape + 1) / (classCounts[className] + FEATURES.shape.length);
+                const posteriorNum = priorRaw * likelihoodColor * likelihoodShape;
+
+                steps[className] = {
+                    count: classCounts[className],
+                    prior: priorRaw,
+                    likelihoodColorRaw: countColor,
+                    likelihoodColorProb: likelihoodColor,
+                    likelihoodShapeRaw: countShape,
+                    likelihoodShapeProb: likelihoodShape,
+                    posteriorNum
+                };
+            });
+
+            const totalPosterior = Object.values(steps).reduce((sum, step) => sum + step.posteriorNum, 0);
+
+            CLASSES.forEach((className) => {
+                steps[className].finalProb = steps[className].posteriorNum / totalPosterior;
+            });
+
+            return steps;
+        };
+
+        const App = () => {
+            const [data] = useState(INITIAL_DATA);
+            const [testItem, setTestItem] = useState(null);
+            const [phase, setPhase] = useState('IDLE');
+            const [prediction, setPrediction] = useState(null);
+
+            const generateTestItem = () => {
+                const colors = ['Red', 'Green', 'Yellow'];
+                const shapes = ['Round', 'Long', 'Curved'];
+                const newItem = {
+                    id: Date.now(),
+                    color: colors[Math.floor(Math.random() * colors.length)],
+                    shape: shapes[Math.floor(Math.random() * shapes.length)],
+                };
+                setTestItem(newItem);
+                setPhase('GENERATED');
+                setPrediction(null);
+            };
+
+            const computed = useMemo(() => {
+                if (!testItem) {
+                    return null;
+                }
+                return calculateProbabilities(data, testItem);
+            }, [data, testItem]);
+
+            const nextStep = () => {
+                if (phase === 'GENERATED') {
+                    setPhase('STEP1');
+                } else if (phase === 'STEP1') {
+                    setPhase('STEP2');
+                } else if (phase === 'STEP2') {
+                    setPhase('STEP3');
+                } else if (phase === 'STEP3') {
+                    const winner = computed.Apple.finalProb > computed.Banana.finalProb ? 'Apple' : 'Banana';
+                    setPrediction(winner);
+                    setPhase('RESULT');
+                } else if (phase === 'RESULT') {
+                    setTestItem(null);
+                    setPhase('IDLE');
+                    setPrediction(null);
+                }
+            };
+
+            const reset = () => {
+                setTestItem(null);
+                setPhase('IDLE');
+                setPrediction(null);
+            };
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 max-w-7xl mx-auto flex flex-col gap-6">
+                    <header className="flex flex-col md:flex-row justify-between items-start md:items-center border-b pb-6 border-slate-200">
+                        <div>
+                            <h1 className="text-3xl font-bold text-slate-800 tracking-tight">Naive Bayes Classifier</h1>
+                            <p className="text-slate-500 mt-1">A visual explanation of how machines make probabilistic decisions.</p>
+                        </div>
+                        <div className="mt-4 md:mt-0 flex gap-2">
+                            <button
+                                onClick={() => window.location.reload()}
+                                className="px-4 py-2 text-sm font-medium text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
+                            >
+                                Reset Demo
+                            </button>
+                        </div>
+                    </header>
+
+                    <main className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+                        <div className="lg:col-span-4 flex flex-col gap-4">
+                            <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-5 h-full">
+                                <div className="flex justify-between items-center mb-4">
+                                    <h2 className="font-semibold text-slate-700 flex items-center gap-2">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+                                        Training Data
+                                    </h2>
+                                    <span className="text-xs font-mono bg-slate-100 px-2 py-1 rounded text-slate-500">
+                                        N={data.length}
+                                    </span>
+                                </div>
+
+                                <div className="space-y-6">
+                                    <div className={`p-4 rounded-lg bg-red-50 border border-red-100 transition-all duration-500 ${phase === 'STEP1' ? 'active-step' : ''}`}>
+                                        <div className="flex justify-between text-sm font-bold text-red-800 mb-2">
+                                            <span>Apples</span>
+                                            <span>{data.filter((datum) => datum.type === 'Apple').length} total</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {data.filter((datum) => datum.type === 'Apple').map((datum) => (
+                                                <div key={datum.id} className="group relative">
+                                                    <AppleIcon color={datum.color} className="w-8 h-8 drop-shadow-sm transition-transform hover:scale-110 cursor-help" />
+                                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                                        {datum.color}, {datum.shape}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+
+                                    <div className={`p-4 rounded-lg bg-yellow-50 border border-yellow-100 transition-all duration-500 ${phase === 'STEP1' ? 'active-step' : ''}`}>
+                                        <div className="flex justify-between text-sm font-bold text-yellow-800 mb-2">
+                                            <span>Bananas</span>
+                                            <span>{data.filter((datum) => datum.type === 'Banana').length} total</span>
+                                        </div>
+                                        <div className="flex flex-wrap gap-2">
+                                            {data.filter((datum) => datum.type === 'Banana').map((datum) => (
+                                                <div key={datum.id} className="group relative">
+                                                    <BananaIcon color={datum.color} className="w-8 h-8 drop-shadow-sm transition-transform hover:scale-110 cursor-help" />
+                                                    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-max bg-slate-800 text-white text-xs py-1 px-2 rounded opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
+                                                        {datum.color}, {datum.shape}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 p-4 bg-slate-50 rounded-lg text-sm text-slate-600 border border-slate-100">
+                                    <p>The algorithm counts these examples to estimate the probabilities behind each prediction.</p>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-5 flex flex-col gap-4">
+                            <div className="bg-white rounded-xl shadow-lg border border-slate-200 overflow-hidden h-full flex flex-col">
+                                <div className="bg-slate-900 p-8 flex flex-col items-center justify-center min-h-[250px] relative">
+                                    {!testItem ? (
+                                        <div className="text-center">
+                                            <button
+                                                onClick={generateTestItem}
+                                                className="bg-blue-600 hover:bg-blue-500 text-white px-6 py-3 rounded-full font-semibold shadow-lg shadow-blue-900/50 transition-all transform hover:scale-105 active:scale-95 flex items-center gap-2"
+                                            >
+                                                <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 4v16m8-8H4"/></svg>
+                                                Classify New Fruit
+                                            </button>
+                                            <p className="text-slate-400 mt-4 text-sm">Click to spawn a random fruit with unknown type</p>
+                                        </div>
+                                    ) : (
+                                        <div className="flex flex-col items-center animate-popIn">
+                                            <div className="relative">
+                                                <div className="w-32 h-32 bg-white/10 rounded-full flex items-center justify-center backdrop-blur-sm border border-white/20">
+                                                    {phase === 'RESULT' && prediction === 'Apple' ? (
+                                                        <AppleIcon color={testItem.color} className="w-20 h-20 fruit-enter" />
+                                                    ) : phase === 'RESULT' && prediction === 'Banana' ? (
+                                                        <BananaIcon color={testItem.color} className="w-20 h-20 fruit-enter" />
+                                                    ) : (
+                                                        <div className="text-6xl animate-pulse">?</div>
+                                                    )}
+                                                </div>
+                                                <div className="absolute -right-24 top-0 flex flex-col gap-2">
+                                                    <div className={`bg-slate-800 text-white text-xs px-2 py-1 rounded border border-slate-700 transition-colors ${phase === 'STEP2' ? 'border-blue-400 text-blue-200' : ''}`}>
+                                                        Color: <span className="font-bold">{testItem.color}</span>
+                                                    </div>
+                                                    <div className={`bg-slate-800 text-white text-xs px-2 py-1 rounded border border-slate-700 transition-colors ${phase === 'STEP3' ? 'border-blue-400 text-blue-200' : ''}`}>
+                                                        Shape: <span className="font-bold">{testItem.shape}</span>
+                                                    </div>
+                                                </div>
+                                            </div>
+
+                                            {phase !== 'RESULT' && (
+                                                <div className="mt-8 flex gap-3">
+                                                    <button
+                                                        onClick={nextStep}
+                                                        className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-all flex items-center gap-2"
+                                                    >
+                                                        {phase === 'GENERATED' ? 'Start Calculation' :
+                                                         phase === 'STEP3' ? 'Reveal Result' : 'Next Step'}
+                                                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 5l7 7-7 7"/></svg>
+                                                    </button>
+                                                </div>
+                                            )}
+
+                                            {phase === 'RESULT' && (
+                                                <div className="mt-8 flex gap-3">
+                                                    <button
+                                                        onClick={reset}
+                                                        className="bg-slate-700 hover:bg-slate-600 text-white px-6 py-2 rounded-lg font-medium shadow-lg transition-all"
+                                                    >
+                                                        Start Over
+                                                    </button>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+
+                                <div className="p-6 bg-white flex-1 overflow-y-auto custom-scroll">
+                                    <h3 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Algorithm Internals</h3>
+
+                                    {!testItem ? (
+                                        <div className="text-center text-slate-400 py-8 italic">
+                                            Waiting for data...
+                                        </div>
+                                    ) : (
+                                        <div className="space-y-6">
+                                            <div className={`transition-opacity duration-500 ${phase === 'GENERATED' || phase === 'IDLE' ? 'opacity-50' : 'opacity-100'}`}>
+                                                <div className={`flex items-center gap-2 mb-2 ${phase === 'STEP1' ? 'text-blue-600' : 'text-slate-800'}`}>
+                                                    <div className="font-bold text-sm bg-slate-100 rounded px-2 py-1">1. Prior Probability</div>
+                                                    <span className="text-xs text-slate-500">How common is each fruit overall?</span>
+                                                </div>
+                                                {CLASSES.map((className) => (
+                                                    <div key={className} className="flex items-center justify-between text-sm mb-1 px-4">
+                                                        <span className="w-20 font-medium">{className}</span>
+                                                        <div className="flex-1 mx-4 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-slate-400 rounded-full bar-transition"
+                                                                style={{ width: phase === 'GENERATED' ? '0%' : `${computed[className].prior * 100}%` }}
+                                                            ></div>
+                                                        </div>
+                                                        <span className="font-mono text-xs w-12 text-right">
+                                                            {phase === 'GENERATED' ? '?' : computed[className].prior.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div className={`transition-opacity duration-500 ${(phase === 'GENERATED' || phase === 'STEP1') ? 'opacity-30' : 'opacity-100'}`}>
+                                                <div className={`flex items-center gap-2 mb-2 ${phase === 'STEP2' ? 'text-blue-600' : 'text-slate-800'}`}>
+                                                    <div className="font-bold text-sm bg-slate-100 rounded px-2 py-1">2. Likelihood (Color)</div>
+                                                    <span className="text-xs text-slate-500">P({testItem.color} | Fruit)</span>
+                                                </div>
+                                                {CLASSES.map((className) => (
+                                                    <div key={className} className="flex items-center justify-between text-sm mb-1 px-4">
+                                                        <span className="w-20 font-medium">{className}</span>
+                                                        <div className="flex-1 mx-4 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-blue-500 rounded-full bar-transition"
+                                                                style={{ width: (phase === 'GENERATED' || phase === 'STEP1') ? '0%' : `${computed[className].likelihoodColorProb * 100}%` }}
+                                                            ></div>
+                                                        </div>
+                                                        <span className="font-mono text-xs w-12 text-right">
+                                                            {(phase === 'GENERATED' || phase === 'STEP1') ? '?' : computed[className].likelihoodColorProb.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+
+                                            <div className={`transition-opacity duration-500 ${(phase === 'GENERATED' || phase === 'STEP1' || phase === 'STEP2') ? 'opacity-30' : 'opacity-100'}`}>
+                                                <div className={`flex items-center gap-2 mb-2 ${phase === 'STEP3' ? 'text-blue-600' : 'text-slate-800'}`}>
+                                                    <div className="font-bold text-sm bg-slate-100 rounded px-2 py-1">3. Likelihood (Shape)</div>
+                                                    <span className="text-xs text-slate-500">P({testItem.shape} | Fruit)</span>
+                                                </div>
+                                                {CLASSES.map((className) => (
+                                                    <div key={className} className="flex items-center justify-between text-sm mb-1 px-4">
+                                                        <span className="w-20 font-medium">{className}</span>
+                                                        <div className="flex-1 mx-4 h-2 bg-slate-100 rounded-full overflow-hidden">
+                                                            <div
+                                                                className="h-full bg-indigo-500 rounded-full bar-transition"
+                                                                style={{ width: (phase === 'GENERATED' || phase === 'STEP1' || phase === 'STEP2') ? '0%' : `${computed[className].likelihoodShapeProb * 100}%` }}
+                                                            ></div>
+                                                        </div>
+                                                        <span className="font-mono text-xs w-12 text-right">
+                                                            {(phase === 'GENERATED' || phase === 'STEP1' || phase === 'STEP2') ? '?' : computed[className].likelihoodShapeProb.toFixed(2)}
+                                                        </span>
+                                                    </div>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="lg:col-span-3">
+                            <div className={`bg-white rounded-xl shadow-sm border border-slate-200 p-5 h-full transition-all duration-500 ${phase === 'RESULT' ? 'ring-4 ring-green-100 border-green-200' : ''}`}>
+                                <h2 className="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
+                                    Prediction
+                                </h2>
+
+                                {!testItem || phase === 'GENERATED' ? (
+                                    <div className="text-sm text-slate-500 text-center mt-10">
+                                        Run the simulation to see probability scores here.
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6">
+                                        {CLASSES.map((className) => {
+                                            const isWinner = prediction === className;
+                                            const opacity = phase !== 'RESULT' ? 0.5 : (isWinner ? 1 : 0.4);
+                                            const score = computed[className].finalProb * 100;
+
+                                            return (
+                                                <div key={className} className="relative" style={{ opacity }}>
+                                                    <div className="flex justify-between items-end mb-1">
+                                                        <span className={`font-bold ${isWinner ? 'text-green-600' : 'text-slate-600'}`}>{className}</span>
+                                                        <span className="font-mono text-lg font-bold">
+                                                            {phase === 'RESULT' ? `${score.toFixed(1)}%` : '...'}
+                                                        </span>
+                                                    </div>
+                                                    <div className="h-4 bg-slate-100 rounded-full overflow-hidden">
+                                                        <div
+                                                            className={`h-full rounded-full transition-all duration-1000 ease-out ${isWinner ? 'bg-green-500' : 'bg-slate-400'}`}
+                                                            style={{ width: phase === 'RESULT' ? `${score}%` : '0%' }}
+                                                        ></div>
+                                                    </div>
+                                                    {isWinner && phase === 'RESULT' && (
+                                                        <div className="absolute -right-2 -top-2 bg-green-100 text-green-700 text-xs font-bold px-2 py-0.5 rounded-full border border-green-200">
+                                                            Winner
+                                                        </div>
+                                                    )}
+                                                </div>
+                                            );
+                                        })}
+
+                                        {phase === 'RESULT' && (
+                                            <div className="mt-6 p-3 bg-blue-50 text-blue-800 text-xs rounded border border-blue-100 leading-relaxed">
+                                                <strong>Why?</strong> The algorithm calculated that a
+                                                <span className="font-bold"> {testItem.color}</span>,
+                                                <span className="font-bold"> {testItem.shape}</span> fruit
+                                                is more likely to be a {prediction} based on the training data.
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </main>
+
+                    <footer className="mt-8 border-t border-slate-200 pt-8 text-slate-600">
+                        <h3 className="font-bold text-slate-800 mb-2">The Math Behind It (Bayes Theorem)</h3>
+                        <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
+                            <div className="flex flex-col md:flex-row items-center justify-center gap-8 math-font text-lg">
+                                <div className="text-center">
+                                    <div className="mb-1 text-slate-400 text-sm">Posterior</div>
+                                    <div className="font-bold text-indigo-600">P(Type | Features)</div>
+                                </div>
+                                <div className="text-2xl text-slate-300">∝</div>
+                                <div className="text-center">
+                                    <div className="mb-1 text-slate-400 text-sm">Prior</div>
+                                    <div className="font-bold text-slate-700">P(Type)</div>
+                                </div>
+                                <div className="text-2xl text-slate-300">×</div>
+                                <div className="text-center">
+                                    <div className="mb-1 text-slate-400 text-sm">Likelihood</div>
+                                    <div className="font-bold text-blue-600">P(Color | Type)</div>
+                                </div>
+                                <div className="text-2xl text-slate-300">×</div>
+                                <div className="text-center">
+                                    <div className="mb-1 text-slate-400 text-sm">Likelihood</div>
+                                    <div className="font-bold text-blue-600">P(Shape | Type)</div>
+                                </div>
+                            </div>
+                        </div>
+                        <p className="mt-4 text-sm text-slate-500 max-w-3xl mx-auto text-center">
+                            Note: In this simplified demo, we use basic frequency counts. Real-world Naive Bayes often uses Laplace smoothing to handle unseen features and avoid zero probabilities.
+                        </p>
+                    </footer>
+                </div>
+            );
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>

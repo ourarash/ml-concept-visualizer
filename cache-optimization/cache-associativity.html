@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #47 by Victoria Aguirre (@victoria-aguirre): Add cache associativity conflict miss visualizer. -->
+<html lang="en">
+<head>
+<div style="
+  max-width: 900px;
+  margin: 18px auto 0;
+  padding: 16px;
+  border-radius: 14px;
+  background: rgba(15,23,42,0.7);
+  border: 1px solid rgba(148,163,184,0.15);
+  line-height: 1.6;
+  color: #cbd5e1;
+">
+  <strong>Direct-mapped caches</strong> allow each memory block to map to only one cache line, which can create conflict misses.
+  <strong>Set-associative caches</strong> allow blocks to choose among multiple lines in a set, reducing conflicts.
+  <strong>Fully associative caches</strong> allow any block to be placed anywhere in the cache, minimizing conflict misses but increasing hardware complexity.
+</div>
+
+<div style="
+  max-width: 900px;
+  margin: 12px auto 0;
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(56,189,248,0.12);
+  border: 1px solid rgba(56,189,248,0.25);
+  color: #e0f2fe;
+">
+  <strong>Try this:</strong>
+  Click <em>Conflict Demo</em>, then switch associativity from
+  <strong>1-way direct mapped</strong> to
+  <strong>2-way set associative</strong>.
+  Notice how additional ways reduce repeated conflict misses.
+</div>
+
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cache Associativity & Conflict Miss Visualizer</title>
+  <style>
+    :root {
+      --bg: #0f172a;
+      --panel: #111827;
+      --panel-2: #1e293b;
+      --text: #e5e7eb;
+      --muted: #94a3b8;
+      --accent: #38bdf8;
+      --good: #22c55e;
+      --bad: #ef4444;
+      --warn: #f59e0b;
+      --line: #334155;
+      --purple: #a78bfa;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: radial-gradient(circle at top left, #1e3a8a 0, #0f172a 32%, #020617 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    header {
+      padding: 32px 20px 18px;
+      text-align: center;
+    }
+
+    header h1 {
+      margin: 0 0 10px;
+      font-size: clamp(1.8rem, 4vw, 3rem);
+      letter-spacing: -0.04em;
+    }
+
+    header p {
+      max-width: 850px;
+      margin: 0 auto;
+      color: var(--muted);
+      line-height: 1.6;
+      font-size: 1rem;
+    }
+
+    .container {
+      width: min(1220px, calc(100% - 28px));
+      margin: 0 auto 36px;
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 18px;
+    }
+
+    .panel {
+      background: rgba(15, 23, 42, 0.84);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 20px;
+      box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+      overflow: hidden;
+    }
+
+    .panel h2 {
+      font-size: 1.05rem;
+      margin: 0;
+      padding: 16px 18px;
+      background: rgba(30, 41, 59, 0.72);
+      border-bottom: 1px solid rgba(148, 163, 184, 0.16);
+    }
+
+    .controls {
+      padding: 18px;
+      display: grid;
+      gap: 16px;
+    }
+
+    label {
+      display: grid;
+      gap: 7px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    select, input[type="range"] {
+      width: 100%;
+    }
+
+    select {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #020617;
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 0.95rem;
+    }
+
+    input[type="range"] {
+      accent-color: var(--accent);
+    }
+
+    .range-readout {
+      display: flex;
+      justify-content: space-between;
+      color: var(--text);
+      font-size: 0.85rem;
+    }
+
+    .button-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    button {
+      border: 0;
+      border-radius: 13px;
+      padding: 11px 12px;
+      background: linear-gradient(135deg, #0284c7, #7c3aed);
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.15s ease, filter 0.15s ease;
+    }
+
+    button:hover { filter: brightness(1.12); transform: translateY(-1px); }
+    button.secondary { background: #334155; }
+    button.warn { background: linear-gradient(135deg, #f97316, #dc2626); }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+
+    .stat {
+      background: rgba(30, 41, 59, 0.72);
+      border: 1px solid rgba(148, 163, 184, 0.15);
+      border-radius: 14px;
+      padding: 12px;
+    }
+
+    .stat strong {
+      display: block;
+      font-size: 1.35rem;
+      line-height: 1.1;
+    }
+
+    .stat span {
+      color: var(--muted);
+      font-size: 0.8rem;
+    }
+
+    .main {
+      display: grid;
+      gap: 18px;
+    }
+
+    .visual-area {
+      padding: 18px;
+      display: grid;
+      gap: 18px;
+    }
+
+    .access-strip {
+      display: flex;
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .addr-token {
+      flex: 0 0 auto;
+      min-width: 62px;
+      text-align: center;
+      background: rgba(30, 41, 59, 0.92);
+      border: 1px solid rgba(148, 163, 184, 0.22);
+      border-radius: 999px;
+      padding: 9px 12px;
+      color: var(--muted);
+      font-weight: 700;
+      transition: all 0.25s ease;
+    }
+
+    .addr-token.active {
+      color: #020617;
+      background: var(--accent);
+      transform: translateY(-4px) scale(1.05);
+      box-shadow: 0 0 28px rgba(56, 189, 248, 0.48);
+    }
+
+    .pipeline {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 12px;
+    }
+
+    .decode-box {
+      background: rgba(2, 6, 23, 0.55);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 16px;
+      padding: 14px;
+      min-height: 88px;
+    }
+
+    .decode-box .label {
+      color: var(--muted);
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+    }
+
+    .decode-box .value {
+      margin-top: 8px;
+      font-size: 1.3rem;
+      font-weight: 800;
+    }
+
+    .hit { color: var(--good); }
+    .miss { color: var(--bad); }
+    .neutral { color: var(--accent); }
+
+    .cache-wrap {
+      background: rgba(2, 6, 23, 0.4);
+      border: 1px solid rgba(148, 163, 184, 0.16);
+      border-radius: 18px;
+      padding: 16px;
+      overflow-x: auto;
+    }
+
+    .cache-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 0.9rem;
+    }
+
+    .cache-grid {
+      display: grid;
+      gap: 10px;
+      min-width: 520px;
+    }
+
+    .cache-set {
+      display: grid;
+      grid-template-columns: 84px 1fr;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .set-label {
+      color: var(--muted);
+      font-weight: 700;
+      text-align: right;
+      font-size: 0.88rem;
+    }
+
+    .ways {
+      display: grid;
+      gap: 8px;
+    }
+
+    .cache-line {
+      min-height: 58px;
+      border-radius: 14px;
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      background: rgba(30, 41, 59, 0.72);
+      padding: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      transition: all 0.28s ease;
+    }
+
+    .cache-line.target {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.24), 0 0 24px rgba(56, 189, 248, 0.22);
+    }
+
+    .cache-line.hit-line {
+      border-color: var(--good);
+      background: rgba(34, 197, 94, 0.16);
+    }
+
+    .cache-line.replace-line {
+      border-color: var(--warn);
+      background: rgba(245, 158, 11, 0.14);
+    }
+
+    .tag {
+      font-weight: 800;
+    }
+
+    .age {
+      color: var(--muted);
+      font-size: 0.78rem;
+    }
+
+    .explanation {
+      padding: 18px;
+      line-height: 1.65;
+      color: var(--muted);
+    }
+
+    .explanation strong { color: var(--text); }
+
+    .formula {
+      background: rgba(2, 6, 23, 0.55);
+      border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 14px;
+      padding: 12px;
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92rem;
+      overflow-x: auto;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    .pill {
+      border: 1px solid rgba(148, 163, 184, 0.2);
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: rgba(30, 41, 59, 0.66);
+    }
+
+    @media (max-width: 900px) {
+      .container { grid-template-columns: 1fr; }
+      .pipeline { grid-template-columns: 1fr; }
+      .cache-set { grid-template-columns: 64px 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Cache Associativity & Conflict Miss Visualizer</h1>
+    <p>
+      Step through memory accesses and watch how block address, set index, and tag determine whether an access hits or misses.
+      Compare direct-mapped, set-associative, and fully-associative caches to see why conflict misses happen.
+    </p>
+  </header>
+
+  <main class="container">
+    <section class="panel">
+      <h2>Controls</h2>
+      <div class="controls">
+        <label>
+          Access pattern
+          <select id="pattern">
+            <option value="conflict">Conflict pattern: 0, 32, 0, 32...</option>
+            <option value="sequential">Sequential scan</option>
+            <option value="stride">Strided access</option>
+            <option value="matrix">Matrix column walk</option>
+            <option value="mixed">Mixed reuse pattern</option>
+          </select>
+        </label>
+
+        <label>
+          Cache lines
+          <select id="lines">
+            <option value="4">4 lines</option>
+            <option value="8" selected>8 lines</option>
+            <option value="16">16 lines</option>
+          </select>
+        </label>
+
+        <label>
+          Block size
+          <select id="blockSize">
+            <option value="4" selected>4 bytes</option>
+            <option value="8">8 bytes</option>
+            <option value="16">16 bytes</option>
+          </select>
+        </label>
+
+        <label>
+          Associativity
+          <select id="assoc">
+            <option value="1" selected>1-way direct mapped</option>
+            <option value="2">2-way set associative</option>
+            <option value="4">4-way set associative</option>
+            <option value="full">Fully associative</option>
+          </select>
+        </label>
+
+        <label>
+          Animation speed
+          <input id="speed" type="range" min="250" max="1500" step="50" value="750" />
+          <span class="range-readout"><span>Fast</span><span id="speedLabel">750 ms</span><span>Slow</span></span>
+        </label>
+
+        <div class="button-row">
+          <button id="stepBtn">Step</button>
+          <button id="playBtn">Play</button>
+          <button id="resetBtn" class="secondary">Reset</button>
+          <button id="demoBtn" class="warn">Conflict Demo</button>
+        </div>
+
+        <div class="stat-grid">
+          <div class="stat"><strong id="hits">0</strong><span>Hits</span></div>
+          <div class="stat"><strong id="misses">0</strong><span>Misses</span></div>
+          <div class="stat"><strong id="hitRate">0%</strong><span>Hit rate</span></div>
+          <div class="stat"><strong id="amat">—</strong><span>AMAT estimate</span></div>
+        </div>
+
+        <div class="legend">
+          <span class="pill">Blue = selected set</span>
+          <span class="pill">Green = hit</span>
+          <span class="pill">Orange = replacement</span>
+        </div>
+      </div>
+    </section>
+
+    <section class="main">
+      <section class="panel visual-area">
+        <div class="access-strip" id="accessStrip"></div>
+
+        <div class="pipeline">
+          <div class="decode-box">
+            <div class="label">Current byte address</div>
+            <div class="value neutral" id="addrBox">—</div>
+          </div>
+          <div class="decode-box">
+            <div class="label">Block address</div>
+            <div class="value" id="blockBox">—</div>
+          </div>
+          <div class="decode-box">
+            <div class="label">Result</div>
+            <div class="value" id="resultBox">Press Step</div>
+          </div>
+        </div>
+
+        <div class="cache-wrap">
+          <div class="cache-title">
+            <span id="cacheTitle">Cache</span>
+            <span id="mappingText">set = block address mod number of sets</span>
+          </div>
+          <div class="cache-grid" id="cacheGrid"></div>
+        </div>
+      </section>
+
+      <section class="panel explanation">
+        <h2 style="padding:0;background:none;border:0;margin-bottom:8px;">What to notice</h2>
+        <p id="lessonText">
+          In a direct-mapped cache, each memory block has exactly one possible cache line. If two frequently reused blocks map to the same line, they keep evicting each other even when the cache has unused capacity elsewhere. That repeated eviction is a <strong>conflict miss</strong>.
+        </p>
+        <div class="formula" id="formulaBox">
+          block = floor(address / block_size), set = block mod number_of_sets, tag = floor(block / number_of_sets)
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const patternEl = document.getElementById('pattern');
+    const linesEl = document.getElementById('lines');
+    const blockSizeEl = document.getElementById('blockSize');
+    const assocEl = document.getElementById('assoc');
+    const speedEl = document.getElementById('speed');
+    const speedLabel = document.getElementById('speedLabel');
+    const accessStrip = document.getElementById('accessStrip');
+    const cacheGrid = document.getElementById('cacheGrid');
+    const addrBox = document.getElementById('addrBox');
+    const blockBox = document.getElementById('blockBox');
+    const resultBox = document.getElementById('resultBox');
+    const cacheTitle = document.getElementById('cacheTitle');
+    const mappingText = document.getElementById('mappingText');
+    const lessonText = document.getElementById('lessonText');
+    const formulaBox = document.getElementById('formulaBox');
+    const hitsEl = document.getElementById('hits');
+    const missesEl = document.getElementById('misses');
+    const hitRateEl = document.getElementById('hitRate');
+    const amatEl = document.getElementById('amat');
+    const stepBtn = document.getElementById('stepBtn');
+    const playBtn = document.getElementById('playBtn');
+    const resetBtn = document.getElementById('resetBtn');
+    const demoBtn = document.getElementById('demoBtn');
+
+    let state;
+    let timer = null;
+
+    function accessPattern(name) {
+      if (name === 'sequential') return Array.from({ length: 24 }, (_, i) => i * 4);
+      if (name === 'stride') return [0, 32, 64, 96, 0, 32, 64, 96, 4, 36, 68, 100, 4, 36, 68, 100];
+      if (name === 'matrix') return [0, 64, 128, 192, 4, 68, 132, 196, 8, 72, 136, 200, 0, 64, 128, 192];
+      if (name === 'mixed') return [0, 4, 8, 12, 0, 4, 64, 68, 0, 4, 128, 132, 0, 4, 8, 12];
+      return [0, 32, 0, 32, 0, 32, 4, 36, 4, 36, 0, 32, 64, 96, 64, 96];
+    }
+
+    function config() {
+      const lines = Number(linesEl.value);
+      const blockSize = Number(blockSizeEl.value);
+      const assocValue = assocEl.value === 'full' ? lines : Number(assocEl.value);
+      const associativity = Math.min(assocValue, lines);
+      const sets = lines / associativity;
+      return { lines, blockSize, associativity, sets };
+    }
+
+    function init() {
+      stop();
+      const cfg = config();
+      state = {
+        cfg,
+        accesses: accessPattern(patternEl.value),
+        pointer: 0,
+        time: 0,
+        hits: 0,
+        misses: 0,
+        cache: Array.from({ length: cfg.sets }, () =>
+          Array.from({ length: cfg.associativity }, () => ({ valid: false, tag: null, block: null, lastUsed: 0 }))
+        ),
+        lastTarget: null,
+        lastHit: null,
+        lastReplace: null
+      };
+      renderAccesses();
+      renderCache();
+      renderStats();
+      addrBox.textContent = '—';
+      blockBox.textContent = '—';
+      resultBox.textContent = 'Press Step';
+      resultBox.className = 'value';
+      updateLesson();
+    }
+
+    function decode(address) {
+      const { blockSize, sets } = state.cfg;
+      const block = Math.floor(address / blockSize);
+      const set = block % sets;
+      const tag = Math.floor(block / sets);
+      return { address, block, set, tag };
+    }
+
+    function step() {
+      if (state.pointer >= state.accesses.length) {
+        state.pointer = 0;
+        renderAccesses();
+      }
+
+      const address = state.accesses[state.pointer];
+      const d = decode(address);
+      const setLines = state.cache[d.set];
+      state.time += 1;
+
+      let hitIndex = setLines.findIndex(line => line.valid && line.tag === d.tag);
+      let replaceIndex = -1;
+      let wasHit = hitIndex !== -1;
+
+      if (wasHit) {
+        setLines[hitIndex].lastUsed = state.time;
+        state.hits += 1;
+      } else {
+        state.misses += 1;
+        replaceIndex = setLines.findIndex(line => !line.valid);
+        if (replaceIndex === -1) {
+          replaceIndex = setLines.reduce((oldestIndex, line, index, arr) =>
+            line.lastUsed < arr[oldestIndex].lastUsed ? index : oldestIndex, 0);
+        }
+        setLines[replaceIndex] = { valid: true, tag: d.tag, block: d.block, lastUsed: state.time };
+      }
+
+      state.lastTarget = d.set;
+      state.lastHit = wasHit ? { set: d.set, way: hitIndex } : null;
+      state.lastReplace = !wasHit ? { set: d.set, way: replaceIndex } : null;
+
+      addrBox.textContent = address;
+      blockBox.textContent = `block ${d.block}, set ${d.set}, tag ${d.tag}`;
+      resultBox.textContent = wasHit ? 'HIT' : 'MISS';
+      resultBox.className = wasHit ? 'value hit' : 'value miss';
+
+      state.pointer += 1;
+      renderAccesses();
+      renderCache();
+      renderStats();
+      updateLesson(wasHit, d);
+    }
+
+    function renderAccesses() {
+      accessStrip.innerHTML = '';
+      state.accesses.forEach((addr, index) => {
+        const token = document.createElement('div');
+        token.className = 'addr-token' + (index === state.pointer ? ' active' : '');
+        token.textContent = addr;
+        accessStrip.appendChild(token);
+      });
+    }
+
+    function renderCache() {
+      const { lines, blockSize, associativity, sets } = state.cfg;
+      cacheTitle.textContent = `${lines} cache lines · ${sets} set(s) · ${associativity}-way · ${blockSize}B blocks`;
+      mappingText.textContent = sets === 1
+        ? 'fully associative: any block can go anywhere'
+        : 'set = block address mod number of sets';
+
+      cacheGrid.innerHTML = '';
+      state.cache.forEach((setLines, setIndex) => {
+        const row = document.createElement('div');
+        row.className = 'cache-set';
+
+        const label = document.createElement('div');
+        label.className = 'set-label';
+        label.textContent = `Set ${setIndex}`;
+        row.appendChild(label);
+
+        const ways = document.createElement('div');
+        ways.className = 'ways';
+        ways.style.gridTemplateColumns = `repeat(${state.cfg.associativity}, minmax(120px, 1fr))`;
+
+        setLines.forEach((line, wayIndex) => {
+          const cell = document.createElement('div');
+          let klass = 'cache-line';
+          if (state.lastTarget === setIndex) klass += ' target';
+          if (state.lastHit && state.lastHit.set === setIndex && state.lastHit.way === wayIndex) klass += ' hit-line';
+          if (state.lastReplace && state.lastReplace.set === setIndex && state.lastReplace.way === wayIndex) klass += ' replace-line';
+          cell.className = klass;
+          cell.innerHTML = line.valid
+            ? `<div><div class="tag">Tag ${line.tag}</div><div class="age">Block ${line.block}</div></div><div class="age">way ${wayIndex}</div>`
+            : `<div><div class="tag">Empty</div><div class="age">valid bit = 0</div></div><div class="age">way ${wayIndex}</div>`;
+          ways.appendChild(cell);
+        });
+
+        row.appendChild(ways);
+        cacheGrid.appendChild(row);
+      });
+    }
+
+    function renderStats() {
+      const total = state.hits + state.misses;
+      const hitRate = total ? Math.round((state.hits / total) * 100) : 0;
+      const missRate = total ? state.misses / total : 0;
+      const amat = total ? (1 + missRate * 50).toFixed(1) : '—';
+      hitsEl.textContent = state.hits;
+      missesEl.textContent = state.misses;
+      hitRateEl.textContent = `${hitRate}%`;
+      amatEl.textContent = total ? `${amat} cycles` : '—';
+    }
+
+    function updateLesson(wasHit, d) {
+      const { associativity, sets } = state.cfg;
+      formulaBox.textContent = sets === 1
+        ? 'block = floor(address / block_size); fully associative cache searches all lines for matching tag'
+        : 'block = floor(address / block_size), set = block mod number_of_sets, tag = floor(block / number_of_sets)';
+
+      if (!d) return;
+
+      if (wasHit) {
+        lessonText.innerHTML = `Address <strong>${d.address}</strong> maps to block <strong>${d.block}</strong>. The matching tag was already present in set <strong>${d.set}</strong>, so this access is a <strong class="hit">hit</strong>. Reusing data before it is evicted improves the hit rate.`;
+      } else if (associativity === 1) {
+        lessonText.innerHTML = `Address <strong>${d.address}</strong> maps to set <strong>${d.set}</strong>. In a direct-mapped cache, that block has only one possible location. If another useful block with the same set index was there, it gets evicted, causing a <strong class="miss">conflict miss</strong>.`;
+      } else if (sets === 1) {
+        lessonText.innerHTML = `This fully-associative cache has one set containing all lines. A new block can use any line, so conflict misses from fixed set mapping disappear. Misses now mainly come from first touches or total capacity pressure.`;
+      } else {
+        lessonText.innerHTML = `Address <strong>${d.address}</strong> maps to set <strong>${d.set}</strong>, but the cache has <strong>${associativity}</strong> ways per set. Extra ways let multiple blocks with the same set index coexist, reducing conflict misses compared with direct mapping.`;
+      }
+    }
+
+    function play() {
+      if (timer) return stop();
+      playBtn.textContent = 'Pause';
+      timer = setInterval(() => {
+        step();
+        if (state.pointer >= state.accesses.length) stop();
+      }, Number(speedEl.value));
+    }
+
+    function stop() {
+      if (timer) clearInterval(timer);
+      timer = null;
+      playBtn.textContent = 'Play';
+    }
+
+    patternEl.addEventListener('change', init);
+    linesEl.addEventListener('change', init);
+    blockSizeEl.addEventListener('change', init);
+    assocEl.addEventListener('change', init);
+    speedEl.addEventListener('input', () => {
+      speedLabel.textContent = `${speedEl.value} ms`;
+      if (timer) {
+        stop();
+        play();
+      }
+    });
+
+    stepBtn.addEventListener('click', step);
+    playBtn.addEventListener('click', play);
+    resetBtn.addEventListener('click', init);
+    demoBtn.addEventListener('click', () => {
+      patternEl.value = 'conflict';
+      linesEl.value = '4';
+      blockSizeEl.value = '4';
+      assocEl.value = '1';
+      init();
+    });
+
+    init();
+  </script>
+</body>
+</html>
+

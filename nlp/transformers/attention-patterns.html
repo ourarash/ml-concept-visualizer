@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #7 by Edwin Tieu (@EdwinTieu5642): Feature: Added Sparse and Local Attention Visualizers. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sparse &amp; Local Attention Patterns</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #f1f5f9;
+        }
+        .matrix-canvas {
+            display: block;
+            border-radius: 0.5rem;
+            cursor: crosshair;
+            image-rendering: pixelated;
+        }
+        .panel {
+            background: white;
+            border-radius: 0.75rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            border: 1px solid #e2e8f0;
+        }
+        input[type=range] {
+            accent-color: #4f46e5;
+            width: 100%;
+        }
+        .badge-full    { background: #dbeafe; color: #1d4ed8; }
+        .badge-local   { background: #dcfce7; color: #15803d; }
+        .badge-sparse  { background: #ede9fe; color: #7c3aed; }
+        .mode-header-full   { color: #1d4ed8; }
+        .mode-header-local  { color: #15803d; }
+        .mode-header-sparse { color: #7c3aed; }
+        .bar-full   { background: #3b82f6; }
+        .bar-local  { background: #22c55e; }
+        .bar-sparse { background: #a855f7; }
+        .concept-card {
+            border-left: 4px solid;
+            padding: 1rem 1.25rem;
+            border-radius: 0 0.5rem 0.5rem 0;
+            background: white;
+        }
+        .concept-full   { border-color: #3b82f6; }
+        .concept-local  { border-color: #22c55e; }
+        .concept-sparse { border-color: #a855f7; }
+        .tooltip {
+            position: fixed;
+            pointer-events: none;
+            background: #1e293b;
+            color: #f8fafc;
+            font-size: 0.75rem;
+            padding: 0.35rem 0.6rem;
+            border-radius: 0.375rem;
+            z-index: 9999;
+            white-space: nowrap;
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .tooltip.visible { opacity: 1; }
+        #arc-canvas {
+            display: block;
+            width: 100%;
+            max-width: 900px;
+            margin: 0 auto;
+        }
+    </style>
+</head>
+<body class="min-h-screen p-4 md:p-8">
+
+<div id="tooltip" class="tooltip"></div>
+
+<main class="max-w-6xl w-full mx-auto">
+
+    <!-- Header -->
+    <header class="mb-6">
+        <h1 class="text-3xl font-bold text-slate-800">Sparse &amp; Local Attention Patterns</h1>
+        <p class="text-slate-500 mt-1">
+            Compare full O(n²) attention with efficient alternatives — local windowed and sparse random attention.
+            Hover over any row to see which tokens a query attends to.
+        </p>
+    </header>
+
+    <!-- Controls -->
+    <div class="panel p-5 mb-6">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">
+                    Sequence Length <span class="font-mono text-indigo-600" id="lbl-n">n = 16</span>
+                </label>
+                <input type="range" id="slider-n" min="6" max="24" value="16" step="1">
+                <p class="text-xs text-slate-400 mt-1">Number of tokens in the sequence</p>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">
+                    Local Window <span class="font-mono text-green-600" id="lbl-w">w = ±2</span>
+                </label>
+                <input type="range" id="slider-w" min="1" max="6" value="2" step="1">
+                <p class="text-xs text-slate-400 mt-1">Tokens attended on each side (local attention)</p>
+            </div>
+            <div>
+                <label class="block text-sm font-semibold text-slate-700 mb-1">
+                    Sparse k <span class="font-mono text-purple-600" id="lbl-k">k = 3</span>
+                </label>
+                <input type="range" id="slider-k" min="1" max="8" value="3" step="1">
+                <p class="text-xs text-slate-400 mt-1">Random tokens each query attends to (sparse)</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Three matrix panels -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+
+        <!-- Full Attention -->
+        <div class="panel p-4 flex flex-col items-center">
+            <div class="w-full flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold mode-header-full">Full Attention</h2>
+                <span class="badge-full badge text-xs px-2 py-0.5 rounded-full font-mono" id="badge-full">O(n²) = 256</span>
+            </div>
+            <canvas id="canvas-full" class="matrix-canvas w-full"></canvas>
+            <p class="text-xs text-slate-400 mt-3 text-center">Every token attends to every other token</p>
+        </div>
+
+        <!-- Local Attention -->
+        <div class="panel p-4 flex flex-col items-center">
+            <div class="w-full flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold mode-header-local">Local Attention</h2>
+                <span class="badge-local badge text-xs px-2 py-0.5 rounded-full font-mono" id="badge-local">O(n·w)</span>
+            </div>
+            <canvas id="canvas-local" class="matrix-canvas w-full"></canvas>
+            <p class="text-xs text-slate-400 mt-3 text-center">Each token attends only to ±w neighbors</p>
+        </div>
+
+        <!-- Sparse Attention -->
+        <div class="panel p-4 flex flex-col items-center">
+            <div class="w-full flex items-center justify-between mb-3">
+                <h2 class="text-lg font-bold mode-header-sparse">Sparse Attention</h2>
+                <span class="badge-sparse badge text-xs px-2 py-0.5 rounded-full font-mono" id="badge-sparse">O(n·k)</span>
+            </div>
+            <canvas id="canvas-sparse" class="matrix-canvas w-full"></canvas>
+            <p class="text-xs text-slate-400 mt-3 text-center">Each token attends to k randomly-chosen tokens</p>
+        </div>
+
+    </div>
+
+    <!-- Arc Diagram -->
+    <div class="panel p-5 mb-6">
+        <div class="flex items-center justify-between mb-3">
+            <h3 class="font-bold text-slate-700">Attention Arc Diagram
+                <span class="text-slate-400 font-normal text-sm" id="arc-label"> — hover a matrix row to inspect a token</span>
+            </h3>
+            <span class="text-xs text-slate-400 italic">Click a row to lock the selection</span>
+        </div>
+        <canvas id="arc-canvas" height="130"></canvas>
+    </div>
+
+    <!-- Complexity bars -->
+    <div class="panel p-5 mb-6">
+        <h3 class="font-bold text-slate-700 mb-4">Connections Count Comparison
+            <span class="text-slate-400 font-normal text-sm">(live, updates with sliders)</span>
+        </h3>
+        <div class="space-y-4">
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-semibold text-blue-700">Full Attention</span>
+                    <span class="font-mono text-blue-700" id="bar-lbl-full">256 connections</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
+                    <div id="bar-full" class="bar-full h-5 rounded-full transition-all duration-300" style="width:100%"></div>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-semibold text-green-700">Local Attention</span>
+                    <span class="font-mono text-green-700" id="bar-lbl-local">80 connections</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
+                    <div id="bar-local" class="bar-local h-5 rounded-full transition-all duration-300" style="width:31%"></div>
+                </div>
+            </div>
+            <div>
+                <div class="flex justify-between text-sm mb-1">
+                    <span class="font-semibold text-purple-700">Sparse Attention</span>
+                    <span class="font-mono text-purple-700" id="bar-lbl-sparse">48 connections</span>
+                </div>
+                <div class="w-full bg-slate-100 rounded-full h-5 overflow-hidden">
+                    <div id="bar-sparse" class="bar-sparse h-5 rounded-full transition-all duration-300" style="width:19%"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Concept cards -->
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-5 mb-10">
+
+        <div class="concept-card concept-full shadow-sm">
+            <h4 class="font-bold text-blue-700 mb-1">🌐 Full Attention</h4>
+            <p class="text-sm text-slate-600">Every token can see every other token.
+            Complexity is <strong>O(n²)</strong> in both time and memory, making it prohibitive for long sequences
+            (e.g., 10 000+ tokens). This is the standard Transformer attention from <em>Attention is All You Need</em>.</p>
+        </div>
+
+        <div class="concept-card concept-local shadow-sm">
+            <h4 class="font-bold text-green-700 mb-1">🪟 Local (Windowed) Attention</h4>
+            <p class="text-sm text-slate-600">Each token attends only to a fixed window of ±w neighbours.
+            Complexity drops to <strong>O(n·w)</strong>. Ideal when local context is enough —
+            speech, time series, or sliding-window language models. Used in <em>Longformer</em>.</p>
+        </div>
+
+        <div class="concept-card concept-sparse shadow-sm">
+            <h4 class="font-bold text-purple-700 mb-1">✨ Sparse Attention</h4>
+            <p class="text-sm text-slate-600">Each token attends to k tokens chosen from the full sequence.
+            Complexity becomes <strong>O(n·k)</strong> where k ≪ n.
+            Useful for long-range tasks like document summarisation or genomic data.
+            Used in <em>BigBird</em>, <em>Reformer</em>, and <em>Sparse Transformers</em>.</p>
+        </div>
+
+    </div>
+
+</main>
+
+<script>
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let N = 16, W = 2, K = 3;
+let hoveredRow = null;   // null = none, number = locked
+let tempRow    = null;   // ephemeral hover
+
+// Canvas references
+const cvFull   = document.getElementById('canvas-full');
+const cvLocal  = document.getElementById('canvas-local');
+const cvSparse = document.getElementById('canvas-sparse');
+const cvArc    = document.getElementById('arc-canvas');
+
+// Colour schemes (active cell, hover highlight, header bar)
+const SCHEME = {
+    full:   { active: '#3b82f6', hover: '#bfdbfe', header: '#1d4ed8', row: '#eff6ff'  },
+    local:  { active: '#22c55e', hover: '#bbf7d0', header: '#15803d', row: '#f0fdf4'  },
+    sparse: { active: '#a855f7', hover: '#e9d5ff', header: '#7c3aed', row: '#faf5ff'  },
+};
+
+// ─────────────────────────────────────────────
+// Deterministic PRNG seeded per row
+// ─────────────────────────────────────────────
+function sparseTargets(row, n, k) {
+    let seed = (row * 2654435761) >>> 0;
+    const next = () => { seed = Math.imul(seed ^ (seed >>> 16), 0x45d9f3b) >>> 0; return seed; };
+    const picked = new Set();
+    let attempts = 0;
+    while (picked.size < Math.min(k, n) && attempts < 500) {
+        picked.add(next() % n);
+        attempts++;
+    }
+    return picked;
+}
+
+// ─────────────────────────────────────────────
+// Build attention mask [row][col]
+// ─────────────────────────────────────────────
+function buildMask(mode, n, w, k) {
+    return Array.from({ length: n }, (_, r) =>
+        Array.from({ length: n }, (_, c) => {
+            switch (mode) {
+                case 'full':   return true;
+                case 'local':  return Math.abs(r - c) <= w;
+                case 'sparse': return sparseTargets(r, n, k).has(c);
+            }
+        })
+    );
+}
+
+function countConnections(mask) {
+    return mask.reduce((sum, row) => sum + row.filter(Boolean).length, 0);
+}
+
+// ─────────────────────────────────────────────
+// Draw attention matrix
+// ─────────────────────────────────────────────
+function drawMatrix(canvas, mask, scheme, highlightRow) {
+    const n = mask.length;
+    const cs = Math.floor(canvas.clientWidth / n);
+    const size = cs * n;
+    canvas.width  = size;
+    canvas.height = size;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, size, size);
+
+    for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+            const x = c * cs;
+            const y = r * cs;
+            const active = mask[r][c];
+            const isHovRow = r === highlightRow;
+            const isHovCol = c === highlightRow;
+
+            if (isHovRow && active) {
+                ctx.fillStyle = scheme.active;
+            } else if (isHovRow) {
+                ctx.fillStyle = scheme.row;
+            } else if (isHovCol && active) {
+                ctx.fillStyle = scheme.hover;
+            } else if (active) {
+                ctx.fillStyle = scheme.active;
+                ctx.globalAlpha = 0.35;
+                ctx.fillRect(x, y, cs, cs);
+                ctx.globalAlpha = 1.0;
+                ctx.strokeStyle = '#e2e8f0';
+                ctx.lineWidth = 0.5;
+                ctx.strokeRect(x + 0.25, y + 0.25, cs - 0.5, cs - 0.5);
+                continue;
+            } else {
+                ctx.fillStyle = '#f8fafc';
+            }
+            ctx.fillRect(x, y, cs, cs);
+            ctx.globalAlpha = 1.0;
+            ctx.strokeStyle = '#e2e8f0';
+            ctx.lineWidth = 0.5;
+            ctx.strokeRect(x + 0.25, y + 0.25, cs - 0.5, cs - 0.5);
+        }
+    }
+
+    if (highlightRow !== null && highlightRow >= 0 && highlightRow < n) {
+        ctx.strokeStyle = scheme.header;
+        ctx.lineWidth = 2.5;
+        ctx.strokeRect(0, highlightRow * cs, size, cs);
+    }
+}
+
+// ─────────────────────────────────────────────
+// Draw arc diagram
+// ─────────────────────────────────────────────
+function drawArcDiagram(row) {
+    const canvas = cvArc;
+    const W_canvas = canvas.offsetWidth || 800;
+    canvas.width  = W_canvas;
+    canvas.height = 130;
+    const ctx = canvas.getContext('2d');
+    ctx.clearRect(0, 0, W_canvas, 130);
+
+    if (row === null) {
+        ctx.fillStyle = '#94a3b8';
+        ctx.font = '13px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText("Hover over a row in any attention matrix to inspect that token's connections", W_canvas / 2, 65);
+        return;
+    }
+
+    const n      = N;
+    const r_pad  = 40;
+    const avail  = W_canvas - r_pad * 2;
+    const gap    = avail / (n - 1);
+    const baseline = 100;
+    const radius   = 9;
+
+    const maskFull   = buildMask('full',   n, W, K);
+    const maskLocal  = buildMask('local',  n, W, K);
+    const maskSparse = buildMask('sparse', n, W, K);
+
+    const drawArcs = (mask, scheme) => {
+        ctx.lineWidth = 1.5;
+        for (let c = 0; c < n; c++) {
+            if (!mask[row][c]) continue;
+            const x1 = r_pad + row * gap;
+            const x2 = r_pad + c * gap;
+            const height = Math.abs(x2 - x1) * 0.42 + 16;
+            ctx.beginPath();
+            ctx.moveTo(x1, baseline);
+            ctx.bezierCurveTo(x1, baseline - height, x2, baseline - height, x2, baseline);
+            ctx.strokeStyle = scheme.active;
+            ctx.globalAlpha = c === row ? 1.0 : 0.55;
+            ctx.stroke();
+            ctx.globalAlpha = 1.0;
+        }
+    };
+
+    drawArcs(maskFull,   SCHEME.full);
+    drawArcs(maskLocal,  SCHEME.local);
+    drawArcs(maskSparse, SCHEME.sparse);
+
+    for (let i = 0; i < n; i++) {
+        const x = r_pad + i * gap;
+        ctx.beginPath();
+        ctx.arc(x, baseline, radius, 0, Math.PI * 2);
+        if (i === row) {
+            ctx.fillStyle = '#1e293b';
+        } else {
+            const aFull   = maskFull[row][i];
+            const aLocal  = maskLocal[row][i];
+            const aSparse = maskSparse[row][i];
+            if (aLocal && aSparse) ctx.fillStyle = '#818cf8';
+            else if (aLocal)       ctx.fillStyle = '#22c55e';
+            else if (aSparse)      ctx.fillStyle = '#a855f7';
+            else if (aFull)        ctx.fillStyle = '#93c5fd';
+            else                   ctx.fillStyle = '#e2e8f0';
+        }
+        ctx.fill();
+        ctx.strokeStyle = '#fff';
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+
+        ctx.fillStyle = i === row ? '#1e293b' : '#64748b';
+        ctx.font = `bold ${Math.min(11, Math.floor(gap * 0.45))}px monospace`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText(i, x, baseline + radius + 3);
+    }
+
+    // Legend
+    const legends = [
+        { label: 'Full',   color: SCHEME.full.active   },
+        { label: 'Local',  color: SCHEME.local.active  },
+        { label: 'Sparse', color: SCHEME.sparse.active },
+    ];
+    let lx = W_canvas - 10;
+    ctx.font = '11px sans-serif';
+    ctx.textBaseline = 'middle';
+    for (let i = legends.length - 1; i >= 0; i--) {
+        const lw = ctx.measureText(legends[i].label).width + 18;
+        lx -= lw + (i < legends.length - 1 ? 8 : 0);
+        ctx.fillStyle = legends[i].color;
+        ctx.fillRect(lx, 8, 12, 12);
+        ctx.fillStyle = '#475569';
+        ctx.textAlign = 'left';
+        ctx.fillText(legends[i].label, lx + 16, 14);
+    }
+}
+
+// ─────────────────────────────────────────────
+// Full redraw
+// ─────────────────────────────────────────────
+function redraw(highlightRow) {
+    const maskFull   = buildMask('full',   N, W, K);
+    const maskLocal  = buildMask('local',  N, W, K);
+    const maskSparse = buildMask('sparse', N, W, K);
+
+    drawMatrix(cvFull,   maskFull,   SCHEME.full,   highlightRow);
+    drawMatrix(cvLocal,  maskLocal,  SCHEME.local,  highlightRow);
+    drawMatrix(cvSparse, maskSparse, SCHEME.sparse, highlightRow);
+
+    drawArcDiagram(highlightRow);
+
+    const cFull   = countConnections(maskFull);
+    const cLocal  = countConnections(maskLocal);
+    const cSparse = countConnections(maskSparse);
+
+    document.getElementById('badge-full').textContent   = `O(n²) = ${cFull}`;
+    document.getElementById('badge-local').textContent  = `O(n·w) = ${cLocal}`;
+    document.getElementById('badge-sparse').textContent = `O(n·k) = ${cSparse}`;
+
+    document.getElementById('bar-lbl-full').textContent   = `${cFull} connections`;
+    document.getElementById('bar-lbl-local').textContent  = `${cLocal} connections`;
+    document.getElementById('bar-lbl-sparse').textContent = `${cSparse} connections`;
+
+    document.getElementById('bar-full').style.width   = '100%';
+    document.getElementById('bar-local').style.width  = `${Math.round(cLocal / cFull * 100)}%`;
+    document.getElementById('bar-sparse').style.width = `${Math.round(cSparse / cFull * 100)}%`;
+
+    document.getElementById('arc-label').textContent = highlightRow !== null
+        ? ` — Token ${highlightRow} attends to …`
+        : ' — hover a matrix row to inspect a token';
+}
+
+// ─────────────────────────────────────────────
+// Sliders
+// ─────────────────────────────────────────────
+document.getElementById('slider-n').addEventListener('input', e => {
+    N = parseInt(e.target.value);
+    document.getElementById('lbl-n').textContent = `n = ${N}`;
+    hoveredRow = null; tempRow = null;
+    redraw(null);
+});
+document.getElementById('slider-w').addEventListener('input', e => {
+    W = parseInt(e.target.value);
+    document.getElementById('lbl-w').textContent = `w = \u00b1${W}`;
+    redraw(hoveredRow ?? tempRow);
+});
+document.getElementById('slider-k').addEventListener('input', e => {
+    K = parseInt(e.target.value);
+    document.getElementById('lbl-k').textContent = `k = ${K}`;
+    redraw(hoveredRow ?? tempRow);
+});
+
+// ─────────────────────────────────────────────
+// Mouse interactions
+// ─────────────────────────────────────────────
+const tooltip = document.getElementById('tooltip');
+
+function getRowFromEvent(canvas, e) {
+    const rect = canvas.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    const cs = canvas.width / N;
+    const displayScale = canvas.width / rect.width;
+    const row = Math.floor((y * displayScale) / cs);
+    return (row >= 0 && row < N) ? row : null;
+}
+
+function attachMatrixEvents(canvas, modeName) {
+    canvas.addEventListener('mousemove', e => {
+        if (hoveredRow !== null) return;
+        const row = getRowFromEvent(canvas, e);
+        if (row !== tempRow) { tempRow = row; redraw(tempRow); }
+        if (row !== null) {
+            tooltip.textContent = `Token ${row} (${modeName})`;
+            tooltip.style.left = `${e.clientX + 12}px`;
+            tooltip.style.top  = `${e.clientY - 8}px`;
+            tooltip.classList.add('visible');
+        } else {
+            tooltip.classList.remove('visible');
+        }
+    });
+    canvas.addEventListener('mouseleave', () => {
+        if (hoveredRow !== null) return;
+        tempRow = null;
+        tooltip.classList.remove('visible');
+        redraw(null);
+    });
+    canvas.addEventListener('click', e => {
+        const row = getRowFromEvent(canvas, e);
+        if (row === null) return;
+        hoveredRow = (hoveredRow === row) ? null : row;
+        redraw(hoveredRow ?? tempRow);
+    });
+}
+
+attachMatrixEvents(cvFull,   'Full Attention');
+attachMatrixEvents(cvLocal,  'Local Attention');
+attachMatrixEvents(cvSparse, 'Sparse Attention');
+
+// ─────────────────────────────────────────────
+// Responsive resize
+// ─────────────────────────────────────────────
+const ro = new ResizeObserver(() => redraw(hoveredRow ?? tempRow));
+ro.observe(cvFull);
+ro.observe(cvLocal);
+ro.observe(cvSparse);
+ro.observe(cvArc);
+
+redraw(null);
+</script>
+</body>
+</html>

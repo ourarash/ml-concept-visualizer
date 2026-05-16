@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #9 by vineetha00 (@vineetha00): Text Generation Decoding Strategies Visualizer. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Text Generation Decoding Strategies — EE508</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap');
+:root{--bg:#f5f2eb;--bg2:#ede9df;--ink:#1a1810;--ink2:#3d3a30;--ink3:#7a7568;--border:#c8c0aa;--border2:#ddd6c4;--greedy:#c0392b;--beam:#2471a3;--topk:#1e8449;--topp:#d35400;}
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'IBM Plex Sans',sans-serif;background:var(--bg);color:var(--ink);min-height:100vh;}
+body::before{content:'';position:fixed;inset:0;background-image:linear-gradient(var(--border2) 1px,transparent 1px),linear-gradient(90deg,var(--border2) 1px,transparent 1px);background-size:32px 32px;opacity:0.35;pointer-events:none;z-index:0;}
+.container{position:relative;z-index:1;max-width:1100px;margin:0 auto;padding:28px 20px;}
+.header{margin-bottom:22px;}
+.course-tag{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.2em;text-transform:uppercase;color:var(--ink3);border-left:3px solid var(--ink);padding-left:8px;margin-bottom:10px;display:block;}
+h1{font-family:'IBM Plex Mono',monospace;font-size:clamp(19px,3.5vw,29px);font-weight:700;letter-spacing:-0.02em;margin-bottom:8px;}
+h1 em{font-style:normal;text-decoration:underline;text-decoration-color:var(--greedy);text-underline-offset:4px;}
+.subtitle{font-size:13px;color:var(--ink3);line-height:1.6;max-width:640px;}
+.slide-ref{display:inline-block;margin-top:8px;font-family:'IBM Plex Mono',monospace;font-size:10px;color:var(--ink3);background:var(--bg2);border:1px solid var(--border);padding:3px 8px;border-radius:2px;}
+.prompt-bar{display:flex;align-items:center;gap:12px;background:var(--ink);color:#f5f2eb;padding:12px 18px;border-radius:4px;margin-bottom:18px;flex-wrap:wrap;}
+.plabel{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:0.15em;text-transform:uppercase;color:#a09880;flex-shrink:0;}
+.ptext{font-family:'IBM Plex Mono',monospace;font-size:14px;font-weight:500;color:#f4e04d;flex:1;}
+.pnote{font-size:11px;color:#a09880;}
+.strat-tabs{display:flex;gap:4px;margin-bottom:16px;flex-wrap:wrap;}
+.stab{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:7px 16px;border:2px solid var(--border);background:transparent;color:var(--ink3);cursor:pointer;border-radius:2px;transition:all 0.15s;letter-spacing:0.04em;}
+.stab:hover{border-color:var(--ink);color:var(--ink);}
+.stab.a-greedy{border-color:var(--greedy);color:var(--greedy);background:#fdf0ee;}
+.stab.a-beam{border-color:var(--beam);color:var(--beam);background:#eaf4fb;}
+.stab.a-topk{border-color:var(--topk);color:var(--topk);background:#eafaf1;}
+.stab.a-topp{border-color:var(--topp);color:var(--topp);background:#fef5ec;}
+.main-grid{display:grid;grid-template-columns:1fr 300px;gap:16px;}
+@media(max-width:780px){.main-grid{grid-template-columns:1fr;}}
+.canvas-card{background:#fff;border:2px solid var(--border);border-radius:4px;overflow:hidden;}
+.canvas-head{display:flex;align-items:center;justify-content:space-between;padding:10px 16px;border-bottom:2px solid var(--border);}
+.canvas-strat-name{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;}
+.btn-run{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.1em;text-transform:uppercase;padding:5px 16px;border:none;border-radius:2px;cursor:pointer;transition:all 0.15s;}
+.btn-run:hover{opacity:0.85;}
+.btn-run.greedy{background:var(--greedy);color:#fff;}
+.btn-run.beam{background:var(--beam);color:#fff;}
+.btn-run.topk{background:var(--topk);color:#fff;}
+.btn-run.topp{background:var(--topp);color:#fff;}
+#treeCanvas{display:block;width:100%;background:#fafaf8;}
+.decision-box{padding:10px 16px;border-top:1px solid var(--border2);min-height:52px;background:var(--bg2);}
+.dlabel{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:var(--ink3);margin-bottom:4px;}
+.dtext{font-size:12px;color:var(--ink2);line-height:1.5;}
+.logscore-row{padding:6px 16px 8px;border-top:1px solid var(--border2);background:#fafaf8;display:none;align-items:center;gap:8px;}
+.logscore-row.vis{display:flex;}
+.ls-label{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.1em;color:var(--ink3);}
+.ls-bar-wrap{flex:1;height:10px;background:var(--bg2);border-radius:1px;overflow:hidden;}
+.ls-bar{height:100%;border-radius:1px;transition:width 0.4s;}
+.ls-val{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;color:var(--ink);min-width:52px;text-align:right;}
+.output-row{display:flex;align-items:center;gap:6px;padding:10px 16px;border-top:2px solid var(--border);flex-wrap:wrap;min-height:46px;background:#fff;}
+.olabel{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:var(--ink3);}
+.tok-chip{font-family:'IBM Plex Mono',monospace;font-size:11px;font-weight:600;padding:2px 8px;border-radius:2px;border:1.5px solid currentColor;opacity:0;transform:translateY(3px);transition:opacity 0.2s,transform 0.2s;}
+.tok-chip.show{opacity:1;transform:translateY(0);}
+.sidebar{display:flex;flex-direction:column;gap:14px;}
+.scard{background:#fff;border:2px solid var(--border);border-radius:4px;padding:14px;}
+.scard-title{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px;}
+.desc-strat-name{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:700;margin-bottom:6px;}
+.desc-text{font-size:12px;color:var(--ink2);line-height:1.6;}
+.desc-formula{font-family:'IBM Plex Mono',monospace;font-size:11px;color:var(--ink);background:var(--bg2);border-left:3px solid currentColor;padding:6px 10px;margin-top:8px;border-radius:0 2px 2px 0;}
+.param-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;}
+.param-label{font-size:12px;color:var(--ink2);}
+.param-val{font-family:'IBM Plex Mono',monospace;font-size:12px;font-weight:600;color:var(--ink);min-width:32px;text-align:right;}
+input[type=range]{width:100%;height:4px;border-radius:2px;-webkit-appearance:none;outline:none;cursor:pointer;margin-bottom:10px;}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;border-radius:50%;background:var(--ink);border:2px solid #fff;box-shadow:0 0 0 1px var(--ink);cursor:pointer;}
+.prob-row{display:flex;align-items:center;gap:8px;margin-bottom:5px;}
+.prob-tok{font-family:'IBM Plex Mono',monospace;font-size:11px;width:52px;flex-shrink:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.prob-bg{flex:1;height:18px;background:var(--bg2);border-radius:1px;overflow:hidden;}
+.prob-fill{height:100%;border-radius:1px;display:flex;align-items:center;padding-left:4px;transition:width 0.35s;}
+.prob-fill-label{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;color:rgba(255,255,255,0.85);}
+.compare-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;}
+@media(max-width:600px){.compare-grid{grid-template-columns:repeat(2,1fr);}}
+.ccard{border:1.5px solid var(--border);border-radius:2px;padding:10px;background:var(--bg);}
+.ccard-name{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.06em;margin-bottom:5px;}
+.ccard-prop{font-size:10px;color:var(--ink3);margin-bottom:2px;line-height:1.4;}
+.ccard-prop span{font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;color:var(--ink2);}
+.qual-dots{display:flex;gap:3px;margin-top:5px;}
+.qdot{width:7px;height:7px;border-radius:50%;background:var(--border);}
+.qdot.on{background:currentColor;}
+</style>
+</head>
+<body>
+<div class="container">
+<div class="header">
+  <span class="course-tag">EE508 — Hardware Foundations for ML · NLP &amp; Language Models</span>
+  <h1>Text Generation <em>Decoding Strategies</em></h1>
+  <p class="subtitle">When a language model generates text it must choose the next token at each step. This visualization shows how four strategies navigate the probability distribution — and why each leads to different outputs.</p>
+  <span class="slide-ref">↳ Autoregressive example from ML_LectureSp26_transformers2.pdf, Slide 6 — "The cat sat → on → the → mat"</span>
+</div>
+<div class="prompt-bar">
+  <span class="plabel">Prompt</span>
+  <span class="ptext" id="promptText">"The cat sat"</span>
+  <select id="promptSelect" style="font-family:'IBM Plex Mono',monospace;font-size:11px;background:#2a2820;color:#f5f2eb;border:1px solid #4a4840;border-radius:2px;padding:5px 8px;cursor:pointer;">
+    <option value="cat">The cat sat</option>
+    <option value="robot">A robot may not</option>
+    <option value="model">The neural network</option>
+    <option value="recite">recite the first law</option>
+  </select>
+  <span class="pnote">← from Lecture slides</span>
+</div>
+<div class="strat-tabs">
+  <button class="stab a-greedy" onclick="setStrategy('greedy')">Greedy Search</button>
+  <button class="stab" onclick="setStrategy('beam')">Beam Search</button>
+  <button class="stab" onclick="setStrategy('topk')">Top-K Sampling</button>
+  <button class="stab" onclick="setStrategy('topp')">Top-P (Nucleus)</button>
+</div>
+<div class="main-grid">
+  <div class="canvas-card">
+    <div class="canvas-head">
+      <span class="canvas-strat-name" id="csn" style="color:var(--greedy)">Greedy Search</span>
+      <button class="btn-run greedy" id="btnRun" onclick="runAnim()">&#9654; Run</button>
+    </div>
+    <canvas id="treeCanvas" height="350"></canvas>
+    <div class="decision-box">
+      <div class="dlabel">Decision Explanation</div>
+      <div class="dtext" id="decBox">Press Run to begin the step-by-step animation.</div>
+    </div>
+    <div class="logscore-row" id="lsRow">
+      <span class="ls-label">Cumulative log-score</span>
+      <div class="ls-bar-wrap"><div class="ls-bar" id="lsBar" style="width:40%"></div></div>
+      <span class="ls-val" id="lsVal">–</span>
+    </div>
+    <div class="output-row">
+      <span class="olabel">Generated:</span>
+      <span id="pfx" style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--ink3);margin-right:4px;"></span>
+      <div id="outToks" style="display:flex;gap:4px;flex-wrap:wrap;"></div>
+    </div>
+  </div>
+  <div class="sidebar">
+    <div class="scard">
+      <div class="scard-title">Strategy</div>
+      <div class="desc-strat-name" id="dName" style="color:var(--greedy)">Greedy Search</div>
+      <p class="desc-text" id="dText">At each step, pick the single token with the highest probability. Fast and deterministic — but may miss better overall sequences.</p>
+      <div class="desc-formula" id="dFormula" style="border-color:var(--greedy)">x&#770;&#8348; = argmax P(x&#8348; | x&#8321;&#8230;x&#8348;&#8331;&#8321;)</div>
+    </div>
+    <div class="scard">
+      <div class="scard-title">Parameters</div>
+      <div id="gP"><p style="font-size:12px;color:var(--ink3);">No parameters — greedy always picks the single highest-probability token.</p></div>
+      <div id="bP" style="display:none">
+        <div class="param-row"><span class="param-label">Beam width</span><span class="param-val" id="bwV">3</span></div>
+        <input type="range" style="background:var(--beam)" id="bwS" min="2" max="5" value="3">
+        <div class="param-row"><span class="param-label">Max length</span><span class="param-val" id="blV">4</span></div>
+        <input type="range" style="background:var(--beam)" id="blS" min="3" max="6" value="4">
+      </div>
+      <div id="kP" style="display:none">
+        <div class="param-row"><span class="param-label">K (top tokens)</span><span class="param-val" id="kV">3</span></div>
+        <input type="range" style="background:var(--topk)" id="kS" min="1" max="6" value="3">
+        <div class="param-row"><span class="param-label">Temperature</span><span class="param-val" id="ktV">1.0</span></div>
+        <input type="range" style="background:var(--topk)" id="ktS" min="1" max="20" value="10">
+      </div>
+      <div id="pP" style="display:none">
+        <div class="param-row"><span class="param-label">P threshold</span><span class="param-val" id="pV">0.90</span></div>
+        <input type="range" style="background:var(--topp)" id="pS" min="1" max="10" value="9">
+        <div class="param-row"><span class="param-label">Temperature</span><span class="param-val" id="ptV">1.0</span></div>
+        <input type="range" style="background:var(--topp)" id="ptS" min="1" max="20" value="10">
+      </div>
+    </div>
+    <div class="scard">
+      <div class="scard-title">Next-token distribution</div>
+      <div id="probBars"></div>
+    </div>
+  </div>
+</div>
+<div style="margin-top:20px;">
+  <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;letter-spacing:0.15em;text-transform:uppercase;color:var(--ink3);margin-bottom:10px;">Strategy Comparison</div>
+  <div class="compare-grid">
+    <div class="ccard"><div class="ccard-name" style="color:var(--greedy)">GREEDY</div><div class="ccard-prop">Deterministic: <span style="color:var(--greedy)">Yes</span></div><div class="ccard-prop">Search width: <span>1</span></div><div class="ccard-prop">Complexity: <span>O(V)</span></div><div class="ccard-prop">Best for: <span>speed</span></div><div class="qual-dots" style="color:var(--greedy)"><div class="qdot on"></div><div class="qdot"></div><div class="qdot"></div><div class="qdot"></div><div class="qdot"></div></div></div>
+    <div class="ccard"><div class="ccard-name" style="color:var(--beam)">BEAM</div><div class="ccard-prop">Deterministic: <span style="color:var(--beam)">Yes</span></div><div class="ccard-prop">Search width: <span>k paths</span></div><div class="ccard-prop">Complexity: <span>O(k·V·L)</span></div><div class="ccard-prop">Best for: <span>translation</span></div><div class="qual-dots" style="color:var(--beam)"><div class="qdot on"></div><div class="qdot on"></div><div class="qdot on"></div><div class="qdot"></div><div class="qdot"></div></div></div>
+    <div class="ccard"><div class="ccard-name" style="color:var(--topk)">TOP-K</div><div class="ccard-prop">Deterministic: <span style="color:var(--topk)">No</span></div><div class="ccard-prop">Search width: <span>k tokens</span></div><div class="ccard-prop">Complexity: <span>O(V+k)</span></div><div class="ccard-prop">Best for: <span>creative text</span></div><div class="qual-dots" style="color:var(--topk)"><div class="qdot on"></div><div class="qdot on"></div><div class="qdot on"></div><div class="qdot on"></div><div class="qdot"></div></div></div>
+    <div class="ccard"><div class="ccard-name" style="color:var(--topp)">TOP-P</div><div class="ccard-prop">Deterministic: <span style="color:var(--topp)">No</span></div><div class="ccard-prop">Search width: <span>dynamic</span></div><div class="ccard-prop">Complexity: <span>O(V log V)</span></div><div class="ccard-prop">Best for: <span>open-ended</span></div><div class="qual-dots" style="color:var(--topp)"><div class="qdot on"></div><div class="qdot on"></div><div class="qdot on"></div><div class="qdot on"></div><div class="qdot on"></div></div></div>
+  </div>
+</div>
+</div>
+<script>
+const PROMPTS={
+  cat:{label:'"The cat sat"',prefix:'The cat sat',tree:{tokens:['on','near','by','under','with'],probs:[0.42,0.22,0.18,0.12,0.06],children:{on:{tokens:['the','a','its','my'],probs:[0.48,0.26,0.16,0.10],children:{the:{tokens:['mat','floor','chair','roof'],probs:[0.52,0.24,0.14,0.10],children:{mat:{tokens:['and','while','nearby','purring'],probs:[0.40,0.28,0.18,0.14],children:{}},floor:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},chair:{tokens:['and','while','above','quietly'],probs:[0.40,0.28,0.18,0.14],children:{}},roof:{tokens:['and','watching','quietly','still'],probs:[0.42,0.26,0.18,0.14],children:{}}}},a:{tokens:['soft','warm','cold','hard'],probs:[0.40,0.32,0.16,0.12],children:{soft:{tokens:['mat','rug','bed','cushion'],probs:[0.46,0.28,0.16,0.10],children:{}},warm:{tokens:['mat','rug','spot','cushion'],probs:[0.44,0.28,0.18,0.10],children:{}},cold:{tokens:['mat','floor','tile','stone'],probs:[0.40,0.30,0.18,0.12],children:{}},hard:{tokens:['mat','floor','tile','stone'],probs:[0.40,0.30,0.18,0.12],children:{}}}},its:{tokens:['mat','paws','side','tail'],probs:[0.44,0.26,0.18,0.12],children:{mat:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},paws:{tokens:['and','while','tucked','stretched'],probs:[0.40,0.28,0.18,0.14],children:{}},side:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},tail:{tokens:['and','while','curled','stretched'],probs:[0.40,0.28,0.18,0.14],children:{}}}},my:{tokens:['lap','feet','coat','hat'],probs:[0.42,0.28,0.18,0.12],children:{lap:{tokens:['and','while','quietly','purring'],probs:[0.40,0.28,0.18,0.14],children:{}},feet:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},coat:{tokens:['and','while','quietly','purring'],probs:[0.40,0.28,0.18,0.14],children:{}},hat:{tokens:['and','while','quietly','purring'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},near:{tokens:['the','a','its','my'],probs:[0.44,0.28,0.16,0.12],children:{the:{tokens:['window','door','fire','stove'],probs:[0.38,0.28,0.22,0.12],children:{window:{tokens:['and','while','quietly','watching'],probs:[0.40,0.28,0.18,0.14],children:{}},door:{tokens:['and','while','quietly','waiting'],probs:[0.40,0.28,0.18,0.14],children:{}},fire:{tokens:['and','while','quietly','warming'],probs:[0.40,0.28,0.18,0.14],children:{}},stove:{tokens:['and','while','quietly','warming'],probs:[0.40,0.28,0.18,0.14],children:{}}}},a:{tokens:['warm','sunny','cozy','bright'],probs:[0.38,0.28,0.22,0.12],children:{warm:{tokens:['window','spot','corner','nook'],probs:[0.40,0.28,0.18,0.14],children:{}},sunny:{tokens:['window','spot','corner','ledge'],probs:[0.42,0.28,0.18,0.12],children:{}},cozy:{tokens:['corner','spot','nook','chair'],probs:[0.40,0.28,0.18,0.14],children:{}},bright:{tokens:['window','corner','spot','ledge'],probs:[0.40,0.28,0.18,0.14],children:{}}}},its:{tokens:['bowl','bed','toys','food'],probs:[0.36,0.28,0.22,0.14],children:{bowl:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},bed:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},toys:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},food:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}}}},my:{tokens:['feet','desk','chair','bag'],probs:[0.36,0.28,0.22,0.14],children:{feet:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},desk:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},chair:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},bag:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},by:{tokens:['the','a','its','my'],probs:[0.42,0.26,0.18,0.14],children:{the:{tokens:['door','fire','window','stove'],probs:[0.38,0.28,0.22,0.12],children:{door:{tokens:['and','while','quietly','waiting'],probs:[0.40,0.28,0.18,0.14],children:{}},fire:{tokens:['and','while','quietly','warming'],probs:[0.40,0.28,0.18,0.14],children:{}},window:{tokens:['and','while','quietly','watching'],probs:[0.40,0.28,0.18,0.14],children:{}},stove:{tokens:['and','while','quietly','warming'],probs:[0.40,0.28,0.18,0.14],children:{}}}},a:{tokens:['warm','cozy','bright','sunny'],probs:[0.38,0.28,0.22,0.12],children:{warm:{tokens:['fire','window','spot','corner'],probs:[0.40,0.28,0.18,0.14],children:{}},cozy:{tokens:['fire','corner','spot','nook'],probs:[0.40,0.28,0.18,0.14],children:{}},bright:{tokens:['window','lamp','light','corner'],probs:[0.40,0.28,0.18,0.14],children:{}},sunny:{tokens:['window','spot','corner','ledge'],probs:[0.42,0.28,0.18,0.12],children:{}}}},its:{tokens:['bowl','bed','toys','food'],probs:[0.36,0.28,0.22,0.14],children:{bowl:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},bed:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},toys:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},food:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}}}},my:{tokens:['feet','desk','chair','bag'],probs:[0.36,0.28,0.22,0.14],children:{feet:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},desk:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},chair:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}},bag:{tokens:['and','while','quietly','nearby'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},under:{tokens:['the','a','its','my'],probs:[0.44,0.24,0.18,0.14],children:{the:{tokens:['table','chair','bed','desk'],probs:[0.38,0.28,0.22,0.12],children:{table:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}},chair:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}},bed:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}},desk:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}}}},a:{tokens:['large','small','wooden','heavy'],probs:[0.36,0.28,0.22,0.14],children:{large:{tokens:['table','chair','desk','bed'],probs:[0.38,0.28,0.22,0.12],children:{}},small:{tokens:['table','chair','desk','stool'],probs:[0.38,0.28,0.22,0.12],children:{}},wooden:{tokens:['table','chair','desk','bench'],probs:[0.38,0.28,0.22,0.12],children:{}},heavy:{tokens:['table','chair','desk','bench'],probs:[0.38,0.28,0.22,0.12],children:{}}}},its:{tokens:['paws','chin','belly','tail'],probs:[0.36,0.28,0.22,0.14],children:{paws:{tokens:['and','while','quietly','tucked'],probs:[0.40,0.28,0.18,0.14],children:{}},chin:{tokens:['and','while','quietly','resting'],probs:[0.40,0.28,0.18,0.14],children:{}},belly:{tokens:['and','while','quietly','resting'],probs:[0.40,0.28,0.18,0.14],children:{}},tail:{tokens:['and','while','quietly','curled'],probs:[0.40,0.28,0.18,0.14],children:{}}}},my:{tokens:['feet','legs','coat','bag'],probs:[0.36,0.28,0.22,0.14],children:{feet:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}},legs:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}},coat:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}},bag:{tokens:['and','while','quietly','hiding'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},with:{tokens:['its','the','a','my'],probs:[0.42,0.26,0.18,0.14],children:{its:{tokens:['paws','tail','eyes','ears'],probs:[0.38,0.28,0.22,0.12],children:{paws:{tokens:['tucked','curled','folded','stretched'],probs:[0.40,0.28,0.20,0.12],children:{}},tail:{tokens:['curled','flicking','wrapped','swishing'],probs:[0.40,0.28,0.20,0.12],children:{}},eyes:{tokens:['closed','open','half','wide'],probs:[0.40,0.28,0.20,0.12],children:{}},ears:{tokens:['back','forward','flat','perked'],probs:[0.40,0.28,0.20,0.12],children:{}}}},the:{tokens:['sun','warmth','light','glow'],probs:[0.38,0.28,0.22,0.12],children:{sun:{tokens:['shining','warming','bright','above'],probs:[0.40,0.28,0.20,0.12],children:{}},warmth:{tokens:['of','from','nearby','above'],probs:[0.40,0.28,0.20,0.12],children:{}},light:{tokens:['above','nearby','shining','bright'],probs:[0.40,0.28,0.20,0.12],children:{}},glow:{tokens:['of','from','above','nearby'],probs:[0.40,0.28,0.20,0.12],children:{}}}},a:{tokens:['content','lazy','peaceful','proud'],probs:[0.36,0.28,0.22,0.14],children:{content:{tokens:['purr','look','sigh','yawn'],probs:[0.40,0.28,0.20,0.12],children:{}},lazy:{tokens:['yawn','stretch','blink','purr'],probs:[0.40,0.28,0.20,0.12],children:{}},peaceful:{tokens:['look','gaze','purr','sigh'],probs:[0.40,0.28,0.20,0.12],children:{}},proud:{tokens:['look','gaze','purr','air'],probs:[0.40,0.28,0.20,0.12],children:{}}}},my:{tokens:['permission','blessing','approval','knowledge'],probs:[0.36,0.28,0.22,0.14],children:{permission:{tokens:['and','as','while','but'],probs:[0.40,0.28,0.20,0.12],children:{}},blessing:{tokens:['and','as','while','but'],probs:[0.40,0.28,0.20,0.12],children:{}},approval:{tokens:['and','as','while','but'],probs:[0.40,0.28,0.20,0.12],children:{}},knowledge:{tokens:['and','as','while','but'],probs:[0.40,0.28,0.20,0.12],children:{}}}}}}}}},
+  robot:{label:'"A robot may not"',prefix:'A robot may not',tree:{tokens:['injure','harm','hurt','damage','threaten'],probs:[0.45,0.24,0.16,0.09,0.06],children:{injure:{tokens:['a','any','another','the'],probs:[0.44,0.28,0.16,0.12],children:{a:{tokens:['human','person','being','creature'],probs:[0.52,0.26,0.14,0.08],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},any:{tokens:['human','person','being','creature'],probs:[0.48,0.26,0.16,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},another:{tokens:['human','robot','being','person'],probs:[0.44,0.28,0.18,0.10],children:{human:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},robot:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},person:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}},the:{tokens:['human','operator','user','owner'],probs:[0.44,0.26,0.18,0.12],children:{human:{tokens:['or','and','through','unless'],probs:[0.40,0.28,0.18,0.14],children:{}},operator:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},user:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},owner:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},harm:{tokens:['a','any','another','the'],probs:[0.42,0.28,0.18,0.12],children:{a:{tokens:['human','person','being','creature'],probs:[0.50,0.26,0.14,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},any:{tokens:['human','person','being','creature'],probs:[0.46,0.28,0.16,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},another:{tokens:['human','robot','being','person'],probs:[0.42,0.28,0.18,0.12],children:{human:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},robot:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},person:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}},the:{tokens:['human','operator','user','owner'],probs:[0.42,0.28,0.18,0.12],children:{human:{tokens:['or','and','through','unless'],probs:[0.40,0.28,0.18,0.14],children:{}},operator:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},user:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},owner:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},hurt:{tokens:['a','any','another','the'],probs:[0.42,0.28,0.18,0.12],children:{a:{tokens:['human','person','being','creature'],probs:[0.48,0.28,0.14,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},any:{tokens:['human','person','being','creature'],probs:[0.44,0.28,0.18,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},another:{tokens:['human','robot','being','person'],probs:[0.40,0.28,0.20,0.12],children:{human:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},robot:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},person:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}},the:{tokens:['human','operator','user','owner'],probs:[0.40,0.28,0.20,0.12],children:{human:{tokens:['or','and','through','unless'],probs:[0.40,0.28,0.18,0.14],children:{}},operator:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},user:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},owner:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},damage:{tokens:['a','any','another','the'],probs:[0.42,0.28,0.18,0.12],children:{a:{tokens:['human','person','being','creature'],probs:[0.46,0.28,0.16,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},any:{tokens:['human','person','being','creature'],probs:[0.42,0.28,0.18,0.12],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},another:{tokens:['human','robot','being','person'],probs:[0.38,0.28,0.22,0.12],children:{human:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},robot:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},person:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}},the:{tokens:['human','operator','user','owner'],probs:[0.38,0.28,0.22,0.12],children:{human:{tokens:['or','and','through','unless'],probs:[0.40,0.28,0.18,0.14],children:{}},operator:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},user:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},owner:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}},threaten:{tokens:['a','any','another','the'],probs:[0.40,0.28,0.20,0.12],children:{a:{tokens:['human','person','being','creature'],probs:[0.44,0.28,0.18,0.10],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},any:{tokens:['human','person','being','creature'],probs:[0.40,0.28,0.20,0.12],children:{human:{tokens:['being','or','and','through'],probs:[0.48,0.28,0.14,0.10],children:{}},person:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}},creature:{tokens:['or','and','through','directly'],probs:[0.40,0.28,0.18,0.14],children:{}}}},another:{tokens:['human','robot','being','person'],probs:[0.38,0.28,0.22,0.12],children:{human:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},robot:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},being:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}},person:{tokens:['or','and','through','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}},the:{tokens:['human','operator','user','owner'],probs:[0.38,0.28,0.22,0.12],children:{human:{tokens:['or','and','through','unless'],probs:[0.40,0.28,0.18,0.14],children:{}},operator:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},user:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}},owner:{tokens:['or','and','unless','except'],probs:[0.40,0.28,0.18,0.14],children:{}}}}}}}}},
+  model:{label:'"The neural network"',prefix:'The neural network',tree:{tokens:['learned','processes','generates','predicts','encodes'],probs:[0.38,0.26,0.18,0.12,0.06],children:{learned:{tokens:['to','how','that','a'],probs:[0.42,0.26,0.20,0.12],children:{to:{tokens:['classify','predict','recognize','map'],probs:[0.38,0.28,0.22,0.12],children:{classify:{tokens:['images','data','patterns','objects'],probs:[0.40,0.28,0.20,0.12],children:{}},predict:{tokens:['outputs','values','labels','classes'],probs:[0.40,0.28,0.20,0.12],children:{}},recognize:{tokens:['patterns','speech','faces','objects'],probs:[0.40,0.28,0.20,0.12],children:{}},map:{tokens:['inputs','data','features','tokens'],probs:[0.40,0.28,0.20,0.12],children:{}}}},how:{tokens:['to','well','quickly','accurately'],probs:[0.40,0.28,0.20,0.12],children:{to:{tokens:['generalize','adapt','converge','optimize'],probs:[0.40,0.28,0.20,0.12],children:{}},well:{tokens:['from','by','through','via'],probs:[0.40,0.28,0.20,0.12],children:{}},quickly:{tokens:['adapt','learn','converge','update'],probs:[0.40,0.28,0.20,0.12],children:{}},accurately:{tokens:['classify','predict','map','label'],probs:[0.40,0.28,0.20,0.12],children:{}}}},that:{tokens:['images','words','tokens','data'],probs:[0.36,0.28,0.22,0.14],children:{images:{tokens:['contain','have','show','include'],probs:[0.40,0.28,0.20,0.12],children:{}},words:{tokens:['have','carry','encode','contain'],probs:[0.40,0.28,0.20,0.12],children:{}},tokens:{tokens:['have','carry','encode','contain'],probs:[0.40,0.28,0.20,0.12],children:{}},data:{tokens:['can','must','will','should'],probs:[0.40,0.28,0.20,0.12],children:{}}}},a:{tokens:['new','deep','complex','simple'],probs:[0.38,0.28,0.22,0.12],children:{new:{tokens:['way','method','approach','strategy'],probs:[0.40,0.28,0.20,0.12],children:{}},deep:{tokens:['representation','feature','mapping','pattern'],probs:[0.40,0.28,0.20,0.12],children:{}},complex:{tokens:['function','mapping','pattern','relation'],probs:[0.40,0.28,0.20,0.12],children:{}},simple:{tokens:['rule','pattern','mapping','function'],probs:[0.40,0.28,0.20,0.12],children:{}}}}}},processes:{tokens:['input','each','the','all'],probs:[0.40,0.28,0.20,0.12],children:{input:{tokens:['tokens','data','sequences','embeddings'],probs:[0.40,0.28,0.20,0.12],children:{tokens:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},data:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},sequences:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},embeddings:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}}}},each:{tokens:['token','layer','step','input'],probs:[0.40,0.28,0.20,0.12],children:{token:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},layer:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},step:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},input:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}}}},the:{tokens:['input','data','tokens','sequence'],probs:[0.40,0.28,0.20,0.12],children:{input:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},data:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},tokens:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},sequence:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}}}},all:{tokens:['input','data','tokens','layers'],probs:[0.40,0.28,0.20,0.12],children:{input:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},data:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},tokens:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}},layers:{tokens:['in','through','via','by'],probs:[0.40,0.28,0.20,0.12],children:{}}}}}},generates:{tokens:['text','tokens','output','predictions'],probs:[0.40,0.28,0.20,0.12],children:{text:{tokens:['by','through','using','with'],probs:[0.40,0.28,0.20,0.12],children:{by:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},through:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},using:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}},with:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}}}},tokens:{tokens:['by','through','using','with'],probs:[0.40,0.28,0.20,0.12],children:{by:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},through:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},using:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}},with:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}}}},output:{tokens:['by','through','using','with'],probs:[0.40,0.28,0.20,0.12],children:{by:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},through:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},using:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}},with:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}}}},predictions:{tokens:['by','through','using','with'],probs:[0.40,0.28,0.20,0.12],children:{by:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},through:{tokens:['sampling','decoding','predicting','selecting'],probs:[0.40,0.28,0.20,0.12],children:{}},using:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}},with:{tokens:['attention','weights','embeddings','layers'],probs:[0.40,0.28,0.20,0.12],children:{}}}}}},predicts:{tokens:['the','each','a','output'],probs:[0.40,0.28,0.20,0.12],children:{the:{tokens:['next','correct','output','final'],probs:[0.44,0.26,0.18,0.12],children:{next:{tokens:['token','word','step','output'],probs:[0.44,0.28,0.18,0.10],children:{}},correct:{tokens:['token','label','class','output'],probs:[0.40,0.28,0.20,0.12],children:{}},output:{tokens:['token','label','class','value'],probs:[0.40,0.28,0.20,0.12],children:{}},final:{tokens:['token','output','label','class'],probs:[0.40,0.28,0.20,0.12],children:{}}}},each:{tokens:['next','following','subsequent','new'],probs:[0.44,0.26,0.18,0.12],children:{next:{tokens:['token','word','step','output'],probs:[0.44,0.28,0.18,0.10],children:{}},following:{tokens:['token','word','step','output'],probs:[0.40,0.28,0.20,0.12],children:{}},subsequent:{tokens:['token','word','step','output'],probs:[0.40,0.28,0.20,0.12],children:{}},new:{tokens:['token','word','step','output'],probs:[0.40,0.28,0.20,0.12],children:{}}}},a:{tokens:['next','new','single','final'],probs:[0.40,0.28,0.20,0.12],children:{next:{tokens:['token','word','step','output'],probs:[0.44,0.28,0.18,0.10],children:{}},new:{tokens:['token','word','step','output'],probs:[0.40,0.28,0.20,0.12],children:{}},single:{tokens:['token','word','step','output'],probs:[0.40,0.28,0.20,0.12],children:{}},final:{tokens:['token','word','step','output'],probs:[0.40,0.28,0.20,0.12],children:{}}}},output:{tokens:['from','using','based','derived'],probs:[0.40,0.28,0.20,0.12],children:{from:{tokens:['input','context','data','embeddings'],probs:[0.40,0.28,0.20,0.12],children:{}},using:{tokens:['attention','weights','context','embeddings'],probs:[0.40,0.28,0.20,0.12],children:{}},based:{tokens:['on','upon','from','using'],probs:[0.40,0.28,0.20,0.12],children:{}},derived:{tokens:['from','using','by','through'],probs:[0.40,0.28,0.20,0.12],children:{}}}}}},encodes:{tokens:['input','the','each','all'],probs:[0.40,0.28,0.20,0.12],children:{input:{tokens:['tokens','data','text','sequences'],probs:[0.40,0.28,0.20,0.12],children:{tokens:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},data:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},text:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},sequences:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}}}},the:{tokens:['input','meaning','context','sequence'],probs:[0.40,0.28,0.20,0.12],children:{input:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},meaning:{tokens:['of','into','as','using'],probs:[0.40,0.28,0.20,0.12],children:{}},context:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},sequence:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}}}},each:{tokens:['token','word','input','layer'],probs:[0.40,0.28,0.20,0.12],children:{token:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},word:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},input:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},layer:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}}}},all:{tokens:['tokens','inputs','data','layers'],probs:[0.40,0.28,0.20,0.12],children:{tokens:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},inputs:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},data:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}},layers:{tokens:['into','as','using','through'],probs:[0.40,0.28,0.20,0.12],children:{}}}}}}}}},
+  recite:{label:'"recite the first law"',prefix:'recite the first law',tree:{tokens:['of','about','from','regarding','concerning'],probs:[0.46,0.22,0.18,0.10,0.04],children:{of:{tokens:['robotics','thermodynamics','motion','gravity'],probs:[0.44,0.28,0.18,0.10],children:{robotics:{tokens:['which','that','stating','saying'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}},saying:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},thermodynamics:{tokens:['which','that','stating','as'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}}}},motion:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},gravity:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}}}},about:{tokens:['robotics','science','physics','nature'],probs:[0.42,0.26,0.20,0.12],children:{robotics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},science:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},physics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},nature:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}}}},from:{tokens:['robotics','physics','science','memory'],probs:[0.42,0.26,0.20,0.12],children:{robotics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},physics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},science:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},memory:{tokens:['which','that','as','recalling'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},recalling:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}}}},regarding:{tokens:['robotics','physics','science','nature'],probs:[0.42,0.26,0.20,0.12],children:{robotics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},physics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},science:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},nature:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}}}},concerning:{tokens:['robotics','physics','science','nature'],probs:[0.42,0.26,0.20,0.12],children:{robotics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','forbids'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},physics:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},science:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}},nature:{tokens:['which','that','as','stating'],probs:[0.40,0.28,0.20,0.12],children:{which:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},that:{tokens:['states','says','requires','defines'],probs:[0.44,0.28,0.18,0.10],children:{}},as:{tokens:['follows','stated','written','defined'],probs:[0.44,0.28,0.18,0.10],children:{}},stating:{tokens:['that','how','which','what'],probs:[0.44,0.28,0.18,0.10],children:{}}}}}}}}}
+};
+
+let curS='greedy',curP='cat',going=false;
+const COLORS={greedy:'#c0392b',beam:'#2471a3',topk:'#1e8449',topp:'#d35400'};
+const NAMES={greedy:'Greedy Search',beam:'Beam Search',topk:'Top-K Sampling',topp:'Top-P (Nucleus)'};
+const cv=document.getElementById('treeCanvas');
+const ctx=cv.getContext('2d');
+
+function resize(){const w=cv.parentElement.clientWidth;cv.width=w;cv.height=Math.min(350,Math.max(240,w*0.46));cv.style.height=cv.height+'px';}
+resize();window.addEventListener('resize',()=>{resize();drawIdle();});
+
+function clr(){ctx.clearRect(0,0,cv.width,cv.height);ctx.fillStyle='#fafaf8';ctx.fillRect(0,0,cv.width,cv.height);ctx.fillStyle='#e0ddd5';for(let x=20;x<cv.width;x+=24)for(let y=20;y<cv.height;y+=24){ctx.beginPath();ctx.arc(x,y,1,0,Math.PI*2);ctx.fill();}}
+
+function drawNode(x,y,tok,prob,col,sel,alpha=1,score=null){ctx.save();ctx.globalAlpha=alpha;const r=22;ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fillStyle=sel?col:'#fff';ctx.fill();ctx.strokeStyle=sel?col:'#c8c0aa';ctx.lineWidth=sel?2.5:1.5;ctx.stroke();ctx.font='bold 10px "IBM Plex Mono",monospace';ctx.fillStyle=sel?'#fff':'#1a1810';ctx.textAlign='center';ctx.textBaseline='middle';const sh=tok.length>6?tok.slice(0,5)+'…':tok;ctx.fillText(sh,x,y-3);ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle=sel?'rgba(255,255,255,0.75)':'#7a7568';ctx.fillText((prob*100).toFixed(0)+'%',x,y+8);if(score!==null){ctx.font='8px "IBM Plex Mono",monospace';ctx.fillStyle=col;ctx.fillText('s:'+score.toFixed(2),x,y+r+11);}ctx.restore();}
+
+function edge(x1,y1,x2,y2,col,act,alpha=1){ctx.save();ctx.globalAlpha=alpha;ctx.beginPath();ctx.moveTo(x1,y1+22);ctx.lineTo(x2,y2-22);ctx.strokeStyle=act?col:'#d4cfc4';ctx.lineWidth=act?2:1;if(!act)ctx.setLineDash([4,4]);ctx.stroke();ctx.setLineDash([]);ctx.restore();}
+
+function drawIdle(){clr();const W=cv.width,H=cv.height,p=PROMPTS[curP],col=COLORS[curS];const{tokens,probs}=p.tree;const n=tokens.length,sp=Math.min((W-60)/n,100),sx=W/2-((n-1)/2)*sp;ctx.font='10px "IBM Plex Mono",monospace';ctx.fillStyle='#7a7568';ctx.textAlign='center';ctx.fillText('['+p.prefix+' …]',W/2,20);ctx.beginPath();ctx.moveTo(W/2,28);ctx.lineTo(W/2,50);ctx.strokeStyle='#c8c0aa';ctx.lineWidth=1;ctx.stroke();tokens.forEach((t,i)=>{const x=sx+i*sp;ctx.beginPath();ctx.moveTo(W/2,50);ctx.lineTo(x,60);ctx.strokeStyle='#d4cfc4';ctx.setLineDash([3,3]);ctx.stroke();ctx.setLineDash([]);drawNode(x,84,t,probs[i],col,false,0.65);});ctx.font='11px "IBM Plex Sans",sans-serif';ctx.fillStyle='#c8c0aa';ctx.textAlign='center';ctx.fillText('Press Run to animate',W/2,H-14);}
+
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+
+function updProb(lv,si,col,hs=null){const c=document.getElementById('probBars');c.innerHTML='';const n=Math.min(lv.tokens.length,6);for(let i=0;i<n;i++){const ih=hs?hs.includes(i):i===si;const pct=(lv.probs[i]*100).toFixed(0);const row=document.createElement('div');row.className='prob-row';row.innerHTML=`<span class="prob-tok" style="color:${ih?col:'#7a7568'}">${lv.tokens[i]}</span><div class="prob-bg"><div class="prob-fill" style="width:${pct}%;background:${ih?col:'#c8c0aa'}"><span class="prob-fill-label">${pct>18?pct+'%':''}</span></div></div>`;c.appendChild(row);}}
+
+function updBeamProb(beams,bcs){const c=document.getElementById('probBars');c.innerHTML='';beams.forEach((b,bi)=>{const row=document.createElement('div');row.className='prob-row';const pct=Math.min(100,Math.max(5,(1+b.score/10)*100));row.innerHTML=`<span class="prob-tok" style="color:${bcs[bi]}">${b.tokens.join(' ')}</span><div class="prob-bg"><div class="prob-fill" style="width:${pct}%;background:${bcs[bi]}"><span class="prob-fill-label">s=${b.score.toFixed(2)}</span></div></div>`;c.appendChild(row);});}
+
+function updOut(toks,col){document.getElementById('pfx').textContent=PROMPTS[curP].prefix;const c=document.getElementById('outToks');c.innerHTML='';toks.forEach(t=>{const ch=document.createElement('span');ch.className='tok-chip';ch.style.color=t.color;ch.style.borderColor=t.color+'60';ch.textContent='"'+t.token+'"';c.appendChild(ch);setTimeout(()=>ch.classList.add('show'),50);});}
+
+function updLS(score,col){document.getElementById('lsRow').classList.add('vis');document.getElementById('lsBar').style.background=col;const p=Math.min(100,Math.max(5,(1+score/10)*80));document.getElementById('lsBar').style.width=p+'%';document.getElementById('lsVal').textContent='&#931;log p = '+score.toFixed(2);}
+
+function setDec(html){document.getElementById('decBox').innerHTML=html;}
+
+async function doGreedy(){
+  const col=COLORS.greedy,p=PROMPTS[curP];let node=p.tree;
+  const W=cv.width,H=cv.height,ms=4,lh=(H-100)/ms;
+  const levels=[],chosen=[];let cur=node;
+  for(let s=0;s<ms;s++){levels.push({tokens:cur.tokens,probs:cur.probs});const bi=cur.probs.indexOf(Math.max(...cur.probs));chosen.push(bi);const bt=cur.tokens[bi];if(cur.children&&cur.children[bt])cur=cur.children[bt];else{for(let r=s+1;r<ms;r++){levels.push({tokens:cur.tokens,probs:cur.probs});chosen.push(cur.probs.indexOf(Math.max(...cur.probs)));}break;}}
+  const outs=[];let ls=0;
+  for(let step=0;step<ms&&going;step++){
+    clr();const W2=cv.width;
+    ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle='#7a7568';ctx.textAlign='center';
+    ctx.fillText('['+p.prefix+' …]',W2/2,16);
+    for(let li=0;li<=step;li++){const lv=levels[li];const n=lv.tokens.length,sp=Math.min((W2-60)/n,90),sx=W2/2-((n-1)/2)*sp,y=68+li*lh;
+      lv.tokens.forEach((tok,ti)=>{const x=sx+ti*sp;const isSel=ti===chosen[li];if(li>0){const pl=levels[li-1];const pn=pl.tokens.length,psp=Math.min((W2-60)/pn,90),psx=W2/2-((pn-1)/2)*psp,px=psx+chosen[li-1]*psp,py=68+(li-1)*lh;if(isSel)edge(px,py,x,y,col,li<step||li===step,0.8);}drawNode(x,y,tok,lv.probs[ti],col,isSel&&li===step,li<=step?1:0.25);});}
+    const lv=levels[step],tok=lv.tokens[chosen[step]];ls+=Math.log(lv.probs[chosen[step]]+1e-9);
+    updProb(lv,chosen[step],col);
+    setDec('<strong>argmax</strong> selected <strong>"'+tok+'"</strong> ('+( lv.probs[chosen[step]]*100).toFixed(0)+'%) — the single highest-probability token. All '+(lv.tokens.length-1)+' other candidates are discarded.');
+    outs.push({token:tok,color:col});updOut(outs,col);updLS(ls,col);
+    await sleep(750);
+  }
+}
+
+async function doBeam(){
+  const col=COLORS.beam,p=PROMPTS[curP];
+  const bw=parseInt(document.getElementById('bwS').value);
+  const ml=parseInt(document.getElementById('blS').value);
+  const W=cv.width,H=cv.height,lh=(H-100)/ml;
+  let beams=p.tree.tokens.map((tok,i)=>({tokens:[tok],score:Math.log(p.tree.probs[i]+1e-9),node:p.tree.children[tok]||{tokens:[],probs:[],children:{}}}));
+  beams.sort((a,b)=>b.score-a.score);beams=beams.slice(0,bw);
+  const history=[beams.map(b=>({...b}))];
+  for(let s=0;s<ml-1;s++){let cs=[];beams.forEach(b=>{if(b.node.tokens)b.node.tokens.forEach((tok,ti)=>{const nn=b.node.children?.[tok]||{tokens:[],probs:[],children:{}};cs.push({tokens:[...b.tokens,tok],score:b.score+Math.log((b.node.probs[ti]||0.1)+1e-9),node:nn});});});cs.sort((a,b)=>b.score-a.score);beams=cs.slice(0,bw);history.push(beams.map(b=>({...b})));}
+  const bcs=['#2471a3','#1a5276','#5dade2'];
+  for(let step=0;step<=ml&&going;step++){
+    clr();const W2=cv.width;
+    ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle='#7a7568';ctx.textAlign='center';ctx.fillText('['+p.prefix+' …]',W2/2,16);
+    const cb=history[Math.min(step,history.length-1)];const xs=W2/(bw+1);
+    cb.forEach((b,bi)=>{const bc=bcs[bi]||col;const bx=xs*(bi+1);b.tokens.forEach((tok,ti)=>{const y=68+ti*lh;const py=ti===0?20:68+(ti-1)*lh;const px=ti===0?W2/2:xs*(bi+1);if(ti<=step){edge(px,py,bx,y,bc,true,0.7);drawNode(bx,y,tok,ti===0?p.tree.probs[p.tree.tokens.indexOf(tok)]||0.1:(b.node.probs?.[ti]||0.15),bc,ti===b.tokens.length-1,0.9,ti===b.tokens.length-1?b.score:null);}});});
+    const top=cb[0];
+    updBeamProb(cb,bcs);
+    setDec('Beam search keeps the <strong>top-'+bw+' sequences</strong> by cumulative log-score. Step '+(step+1)+': best path <strong>"'+top.tokens.join(' ')+'"</strong> (log-score: '+top.score.toFixed(2)+').');
+    updOut(top.tokens.map(t=>({token:t,color:col})),col);
+    const mx=Math.max(...history[history.length-1].map(b=>b.score));const mn=Math.min(...history[history.length-1].map(b=>b.score));const pct=mx===mn?50:((top.score-mn)/(mx-mn))*100;
+    document.getElementById('lsRow').classList.add('vis');document.getElementById('lsBar').style.background=col;document.getElementById('lsBar').style.width=Math.max(5,Math.min(100,pct))+'%';document.getElementById('lsVal').textContent='best beam = '+top.score.toFixed(2);
+    await sleep(850);
+  }
+}
+
+async function doTopK(){
+  const col=COLORS.topk,p=PROMPTS[curP];
+  const K=parseInt(document.getElementById('kS').value);
+  const temp=parseFloat(document.getElementById('ktS').value)/10;
+  const W=cv.width,H=cv.height,ms=4,lh=(H-100)/ms;
+  let node=p.tree;const outs=[];let ls=0;
+  for(let step=0;step<ms&&going;step++){
+    const{tokens,probs}=node;
+    const lg=probs.map(p=>Math.log(p+1e-9)/temp);const mx=Math.max(...lg);const exp=lg.map(l=>Math.exp(l-mx));const sum=exp.reduce((a,b)=>a+b,0);const sc=exp.map(e=>e/sum);
+    const idx=sc.map((p,i)=>({p,i,token:tokens[i]}));idx.sort((a,b)=>b.p-a.p);
+    const topK=idx.slice(0,K);const rest=idx.slice(K);const ks=topK.reduce((s,t)=>s+t.p,0);const nm=topK.map(t=>({...t,pn:t.p/ks}));
+    let r=Math.random(),chosen=nm[0];for(const t of nm){r-=t.pn;if(r<=0){chosen=t;break;}}
+    clr();const W2=cv.width;
+    ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle='#7a7568';ctx.textAlign='center';ctx.fillText('Step '+(step+1)+' — Top-K='+K+', Temp='+temp.toFixed(1),W2/2,16);
+    outs.forEach((o,oi)=>{ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle=col+'70';ctx.fillText('"'+o.token+'"',W2/2,46+oi*lh);});
+    const n=tokens.length,sp=Math.min((W2-60)/n,90),sx=W2/2-((n-1)/2)*sp,y=68+step*lh;
+    tokens.forEach((tok,ti)=>{const x=sx+ti*sp;const inK=topK.some(t=>t.i===ti);const isSel=ti===chosen.i;
+      if(!inK){ctx.save();ctx.globalAlpha=0.2;ctx.beginPath();ctx.arc(x,y,22,0,Math.PI*2);ctx.fillStyle='#c8c0aa';ctx.fill();ctx.restore();ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle='#c8c0aa';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('✗',x,y);}
+      else{drawNode(x,y,tok,sc[ti],col,isSel,1);if(!isSel){ctx.save();ctx.globalAlpha=0.3;ctx.beginPath();ctx.arc(x,y,27,0,Math.PI*2);ctx.strokeStyle=col;ctx.lineWidth=1;ctx.setLineDash([2,3]);ctx.stroke();ctx.setLineDash([]);ctx.restore();}}});
+    ls+=Math.log(chosen.p+1e-9);
+    updProb({tokens,probs:sc},chosen.i,col,topK.map(t=>t.i));
+    setDec('Top-<strong>K='+K+'</strong> restricts sampling to the '+K+' most likely tokens. <strong>"'+chosen.token+'"</strong> was sampled (p='+(chosen.pn*100).toFixed(0)+'%). '+rest.length+' token'+(rest.length!==1?'s were':' was')+' excluded. Temperature='+temp.toFixed(1)+'.');
+    outs.push({token:chosen.token,color:col});updOut(outs,col);updLS(ls,col);
+    if(node.children&&node.children[chosen.token])node=node.children[chosen.token];else{const k=Object.keys(node.children||{});if(k.length)node=node.children[k[0]];else break;}
+    await sleep(900);
+  }
+}
+
+async function doTopP(){
+  const col=COLORS.topp,p=PROMPTS[curP];
+  const P=parseFloat(document.getElementById('pS').value)/10;
+  const temp=parseFloat(document.getElementById('ptS').value)/10;
+  const W=cv.width,H=cv.height,ms=4,lh=(H-100)/ms;
+  let node=p.tree;const outs=[];let ls=0;
+  for(let step=0;step<ms&&going;step++){
+    const{tokens,probs}=node;
+    const lg=probs.map(p=>Math.log(p+1e-9)/temp);const mx=Math.max(...lg);const exp=lg.map(l=>Math.exp(l-mx));const sum=exp.reduce((a,b)=>a+b,0);const sc=exp.map(e=>e/sum);
+    const idx=sc.map((p,i)=>({p,i,token:tokens[i]}));idx.sort((a,b)=>b.p-a.p);
+    let cum=0;const nuc=[];for(const t of idx){nuc.push(t);cum+=t.p;if(cum>=P)break;}
+    const ns=nuc.reduce((s,t)=>s+t.p,0);const nm=nuc.map(t=>({...t,pn:t.p/ns}));
+    let r=Math.random(),chosen=nm[0];for(const t of nm){r-=t.pn;if(r<=0){chosen=t;break;}}
+    clr();const W2=cv.width;
+    const bY=24,bH=12,bX=30,bW=W2-60;ctx.fillStyle='#e8e4d8';ctx.fillRect(bX,bY,bW,bH);let bx=bX;idx.forEach(t=>{const bw2=(t.p/1)*bW;ctx.fillStyle=nuc.some(n=>n.i===t.i)?col:'#d4cfc4';ctx.fillRect(bx,bY,bw2,bH);bx+=bw2;});const cx2=bX+P*bW;ctx.strokeStyle=col;ctx.lineWidth=2;ctx.setLineDash([3,2]);ctx.beginPath();ctx.moveTo(cx2,bY-3);ctx.lineTo(cx2,bY+bH+3);ctx.stroke();ctx.setLineDash([]);ctx.font='8px "IBM Plex Mono",monospace';ctx.fillStyle=col;ctx.textAlign='left';ctx.fillText('p='+P.toFixed(2)+' cutoff',bX,bY-4);
+    outs.forEach((o,oi)=>{ctx.font='9px "IBM Plex Mono",monospace';ctx.fillStyle=col+'70';ctx.textAlign='center';ctx.fillText('"'+o.token+'"',W2/2,50+oi*lh);});
+    const n=tokens.length,sp=Math.min((W2-60)/n,90),sx=W2/2-((n-1)/2)*sp,y=72+step*lh;
+    tokens.forEach((tok,ti)=>{const x=sx+ti*sp;const inN=nuc.some(nt=>nt.i===ti);drawNode(x,y,tok,sc[ti],col,ti===chosen.i,inN?1:0.2);});
+    ls+=Math.log(chosen.p+1e-9);
+    updProb({tokens,probs:sc},chosen.i,col,nuc.map(t=>t.i));
+    setDec('Nucleus <strong>p='+P.toFixed(2)+'</strong>: smallest set covering ≥'+(P*100).toFixed(0)+'% of probability mass = <strong>'+nuc.length+' token'+(nuc.length!==1?'s':'')+'</strong> (cumulative '+(ns*100).toFixed(0)+'%). Sampled: <strong>"'+chosen.token+'"</strong>. Temp='+temp.toFixed(1)+'.');
+    outs.push({token:chosen.token,color:col});updOut(outs,col);updLS(ls,col);
+    if(node.children&&node.children[chosen.token])node=node.children[chosen.token];else{const k=Object.keys(node.children||{});if(k.length)node=node.children[k[0]];else break;}
+    await sleep(900);
+  }
+}
+
+function setStrategy(s){
+  curS=s;
+  document.querySelectorAll('.stab').forEach((t,i)=>{t.className='stab';if(['greedy','beam','topk','topp'][i]===s)t.classList.add('a-'+s);});
+  const col=COLORS[s];
+  document.getElementById('csn').textContent=NAMES[s];document.getElementById('csn').style.color=col;
+  document.getElementById('btnRun').className='btn-run '+s;
+  document.getElementById('dName').textContent=NAMES[s];document.getElementById('dName').style.color=col;
+  const descs={greedy:{t:'At each step, pick the single token with the highest probability. Fast and deterministic — but may miss better overall sequences.',f:'x&#770;ₜ = argmax P(xₜ | x₁…xₜ₋₁)'},beam:{t:'Keep the top-k sequences at each step by cumulative log-probability. More thorough than greedy — used in translation and summarization.',f:'argmax Σₜ log P(xₜ | x₁…xₜ₋₁)'},topk:{t:'Restrict sampling to the K most probable tokens, then sample from their renormalized distribution. Balances quality with diversity.',f:'sample x ~ top-K renormalized'},topp:{t:'Include the smallest set of tokens whose probabilities sum to ≥p. The nucleus size adapts dynamically each step.',f:'min S: Σ₀₁₀₀₀P(xᵢ) ≥ p'}};
+  document.getElementById('dText').textContent=descs[s].t;document.getElementById('dFormula').innerHTML=descs[s].f;document.getElementById('dFormula').style.borderColor=col;
+  ['gP','bP','kP','pP'].forEach((id,i)=>{document.getElementById(id).style.display=['greedy','beam','topk','topp'][i]===s?'':'none';});
+  document.getElementById('lsRow').classList.remove('vis');
+  document.getElementById('outToks').innerHTML='';document.getElementById('pfx').textContent='';
+  setDec('Press Run to begin the step-by-step animation.');
+  going=false;drawIdle();updProb(PROMPTS[curP].tree,0,col);
+}
+
+async function runAnim(){
+  if(going){going=false;return;}
+  going=true;const btn=document.getElementById('btnRun');
+  btn.textContent='25a0 Stop';
+  document.getElementById('outToks').innerHTML='';document.getElementById('pfx').textContent='';
+  setDec('Starting…');document.getElementById('lsRow').classList.remove('vis');
+  try{
+    if(curS==='greedy')await doGreedy();
+    else if(curS==='beam')await doBeam();
+    else if(curS==='topk')await doTopK();
+    else await doTopP();
+  }finally{going=false;btn.textContent='▶ Run';}
+}
+
+// sliders
+[['bwS','bwV',1,0],['blS','blV',1,0],['kS','kV',1,0],['ktS','ktV',10,1],['pS','pV',10,2],['ptS','ptV',10,1]].forEach(([id,vid,sc,dp])=>{document.getElementById(id).addEventListener('input',function(){document.getElementById(vid).textContent=(this.value/sc).toFixed(dp);});});
+
+document.getElementById('promptSelect').addEventListener('change',function(){
+  curP=this.value;document.getElementById('promptText').textContent=PROMPTS[this.value].label;
+  going=false;drawIdle();updProb(PROMPTS[curP].tree,0,COLORS[curS]);
+  document.getElementById('outToks').innerHTML='';document.getElementById('pfx').textContent='';
+  setDec('Press Run to begin the step-by-step animation.');
+});
+
+drawIdle();updProb(PROMPTS.cat.tree,0,COLORS.greedy);
+</script>
+</body>
+</html>

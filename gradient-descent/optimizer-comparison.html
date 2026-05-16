@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #49 by katherinezho (@katherinezho): Add Gradient Descent Variations Visualizer. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gradient Descent Variations Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        body {
+            background-color: #0f172a; /* slate-900 */
+            color: #f8fafc; /* slate-50 */
+            font-family: 'Inter', sans-serif;
+            overflow-x: hidden;
+        }
+        canvas {
+            display: block;
+            cursor: crosshair;
+        }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7); /* slate-800 + opacity */
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        input[type=range] {
+            accent-color: #3b82f6; /* blue-500 */
+        }
+        .math-font {
+            font-family: 'Cambria Math', 'Times New Roman', serif;
+        }
+        .speed-btn.active {
+            background-color: #2563eb !important;
+            color: #fff !important;
+        }
+    </style>
+</head>
+<body class="h-screen flex flex-col md:flex-row">
+
+    <!-- Left Controls Panel -->
+    <div class="w-full md:w-80 glass-panel p-6 flex flex-col gap-5 z-10 border-r border-slate-700 shadow-xl overflow-y-auto">
+        <div>
+            <h1 class="text-2xl font-bold text-blue-400 mb-2 leading-tight">Gradient Descent Variations</h1>
+            <p class="text-sm text-slate-400 leading-relaxed">
+                This visualization builds on the course idea that ML training minimizes a loss function iteratively using gradient descent.
+            </p>
+            <p class="text-xs text-slate-500 mt-2">
+                Loss surface: <span class="text-blue-300 math-font">f(x, y) = x² + 10y²</span>
+            </p>
+        </div>
+
+        <!-- Class connection callout -->
+        <div class="bg-blue-500/10 border border-blue-500/30 rounded-xl p-4">
+            <div class="flex items-center gap-2 mb-1.5">
+                <i class="fas fa-graduation-cap text-blue-400"></i>
+                <span class="text-xs font-bold text-blue-400 uppercase tracking-wider">Class Connection</span>
+            </div>
+            <p class="text-xs text-slate-300 leading-relaxed">
+                In lecture, gradient descent is introduced as an iterative method for minimizing loss. This page shows how changing the update rule affects the <span class="text-blue-300 font-semibold">path</span>, <span class="text-blue-300 font-semibold">speed</span>, and <span class="text-blue-300 font-semibold">stability</span> of convergence.
+            </p>
+        </div>
+
+        <!-- Hyperparameters -->
+        <div class="space-y-4 bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+            <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Hyperparameters</h2>
+
+            <div>
+                <div class="flex justify-between text-sm mb-1.5">
+                    <span class="math-font text-amber-300 font-bold">α &nbsp;learning rate</span>
+                    <span id="lr-val" class="text-amber-300 font-mono font-bold">0.070</span>
+                </div>
+                <input type="range" id="lr-input" min="5" max="200" step="1" value="70" class="w-full">
+                <div class="flex justify-between text-[0.6rem] text-slate-500 mt-1 font-mono">
+                    <span>0.005</span>
+                    <span>0.200</span>
+                </div>
+                <div class="mt-2.5 text-[0.7rem] text-slate-400 leading-relaxed bg-slate-900/40 rounded-md p-2 border border-slate-700/50">
+                    <div class="flex gap-1.5 mb-1">
+                        <i class="fas fa-arrow-up text-rose-400 text-[0.6rem] mt-0.5"></i>
+                        <span><span class="text-rose-400 font-semibold">Higher α:</span> faster convergence, but may overshoot or diverge</span>
+                    </div>
+                    <div class="flex gap-1.5">
+                        <i class="fas fa-arrow-down text-emerald-400 text-[0.6rem] mt-0.5"></i>
+                        <span><span class="text-emerald-400 font-semibold">Lower α:</span> more stable, but needs more iterations</span>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="text-sm mb-2 text-slate-400">Animation Speed</div>
+                <div class="grid grid-cols-4 gap-1.5">
+                    <button data-spd="1"   class="speed-btn active py-1.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition font-semibold">1×</button>
+                    <button data-spd="5"   class="speed-btn py-1.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition font-semibold">5×</button>
+                    <button data-spd="20"  class="speed-btn py-1.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition font-semibold">20×</button>
+                    <button data-spd="100" class="speed-btn py-1.5 rounded text-xs bg-slate-700 text-slate-300 hover:bg-slate-600 transition font-semibold">100×</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Playback -->
+        <div class="space-y-3">
+            <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Playback</h2>
+            <button id="btn-play" class="w-full py-2 px-4 bg-emerald-600 hover:bg-emerald-500 rounded-lg transition text-sm font-medium shadow-[0_0_15px_rgba(5,150,105,0.4)] flex items-center justify-center gap-2">
+                <i class="fas fa-play"></i> Play
+            </button>
+            <div class="grid grid-cols-3 gap-2">
+                <button id="btn-step" class="py-2 px-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-xs font-medium flex items-center justify-center gap-1">
+                    <i class="fas fa-step-forward"></i> Step
+                </button>
+                <button id="btn-reset" class="py-2 px-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-xs font-medium flex items-center justify-center gap-1">
+                    <i class="fas fa-undo"></i> Reset
+                </button>
+                <button id="btn-rand" class="py-2 px-2 bg-slate-700 hover:bg-slate-600 rounded-lg transition text-xs font-medium flex items-center justify-center gap-1" title="Random start">
+                    <i class="fas fa-dice"></i> Rand
+                </button>
+            </div>
+        </div>
+
+        <!-- Status -->
+        <div class="bg-slate-800/50 p-4 rounded-xl border border-slate-700">
+            <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider mb-3">Status</h2>
+            <div class="grid grid-cols-2 gap-3 text-center">
+                <div>
+                    <div class="text-[0.65rem] text-slate-500 uppercase tracking-wide mb-0.5">Iteration</div>
+                    <div id="iter-val" class="text-2xl font-bold text-slate-200 math-font">0</div>
+                </div>
+                <div>
+                    <div class="text-[0.65rem] text-slate-500 uppercase tracking-wide mb-0.5">Converged</div>
+                    <div id="conv-val" class="text-2xl font-bold text-emerald-400 math-font">0/4</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Per-variation live stats -->
+        <div class="space-y-2">
+            <h2 class="text-sm font-semibold text-slate-300 uppercase tracking-wider">Variations</h2>
+            <div id="opt-rows" class="space-y-1.5"></div>
+        </div>
+
+        <!-- Tip -->
+        <div class="mt-auto bg-slate-800/50 p-3 rounded-xl border border-slate-700 text-xs text-slate-400 leading-relaxed">
+            <p class="mb-1"><i class="fas fa-mouse-pointer text-blue-400 mr-1"></i> Click the canvas to set a new start point.</p>
+            <p><i class="fas fa-tachometer-alt text-blue-400 mr-1"></i> Crank speed to 100× to see the full race.</p>
+        </div>
+    </div>
+
+    <!-- Main Canvas Area -->
+    <div class="flex-1 flex flex-col items-center p-3 md:p-4 gap-3 overflow-hidden min-w-0">
+        <!-- Square canvas wrapper -->
+        <div id="canvas-wrap" class="relative flex-1 min-h-[260px] aspect-square max-w-full">
+            <canvas id="canvas" class="absolute inset-0"></canvas>
+
+            <!-- Top corner badge (inside canvas wrapper) -->
+            <div class="absolute top-3 left-3 glass-panel rounded-lg px-3 py-1.5 text-xs flex items-center gap-2 z-10">
+                <span class="text-slate-400">Loss surface</span>
+                <span class="math-font text-amber-300 font-semibold">f = x² + 10y²</span>
+                <span class="text-slate-500 hidden sm:inline">·</span>
+                <span class="text-slate-400 hidden sm:inline">min at</span>
+                <span class="math-font text-emerald-400 hidden sm:inline">(0, 0)</span>
+            </div>
+        </div>
+
+        <!-- Explanation overlay below canvas (own row, not covering visualization) -->
+        <div class="glass-panel rounded-2xl p-4 md:p-5 shadow-2xl border border-slate-700 w-full max-w-4xl flex-shrink-0">
+            <h3 class="text-base font-bold text-blue-400 mb-1">SGD and its variations</h3>
+            <p class="text-slate-400 text-xs md:text-sm mb-3 leading-relaxed">
+                <span class="text-rose-400 font-semibold">SGD</span> is the core lecture concept — every other update rule below is a modification that adds a correction term to the same idea.
+            </p>
+            <div class="grid grid-cols-2 md:grid-cols-4 gap-2.5">
+                <div class="bg-slate-900/60 rounded-lg p-2.5 border-2 border-rose-400/50 ring-1 ring-rose-400/20">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background:#fb7185"></span>
+                            <span class="font-bold text-rose-400 text-sm">SGD</span>
+                        </div>
+                        <span class="text-[0.55rem] uppercase tracking-wider text-rose-400/70 font-semibold">base</span>
+                    </div>
+                    <div class="font-mono text-[0.62rem] text-slate-300 mb-1.5 leading-snug whitespace-nowrap overflow-x-auto">θ ← θ − α · ∇f</div>
+                    <p class="text-[0.7rem] text-slate-400 leading-snug">The lecture's core update rule. Zigzags when the surface is steep.</p>
+                </div>
+                <div class="bg-slate-900/60 rounded-lg p-2.5 border border-emerald-400/30">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background:#34d399"></span>
+                            <span class="font-bold text-emerald-400 text-sm">Momentum</span>
+                        </div>
+                        <span class="text-[0.55rem] uppercase tracking-wider text-slate-500 font-semibold">+ velocity</span>
+                    </div>
+                    <div class="font-mono text-[0.62rem] text-slate-300 mb-1.5 leading-snug">v ← βv − α∇f<br>θ ← θ + v</div>
+                    <p class="text-[0.7rem] text-slate-400 leading-snug">SGD with memory of past steps. Damps oscillations over time.</p>
+                </div>
+                <div class="bg-slate-900/60 rounded-lg p-2.5 border border-amber-400/30">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background:#fbbf24"></span>
+                            <span class="font-bold text-amber-400 text-sm">RMSProp</span>
+                        </div>
+                        <span class="text-[0.55rem] uppercase tracking-wider text-slate-500 font-semibold">adaptive α</span>
+                    </div>
+                    <div class="font-mono text-[0.62rem] text-slate-300 mb-1.5 leading-snug">s ← ρs + (1−ρ)g²<br>θ ← θ − α·g/√s</div>
+                    <p class="text-[0.7rem] text-slate-400 leading-snug">SGD with a per-axis learning rate. Straightens the path.</p>
+                </div>
+                <div class="bg-slate-900/60 rounded-lg p-2.5 border border-violet-400/30">
+                    <div class="flex items-center justify-between mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-2.5 h-2.5 rounded-full" style="background:#a78bfa"></span>
+                            <span class="font-bold text-violet-400 text-sm">Adam</span>
+                        </div>
+                        <span class="text-[0.55rem] uppercase tracking-wider text-slate-500 font-semibold">both</span>
+                    </div>
+                    <div class="font-mono text-[0.62rem] text-slate-300 mb-1.5 leading-snug">m̂ = m/(1−β₁ᵗ)<br>θ ← θ − α·m̂/√v̂</div>
+                    <p class="text-[0.7rem] text-slate-400 leading-snug">Momentum + RMSProp combined. The default in modern training.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+/* ============================================================
+   CONFIG
+   ============================================================ */
+const CFG = {
+    world: { xmin: -4.5, xmax: 4.5, ymin: -4.5, ymax: 4.5 },
+    convergeThr: 0.008,
+    maxIter: 600,
+    contourLevels: [0.25, 1, 2.5, 5, 10, 18, 30, 45, 65, 90],
+    milestoneEvery: 25,
+};
+
+/* ============================================================
+   LOSS FUNCTION  f(x,y) = x² + 10y²
+   Anisotropic bowl — 10× steeper in y. Standard pedagogical
+   example for showing optimizer differences.
+   ============================================================ */
+function lossVal(x, y) { return x * x + 10 * y * y; }
+function lossGrad(x, y) { return { gx: 2 * x, gy: 20 * y }; }
+
+/* ============================================================
+   OPTIMIZERS  — Tailwind 400 palette colors for repo cohesion
+   ============================================================ */
+const OPTS = [
+    { key: 'sgd',      label: 'SGD',      color: '#fb7185' },  // rose-400
+    { key: 'momentum', label: 'Momentum', color: '#34d399' },  // emerald-400
+    { key: 'rmsprop',  label: 'RMSProp',  color: '#fbbf24' },  // amber-400
+    { key: 'adam',     label: 'Adam',     color: '#a78bfa' },  // violet-400
+];
+
+/* ============================================================
+   STATE
+   ============================================================ */
+let startX = 3.2, startY = 2.0;
+let baseLR = 0.07;
+let states = [];
+let iter = 0;
+let playing = false;
+let speed = 1;
+let rafId = null;
+let heatCache = null, heatSize = 0;
+
+function mkState(opt) {
+    return {
+        ...opt,
+        x: startX, y: startY,
+        vx: 0, vy: 0,        // momentum
+        srx: 0, sry: 0,      // rmsprop
+        max: 0, may: 0,      // adam 1st moment
+        vax: 0, vay: 0,      // adam 2nd moment
+        t: 0,
+        path: [{ x: startX, y: startY }],
+        firstConvIter: null,
+        converged: false,
+    };
+}
+function resetStates() { states = OPTS.map(mkState); iter = 0; }
+
+/* ============================================================
+   OPTIMIZER UPDATE RULES
+   ============================================================ */
+function step(s) {
+    if (s.converged) return;
+    const lr = baseLR;
+    const { gx, gy } = lossGrad(s.x, s.y);
+    let dx = 0, dy = 0;
+
+    if (s.key === 'sgd') {
+        dx = -lr * gx; dy = -lr * gy;
+    } else if (s.key === 'momentum') {
+        const b = 0.88;
+        s.vx = b * s.vx - lr * gx;
+        s.vy = b * s.vy - lr * gy;
+        dx = s.vx; dy = s.vy;
+    } else if (s.key === 'rmsprop') {
+        const rho = 0.9, eps = 1e-8;
+        s.srx = rho * s.srx + (1 - rho) * gx * gx;
+        s.sry = rho * s.sry + (1 - rho) * gy * gy;
+        dx = -lr * gx / (Math.sqrt(s.srx) + eps);
+        dy = -lr * gy / (Math.sqrt(s.sry) + eps);
+    } else if (s.key === 'adam') {
+        const b1 = 0.9, b2 = 0.999, eps = 1e-8;
+        s.t++;
+        s.max = b1 * s.max + (1 - b1) * gx;
+        s.may = b1 * s.may + (1 - b1) * gy;
+        s.vax = b2 * s.vax + (1 - b2) * gx * gx;
+        s.vay = b2 * s.vay + (1 - b2) * gy * gy;
+        const mhx = s.max / (1 - Math.pow(b1, s.t));
+        const mhy = s.may / (1 - Math.pow(b1, s.t));
+        const vhx = s.vax / (1 - Math.pow(b2, s.t));
+        const vhy = s.vay / (1 - Math.pow(b2, s.t));
+        dx = -lr * mhx / (Math.sqrt(vhx) + eps);
+        dy = -lr * mhy / (Math.sqrt(vhy) + eps);
+    }
+
+    // Safety clamp on step magnitude
+    const norm = Math.sqrt(dx * dx + dy * dy);
+    if (norm > 1.0) { dx *= 1 / norm; dy *= 1 / norm; }
+
+    s.x = Math.max(CFG.world.xmin, Math.min(CFG.world.xmax, s.x + dx));
+    s.y = Math.max(CFG.world.ymin, Math.min(CFG.world.ymax, s.y + dy));
+    s.path.push({ x: s.x, y: s.y });
+
+    if (Math.hypot(s.x, s.y) < CFG.convergeThr && !s.converged) {
+        s.converged = true; s.firstConvIter = iter; s.x = 0; s.y = 0;
+    }
+}
+function stepAll() { if (iter >= CFG.maxIter) return; states.forEach(step); iter++; }
+
+/* ============================================================
+   CANVAS / COORDINATE SYSTEM
+   DPR-aware: canvas internal buffer is sized at device pixels
+   (e.g. 2× or 3× on Retina), drawing happens in logical pixels
+   via ctx scale. This keeps text & lines crisp on high-DPI screens.
+   ============================================================ */
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+
+let dpr = window.devicePixelRatio || 1;
+let logicalW = 0, logicalH = 0;   // CSS pixel size (what we draw in)
+
+function w2c(wx, wy) {
+    const { xmin, xmax, ymin, ymax } = CFG.world;
+    return {
+        cx: (wx - xmin) / (xmax - xmin) * logicalW,
+        cy: logicalH - (wy - ymin) / (ymax - ymin) * logicalH,
+    };
+}
+function c2w(px, py) {
+    const { xmin, xmax, ymin, ymax } = CFG.world;
+    return {
+        wx: px / logicalW * (xmax - xmin) + xmin,
+        wy: (1 - py / logicalH) * (ymax - ymin) + ymin,
+    };
+}
+
+function resizeCanvas() {
+    const wrap = document.getElementById('canvas-wrap');
+    // Wrapper is aspect-square via CSS; clientWidth and clientHeight should match.
+    // Use the smaller for safety against rounding.
+    const size = Math.min(wrap.clientWidth, wrap.clientHeight);
+    if (size <= 0) return;
+    if (size === logicalW && dpr === (window.devicePixelRatio || 1)) return;
+
+    dpr = window.devicePixelRatio || 1;
+    logicalW = size;
+    logicalH = size;
+
+    // Internal pixel buffer at device resolution (sharp on Retina)
+    canvas.width  = Math.floor(size * dpr);
+    canvas.height = Math.floor(size * dpr);
+    // CSS size in logical pixels (what user sees)
+    canvas.style.width  = size + 'px';
+    canvas.style.height = size + 'px';
+
+    heatCache = null;
+}
+
+window.addEventListener('resize', () => { resizeCanvas(); render(); });
+
+/* ============================================================
+   COLORMAP — viridis-inspired (dark navy → teal → green → yellow)
+   Designed for dark UI: low loss is dark/quiet, high loss is bright.
+   ============================================================ */
+function valToRGB(t) {
+    t = Math.max(0, Math.min(1, t));
+    const stops = [
+        [ 28,  20,  78],   // deep violet (low loss / minimum)
+        [ 45,  68, 140],   // dark blue
+        [ 35, 130, 145],   // teal
+        [ 95, 195, 100],   // green
+        [253, 224,  71],   // bright yellow (high loss)
+    ];
+    const i = t * (stops.length - 1);
+    const lo = Math.floor(i), hi = Math.min(lo + 1, stops.length - 1), f = i - lo;
+    const [r1,g1,b1] = stops[lo], [r2,g2,b2] = stops[hi];
+    return [r1 + f * (r2 - r1), g1 + f * (g2 - g1), b1 + f * (b2 - b1)];
+}
+
+/* ============================================================
+   DRAW: HEATMAP (cached, rendered at device resolution)
+   The offscreen canvas matches the device pixel buffer so the
+   heatmap stays sharp on HiDPI displays.
+   ============================================================ */
+function drawHeatmap() {
+    const dw = canvas.width, dh = canvas.height;  // device pixel size
+    const { xmin, xmax, ymin, ymax } = CFG.world;
+
+    if (!heatCache || heatSize !== dw) {
+        const off = document.createElement('canvas');
+        off.width = dw; off.height = dh;
+        const octx = off.getContext('2d');
+        const img = octx.createImageData(dw, dh);
+        for (let py = 0; py < dh; py++) {
+            const wy = (1 - py / dh) * (ymax - ymin) + ymin;
+            for (let px = 0; px < dw; px++) {
+                const wx = px / dw * (xmax - xmin) + xmin;
+                const L = wx * wx + 10 * wy * wy;
+                const t = Math.pow(Math.min(L / 90, 1), 0.42);
+                const [r, g, b] = valToRGB(t);
+                const idx = (py * dw + px) * 4;
+                img.data[idx] = r; img.data[idx+1] = g; img.data[idx+2] = b; img.data[idx+3] = 255;
+            }
+        }
+        octx.putImageData(img, 0, 0);
+        heatCache = off; heatSize = dw;
+    }
+    // Draw at logical size — the ctx scale already in effect upscales it
+    // back to device pixels for a perfect 1:1 mapping.
+    ctx.drawImage(heatCache, 0, 0, logicalW, logicalH);
+}
+
+/* ============================================================
+   DRAW: CONTOURS (analytical ellipses for x²+10y²=L)
+   ============================================================ */
+function drawContours() {
+    CFG.contourLevels.forEach((L, i) => {
+        const a = Math.sqrt(L), b = Math.sqrt(L / 10);
+        ctx.strokeStyle = `rgba(255,255,255,${0.06 + i * 0.022})`;
+        ctx.lineWidth = 0.7;
+        ctx.beginPath();
+        for (let k = 0; k <= 120; k++) {
+            const θ = (k / 120) * Math.PI * 2;
+            const { cx, cy } = w2c(a * Math.cos(θ), b * Math.sin(θ));
+            k === 0 ? ctx.moveTo(cx, cy) : ctx.lineTo(cx, cy);
+        }
+        ctx.closePath(); ctx.stroke();
+    });
+}
+
+/* ============================================================
+   DRAW: AXES
+   ============================================================ */
+function drawAxes() {
+    const { cx: ox, cy: oy } = w2c(0, 0);
+    ctx.strokeStyle = 'rgba(255,255,255,0.1)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(ox, 0); ctx.lineTo(ox, logicalH);
+    ctx.moveTo(0, oy); ctx.lineTo(logicalW, oy);
+    ctx.stroke();
+}
+
+/* ============================================================
+   HELPER: pill label (slate-900 bg + colored border + colored text)
+   Always readable regardless of underlying heatmap pixel.
+   ============================================================ */
+function drawPillLabel(text, cx, cy, color, opts = {}) {
+    const { ox = 11, oy = -10, fs = 11, fw = '700', px = 6, py = 3, r = 5, borderColor = null } = opts;
+    ctx.font = `${fw} ${fs}px Inter, sans-serif`;
+    const tw = ctx.measureText(text).width;
+    const bw = tw + px * 2, bh = fs + py * 2;
+    const bx = cx + ox, by = cy + oy - bh + py;
+
+    // Soft shadow
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetY = 1;
+
+    // Slate-900 fill
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.94)';
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, r);
+    ctx.fill();
+
+    ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+
+    // Border in optimizer color
+    ctx.strokeStyle = borderColor || color;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.roundRect(bx, by, bw, bh, r);
+    ctx.stroke();
+
+    // Colored text
+    ctx.fillStyle = color;
+    ctx.fillText(text, bx + px, by + bh - py - 1.5);
+}
+
+/* ============================================================
+   DRAW: MIN MARKER + START MARKER
+   ============================================================ */
+function drawMinimum() {
+    const { cx, cy } = w2c(0, 0);
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    ctx.moveTo(cx - 14, cy); ctx.lineTo(cx + 14, cy);
+    ctx.moveTo(cx, cy - 14); ctx.lineTo(cx, cy + 14);
+    ctx.stroke(); ctx.setLineDash([]);
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.6)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.arc(cx, cy, 5, 0, Math.PI * 2); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.95)';
+    ctx.beginPath(); ctx.arc(cx, cy, 2.5, 0, Math.PI * 2); ctx.fill();
+
+    drawPillLabel('min', cx, cy, '#cbd5e1', {
+        ox: 8, oy: -8, fs: 9.5, px: 5, py: 2, r: 4, borderColor: 'rgba(203,213,225,0.4)'
+    });
+}
+
+function drawStart() {
+    const { cx, cy } = w2c(startX, startY);
+    ctx.strokeStyle = 'rgba(255,255,255,0.4)'; ctx.lineWidth = 1.2; ctx.setLineDash([3, 3]);
+    ctx.strokeRect(cx - 5, cy - 5, 10, 10); ctx.setLineDash([]);
+    drawPillLabel('start', cx, cy, '#cbd5e1', {
+        ox: 8, oy: -8, fs: 9.5, px: 5, py: 2, r: 4, borderColor: 'rgba(203,213,225,0.4)'
+    });
+}
+
+/* ============================================================
+   DRAW: OPTIMIZER PATH + DOT + LABEL
+   ============================================================ */
+function drawPath(s) {
+    const path = s.path, n = path.length;
+    if (n < 2) return;
+    const col = s.color;
+    const r = parseInt(col.slice(1, 3), 16);
+    const g = parseInt(col.slice(3, 5), 16);
+    const b = parseInt(col.slice(5, 7), 16);
+
+    for (let i = 1; i < n; i++) {
+        const t = i / n;
+        const alpha = Math.min(1, t * 2.2) * 0.8 + 0.15;
+        const p0 = w2c(path[i-1].x, path[i-1].y);
+        const p1 = w2c(path[i].x,   path[i].y);
+        ctx.strokeStyle = `rgba(${r},${g},${b},${alpha})`;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(p0.cx, p0.cy); ctx.lineTo(p1.cx, p1.cy); ctx.stroke();
+    }
+    for (let i = CFG.milestoneEvery; i < n; i += CFG.milestoneEvery) {
+        const p = w2c(path[i].x, path[i].y);
+        ctx.fillStyle = `rgba(${r},${g},${b},0.85)`;
+        ctx.beginPath(); ctx.arc(p.cx, p.cy, 2.4, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+function drawDot(s) {
+    const { cx, cy } = w2c(s.x, s.y);
+    const col = s.color;
+    const r = parseInt(col.slice(1, 3), 16);
+    const g = parseInt(col.slice(3, 5), 16);
+    const b = parseInt(col.slice(5, 7), 16);
+
+    // Soft glow
+    const grd = ctx.createRadialGradient(cx, cy, 0, cx, cy, 18);
+    grd.addColorStop(0, `rgba(${r},${g},${b},0.45)`);
+    grd.addColorStop(1, `rgba(${r},${g},${b},0)`);
+    ctx.fillStyle = grd;
+    ctx.beginPath(); ctx.arc(cx, cy, 18, 0, Math.PI * 2); ctx.fill();
+
+    // White halo for visual separation
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.beginPath(); ctx.arc(cx, cy, 8.5, 0, Math.PI * 2); ctx.fill();
+
+    // Dot body
+    ctx.fillStyle = col;
+    ctx.beginPath(); ctx.arc(cx, cy, 6.5, 0, Math.PI * 2); ctx.fill();
+
+    // Converged ring
+    if (s.converged) {
+        ctx.globalAlpha = 0.5;
+        ctx.strokeStyle = col; ctx.lineWidth = 2.5;
+        ctx.beginPath(); ctx.arc(cx, cy, 12, 0, Math.PI * 2); ctx.stroke();
+        ctx.globalAlpha = 1;
+    }
+
+    // Pill label
+    drawPillLabel(s.label, cx, cy, col, { ox: 12, oy: -9, fs: 11, fw: '700', px: 6, py: 3, r: 5 });
+}
+
+/* ============================================================
+   FULL RENDER
+   setTransform applies DPR scaling so all subsequent draw calls
+   use logical pixel coordinates while filling the device buffer.
+   ============================================================ */
+function render() {
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.clearRect(0, 0, logicalW, logicalH);
+    drawHeatmap();
+    drawAxes();
+    drawContours();
+    drawMinimum();
+    drawStart();
+    states.forEach(drawPath);
+    states.forEach(drawDot);
+    updateStats();
+}
+
+/* ============================================================
+   STATS DOM UPDATE
+   ============================================================ */
+function updateStats() {
+    document.getElementById('iter-val').textContent = iter;
+    document.getElementById('conv-val').textContent = `${states.filter(s => s.converged).length}/4`;
+
+    const html = states.map(s => {
+        const L = lossVal(s.x, s.y);
+        const dist = Math.hypot(s.x, s.y);
+        const Lstr = L < 0.001 ? L.toExponential(1) : L.toFixed(3);
+        const statusEl = s.converged
+            ? `<span class="text-[0.6rem] font-mono px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 whitespace-nowrap">✓ i${s.firstConvIter}</span>`
+            : `<span class="text-[0.6rem] font-mono px-1.5 py-0.5 rounded bg-slate-700/50 text-slate-400 border border-slate-600/50 whitespace-nowrap">d=${dist.toFixed(2)}</span>`;
+        return `
+            <div class="flex items-center gap-2 bg-slate-800/40 rounded-md px-2.5 py-1.5 border border-slate-700/60">
+                <span class="w-2.5 h-2.5 rounded-full flex-shrink-0" style="background:${s.color}"></span>
+                <div class="flex-1 min-w-0">
+                    <div class="text-xs font-semibold" style="color:${s.color}">${s.label}</div>
+                    <div class="text-[0.62rem] text-slate-400 font-mono">L = ${Lstr}</div>
+                </div>
+                ${statusEl}
+            </div>`;
+    }).join('');
+    document.getElementById('opt-rows').innerHTML = html;
+}
+
+/* ============================================================
+   ANIMATION LOOP
+   ============================================================ */
+function animate() {
+    if (!playing) return;
+    const done = iter >= CFG.maxIter || states.every(s => s.converged);
+    if (!done) { for (let i = 0; i < speed; i++) stepAll(); }
+    render();
+    if (!done) rafId = requestAnimationFrame(animate);
+    else { playing = false; syncPlayBtn(); }
+}
+
+/* ============================================================
+   CONTROLS
+   ============================================================ */
+const btnPlay  = document.getElementById('btn-play');
+const btnStep  = document.getElementById('btn-step');
+const btnReset = document.getElementById('btn-reset');
+const btnRand  = document.getElementById('btn-rand');
+const lrInput  = document.getElementById('lr-input');
+const lrVal    = document.getElementById('lr-val');
+
+function syncPlayBtn() {
+    btnPlay.innerHTML = playing
+        ? '<i class="fas fa-pause"></i> Pause'
+        : '<i class="fas fa-play"></i> Play';
+}
+
+btnPlay.addEventListener('click', () => {
+    playing = !playing; syncPlayBtn();
+    if (playing) animate(); else cancelAnimationFrame(rafId);
+});
+
+btnStep.addEventListener('click', () => {
+    if (!playing && iter < CFG.maxIter) { stepAll(); render(); }
+});
+
+btnReset.addEventListener('click', () => {
+    playing = false; cancelAnimationFrame(rafId); syncPlayBtn();
+    resetStates(); render();
+});
+
+btnRand.addEventListener('click', () => {
+    playing = false; cancelAnimationFrame(rafId); syncPlayBtn();
+    let sx, sy;
+    do {
+        sx = (Math.random() - 0.5) * 7.5;
+        sy = (Math.random() - 0.5) * 7.5;
+    } while (Math.hypot(sx, sy) < 1.2 || Math.hypot(sx, sy) > 4.2);
+    startX = sx; startY = sy; resetStates(); render();
+});
+
+canvas.addEventListener('click', e => {
+    const rect = canvas.getBoundingClientRect();
+    // rect coords are CSS (logical) pixels — same as our drawing space
+    const px = e.clientX - rect.left;
+    const py = e.clientY - rect.top;
+    const { wx, wy } = c2w(px, py);
+    if (Math.hypot(wx, wy) < 0.2) return;
+    startX = wx; startY = wy;
+    playing = false; cancelAnimationFrame(rafId); syncPlayBtn();
+    resetStates(); render();
+});
+
+lrInput.addEventListener('input', e => {
+    baseLR = parseInt(e.target.value) / 1000;
+    lrVal.textContent = baseLR.toFixed(3);
+});
+
+document.querySelectorAll('.speed-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+        document.querySelectorAll('.speed-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        speed = parseInt(btn.dataset.spd);
+    });
+});
+
+/* ============================================================
+   INIT
+   ============================================================ */
+resizeCanvas();
+resetStates();
+render();
+</script>
+</body>
+</html>

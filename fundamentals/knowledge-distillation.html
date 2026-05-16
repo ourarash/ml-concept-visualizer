@@ -1,0 +1,1444 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #50 by Snehal Gore (@ssgore1): Add Interactive Knowledge Distillation & Hardware Roofline Visualizer. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Knowledge Distillation - EE508 Interactive Visualizer</title>
+<style>
+  /* ==========================================================================
+     CSS VARIABLES & BASE STYLES
+     ========================================================================== */
+  :root {
+    /* Dark Theme (Default) */
+    --bg: #0f1117;
+    --surface: #1a1d27;
+    --surface2: #22263a;
+    --border: #2e3250;
+    --accent: #6c63ff;     
+    --accent2: #00d4aa;    
+    --accent3: #ff6b6b;    
+    --accent4: #ffd166;    
+    --text: #e8eaf6;
+    --text-dim: #8b90b8;
+    --teacher: #6c63ff;
+    --student: #00d4aa;
+  }
+
+  body.light-mode {
+    /* Light Theme Overrides */
+    --bg: #f8fafc;
+    --surface: #ffffff;
+    --surface2: #f1f5f9;
+    --border: #e2e8f0;
+    --text: #1e293b;
+    --text-dim: #64748b;
+    --accent: #5a52d6;
+    --accent2: #00bfa5;
+    --accent3: #e53935;
+    --accent4: #f59e0b;
+    --teacher: #5a52d6;
+    --student: #00bfa5;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    min-height: 100vh;
+    line-height: 1.6;
+    transition: background-color 0.3s, color 0.3s;
+  }
+
+  /* ==========================================================================
+     HEADER & NAVIGATION
+     ========================================================================== */
+  header {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+    transition: background-color 0.3s, border-color 0.3s;
+  }
+
+  .header-icon {
+    width: 44px; height: 44px;
+    background: linear-gradient(135deg, var(--teacher), var(--student));
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 22px;
+  }
+
+  header h1 { font-size: 1.5rem; font-weight: 700; line-height: 1.2; }
+  header p { color: var(--text-dim); font-size: 0.85rem; margin-top: 2px; }
+
+  .badge {
+    margin-left: auto;
+    background: rgba(108,99,255,0.15);
+    border: 1px solid var(--accent);
+    color: var(--accent);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+
+  .theme-toggle {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text);
+    cursor: pointer;
+    width: 36px; height: 36px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1rem;
+    transition: all 0.2s;
+  }
+  .theme-toggle:hover { background: var(--border); transform: scale(1.05); }
+
+  .tabs {
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    padding: 0 32px;
+    display: flex;
+    overflow-x: auto;
+    scrollbar-width: none;
+    transition: background-color 0.3s, border-color 0.3s;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+
+  .tab {
+    padding: 14px 20px;
+    cursor: pointer;
+    border: none;
+    background: none;
+    color: var(--text-dim);
+    font-size: 0.88rem;
+    font-weight: 500;
+    border-bottom: 3px solid transparent;
+    transition: all 0.2s;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .tab:hover { color: var(--text); }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  
+  .tab-num {
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: var(--surface2);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 0.72rem; font-weight: 700;
+    transition: background-color 0.3s;
+  }
+  .tab.active .tab-num { background: var(--accent); color: white; }
+
+  /* ==========================================================================
+     LAYOUT & CARDS
+     ========================================================================== */
+  .content { max-width: 960px; margin: 0 auto; padding: 32px 24px; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; animation: fadeUp 0.4s ease both; }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-header { margin-bottom: 24px; }
+  .section-header h2 { font-size: 1.6rem; font-weight: 700; margin-bottom: 8px; }
+  .section-header p { color: var(--text-dim); font-size: 0.95rem; }
+
+  .highlight { color: var(--accent); font-weight: 600; }
+  .highlight2 { color: var(--accent2); font-weight: 600; }
+  .highlight3 { color: var(--accent3); font-weight: 600; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 20px;
+    transition: background-color 0.3s, border-color 0.3s;
+  }
+  .card h3 { font-size: 1rem; font-weight: 700; margin-bottom: 16px; display: flex; align-items: center; gap: 8px; }
+
+  .insight-box {
+    background: rgba(108,99,255,0.08);
+    border: 1px solid rgba(108,99,255,0.3);
+    border-left: 4px solid var(--accent);
+    border-radius: 12px;
+    padding: 16px 20px;
+    margin-top: 24px;
+    font-size: 0.92rem;
+  }
+  .insight-box strong { color: var(--accent); }
+
+  /* ==========================================================================
+     MATH FORMATTING (New)
+     ========================================================================== */
+  .math-eq { display: inline-flex; align-items: center; gap: 8px; font-size: 1.05rem; justify-content: center; width: 100%; }
+  .math-frac { display: inline-flex; flex-direction: column; align-items: center; vertical-align: middle; }
+  .math-num { border-bottom: 1px solid currentColor; padding: 0 8px 2px; line-height: 1.2; }
+  .math-den { padding: 2px 8px 0; line-height: 1.2; }
+
+  /* ==========================================================================
+     TAB 1: PROBLEM SPECIFICS (Hardware Cost Comparison)
+     ========================================================================== */
+  .model-compare { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin: 20px 0; }
+  .model-card {
+    background: var(--surface2);
+    border-radius: 12px; padding: 20px;
+    border: 2px solid transparent; text-align: center;
+    transition: background-color 0.3s;
+  }
+  .model-card.teacher { border-color: rgba(108,99,255,0.4); }
+  .model-card.student { border-color: rgba(0,212,170,0.4); }
+  
+  .model-icon { font-size: 2.5rem; margin-bottom: 12px; }
+  .model-card h4 { font-size: 1rem; font-weight: 700; margin-bottom: 4px; }
+  .model-sub { color: var(--text-dim); font-size: 0.8rem; margin-bottom: 16px; }
+
+  .stat-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid var(--border); font-size: 0.85rem; }
+  .stat-row:last-child { border-bottom: none; }
+  .stat-label { color: var(--text-dim); }
+  .stat-val { font-weight: 700; }
+  .stat-val.bad { color: var(--accent3); }
+  .stat-val.good { color: var(--accent2); }
+
+  .bar-row { margin-bottom: 22px; }
+  .bar-meta { display: flex; justify-content: space-between; font-size: 0.85rem; font-weight: 600; color: var(--text); margin-bottom: 12px; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+  .bar-meta span:last-child { color: var(--accent2); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  
+  .bar-track-wrapper { display: flex; align-items: center; gap: 14px; margin-bottom: 10px; }
+  .bar-name { width: 110px; font-size: 0.82rem; color: var(--text-dim); font-weight: 600; text-align: right; flex-shrink: 0; }
+  .bar-track { flex: 1; height: 14px; background: var(--surface2); border-radius: 8px; overflow: hidden; border: 1px solid var(--border); box-shadow: inset 0 1px 3px rgba(0,0,0,0.1); }
+  .bar-fill { height: 100%; border-radius: 8px; transition: width 1.2s cubic-bezier(0.4, 0, 0.2, 1); }
+
+  /* ==========================================================================
+     TAB 2: HARD VS SOFT LABELS SPECIFICS
+     ========================================================================== */
+  .class-selectors { display: flex; gap: 8px; flex-wrap: wrap; margin: 16px 0; }
+  .class-btn {
+    padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border);
+    background: var(--surface2); color: var(--text-dim); cursor: pointer;
+    font-size: 0.85rem; transition: all 0.2s;
+  }
+  .class-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(108,99,255,0.1); }
+
+  .chart-section { margin-bottom: 14px; }
+  .chart-label { font-size: 0.8rem; font-weight: 600; color: var(--text-dim); margin-bottom: 8px; }
+  
+  .bar-chart-container {
+    display: flex; align-items: flex-end; gap: 5px; height: 110px;
+    padding: 8px 8px 0; background: var(--surface2); border-radius: 10px; border: 1px solid var(--border);
+    transition: background-color 0.3s, border-color 0.3s;
+  }
+  .chart-bar-wrapper { flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px; height: 100%; justify-content: flex-end; }
+  .chart-bar { width: 100%; border-radius: 3px 3px 0 0; min-height: 2px; transition: height 0.5s ease, background-color 0.3s; }
+  .chart-val { font-size: 0.62rem; color: var(--text-dim); font-weight: 600; }
+  .chart-lbl { font-size: 0.65rem; color: var(--text-dim); text-align: center; }
+
+  .arrow-separator { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 0; font-size: 0.82rem; color: var(--text-dim); }
+  
+  .label-comparison { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .label-comparison h4 { font-size: 0.88rem; font-weight: 700; margin-bottom: 8px; }
+  
+  .info-tag { margin-top: 10px; padding: 8px 12px; border-radius: 8px; font-size: 0.78rem; transition: background-color 0.3s; }
+  .info-tag.warn { background: rgba(255,107,107,0.08); border: 1px solid rgba(255,107,107,0.2); color: var(--accent3); }
+  .info-tag.good { background: rgba(0,212,170,0.08); border: 1px solid rgba(0,212,170,0.2); color: var(--accent2); }
+  .info-tag.neu { background: var(--surface2); border: 1px solid var(--border); color: var(--text-dim); }
+
+  .code-block {
+    margin-top: 12px; padding: 12px 16px; background: var(--surface2);
+    border-radius: 10px; font-family: 'Courier New', monospace; font-size: 0.85rem; line-height: 1.8;
+  }
+
+  /* ==========================================================================
+     TAB 3 & 4: SLIDERS AND INTERACTIVE CONTROLS
+     ========================================================================== */
+  input[type=range] {
+    width: 100%; height: 6px; border-radius: 3px;
+    background: var(--surface2); outline: none; cursor: pointer;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; width: 20px; height: 20px; border-radius: 50%;
+    background: var(--accent); cursor: pointer; box-shadow: 0 0 0 3px rgba(108,99,255,0.2);
+  }
+
+  /* Temperature Specifics */
+  .temp-display { display: grid; grid-template-columns: 1fr 2fr; gap: 24px; align-items: start; }
+  .temp-val-display { font-size: 3rem; font-weight: 800; text-align: center; margin: 12px 0; color: var(--accent); }
+  .slider-labels { display: flex; justify-content: space-between; font-size: 0.78rem; color: var(--text-dim); margin-bottom: 4px; }
+  .preset-btns { display: flex; gap: 6px; margin-top: 12px; flex-wrap: wrap; }
+  .preset-btn { padding: 5px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--surface2); color: var(--text-dim); cursor: pointer; font-size: 0.78rem; transition: all 0.2s; }
+  .preset-btn.active { border-color: var(--accent); color: var(--accent); background: rgba(108,99,255,0.05); }
+  .effect-label { margin-top: 12px; text-align: center; font-size: 0.82rem; font-weight: 600; min-height: 20px; color: var(--accent4); }
+  
+  .formula-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; padding: 16px; margin-top: 12px; font-family: 'Courier New', monospace; font-size: 0.88rem; color: var(--accent4); display: flex; justify-content: center; align-items: center; }
+  
+  .metrics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 12px; }
+  .metric-item { background: var(--surface2); border-radius: 8px; padding: 10px; text-align: center; }
+  .metric-label { font-size: 0.75rem; color: var(--text-dim); }
+  .metric-value { font-size: 1.2rem; font-weight: 800; }
+
+  .temp-insights { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .temp-card { background: var(--surface2); border-radius: 10px; padding: 14px; text-align: center; border: 1px solid var(--border); }
+  .temp-card h4 { font-size: 0.82rem; font-weight: 700; margin-bottom: 4px; }
+  .temp-card p { font-size: 0.75rem; color: var(--text-dim); }
+
+  /* Flow Diagram */
+  .flow-diagram { padding: 20px; background: var(--surface2); border-radius: 16px; border: 1px solid var(--border); }
+  .flow-node { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 10px 14px; text-align: center; font-size: 0.82rem; font-weight: 600; }
+  .node-teacher { border-color: var(--teacher); color: var(--teacher); }
+  .node-student { border-color: var(--student); color: var(--student); }
+  .node-loss { border-color: var(--accent4); color: var(--accent4); }
+  .node-combined { border-color: var(--accent); background: rgba(108,99,255,0.08); color: var(--accent); }
+  
+  .flow-row { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 14px; }
+  .flow-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 14px; }
+  .flow-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+  .flow-sub { font-size: 0.72rem; color: var(--text-dim); text-align: center; }
+
+  /* Loss Weighting Layout */
+  .alpha-control { margin: 20px 0; }
+  .alpha-control label { display: flex; justify-content: space-between; font-size: 0.85rem; margin-bottom: 8px; font-weight: 600; }
+  
+  .loss-boxes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 16px 0; }
+  .loss-box { background: var(--surface2); border-radius: 10px; padding: 14px; border: 1px solid var(--border); text-align: center; }
+  .loss-name { font-size: 0.78rem; color: var(--text-dim); margin-bottom: 4px; }
+  .loss-val { font-size: 1.4rem; font-weight: 800; }
+  .loss-desc { font-size: 0.72rem; color: var(--text-dim); margin-top: 4px; }
+
+  .combined-loss { background: rgba(255,209,102,0.08); border: 1px solid rgba(255,209,102,0.3); border-radius: 10px; padding: 14px; text-align: center; margin-top: 4px; }
+  .combined-loss-lbl { font-size: 0.8rem; color: var(--accent4); margin-bottom: 4px; font-weight: 600; }
+  .combined-loss-form { font-size: 1.1rem; color: var(--accent4); margin-top: 8px; font-weight: 500; letter-spacing: 0.02em; }
+  .math-var { font-family: 'Georgia', 'Times New Roman', serif; font-style: italic; font-weight: normal; padding: 0 1px; }
+
+  /* ==========================================================================
+     TAB 5: HARDWARE IMPACT & CANVAS STYLES
+     ========================================================================== */
+  .hw-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin: 20px 0; }
+  .hw-metric {
+    background: var(--surface2); border-radius: 10px; padding: 16px;
+    border: 1px solid var(--border); text-align: center; transition: all 0.3s;
+  }
+  .hw-metric:hover { border-color: var(--accent2); transform: translateY(-2px); }
+  .hw-icon { font-size: 1.5rem; margin-bottom: 6px; }
+  .hw-label { font-size: 0.75rem; color: var(--text-dim); margin-bottom: 8px; }
+  .hw-change { display: flex; justify-content: center; align-items: center; gap: 6px; font-size: 0.82rem; font-weight: 700; }
+  .old-val { color: var(--accent3); text-decoration: line-through; font-weight: 400; }
+  .new-val { color: var(--accent2); }
+
+  .roofline-notes { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 12px 0; }
+  .roofline-note { border-radius: 10px; padding: 10px 14px; font-size: 0.82rem; }
+  .roofline-note.bad { background: rgba(255,107,107,0.08); color: var(--accent3); }
+  .roofline-note.good { background: rgba(0,212,170,0.08); color: var(--accent2); }
+
+  /* Tooltip for Scatter Plot */
+  #tooltip {
+    position: fixed; pointer-events: none; background: var(--surface);
+    border: 1px solid var(--border); border-radius: 10px; padding: 12px;
+    font-size: 0.82rem; box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+    display: none; z-index: 9999; min-width: 180px;
+    transition: opacity 0.1s;
+    color: var(--text);
+  }
+
+  /* Responsive Design */
+  @media(max-width: 640px) {
+    .model-compare, .label-comparison, .temp-display, .loss-boxes, .hw-grid, .temp-insights, .flow-grid, .roofline-notes { grid-template-columns: 1fr; }
+    .content { padding: 20px 16px; }
+    header { padding: 16px; }
+    .tabs { padding: 0 16px; }
+    .badge { margin-left: 0; }
+  }
+</style>
+</head>
+<body>
+
+<!-- Tooltip Element for Canvas Hover -->
+<div id="tooltip"></div>
+
+<!-- Header -->
+<header>
+  <div class="header-icon">&#x1F9E0;</div>
+  <div>
+    <h1>Knowledge Distillation</h1>
+    <p>Interactive Visualizer &mdash; EE508: Hardware Foundations for ML</p>
+  </div>
+  <div class="badge">Model Reduction</div>
+  <button class="theme-toggle" id="theme-btn" onclick="toggleTheme()" title="Toggle Dark/Light Mode">
+    ☀️
+  </button>
+</header>
+
+<!-- Navigation Tabs -->
+<div class="tabs">
+  <button class="tab active" onclick="switchTab(0)"><span class="tab-num">1</span> The Problem</button>
+  <button class="tab" onclick="switchTab(1)"><span class="tab-num">2</span> Hard vs Soft Labels</button>
+  <button class="tab" onclick="switchTab(2)"><span class="tab-num">3</span> Temperature Scaling</button>
+  <button class="tab" onclick="switchTab(3)"><span class="tab-num">4</span> Distillation Training</button>
+  <button class="tab" onclick="switchTab(4)"><span class="tab-num">5</span> Hardware Impact</button>
+</div>
+
+<!-- Main Content Area -->
+<div class="content">
+
+  <!-- ==========================================
+       TAB 1: THE PROBLEM (Big vs Small Models)
+       ========================================== -->
+  <div class="tab-panel active" id="panel-0">
+    <div class="section-header">
+      <h2>&#x1F914; Why Knowledge Distillation?</h2>
+      <p>Large models are accurate but <span class="highlight3">expensive to deploy</span>. We need smarter ways to get <span class="highlight2">small, fast models</span> without sacrificing too much accuracy.</p>
+    </div>
+    
+    <div class="card">
+      <h3>&#x2696; The Big vs Small Model Dilemma</h3>
+      <div class="model-compare">
+        <div class="model-card teacher">
+          <div class="model-icon">&#x1F3EB;</div>
+          <h4 style="color:var(--teacher)">Teacher Model</h4>
+          <div class="model-sub">e.g. ResNet-152</div>
+          <div class="stat-row"><span class="stat-label">Parameters</span><span class="stat-val bad">60M</span></div>
+          <div class="stat-row"><span class="stat-label">MACs / inference</span><span class="stat-val bad">11.6B</span></div>
+          <div class="stat-row"><span class="stat-label">Memory Footprint</span><span class="stat-val bad">~240 MB</span></div>
+          <div class="stat-row"><span class="stat-label">Latency (CPU)</span><span class="stat-val bad">~180 ms</span></div>
+          <div class="stat-row"><span class="stat-label">Top-1 Accuracy</span><span class="stat-val" style="color:var(--accent4)">78.3%</span></div>
+        </div>
+        <div class="model-card student">
+          <div class="model-icon">&#x1F393;</div>
+          <h4 style="color:var(--student)">Student Model</h4>
+          <div class="model-sub">e.g. MobileNetV2</div>
+          <div class="stat-row"><span class="stat-label">Parameters</span><span class="stat-val good">3.4M</span></div>
+          <div class="stat-row"><span class="stat-label">MACs / inference</span><span class="stat-val good">300M</span></div>
+          <div class="stat-row"><span class="stat-label">Memory Footprint</span><span class="stat-val good">~14 MB</span></div>
+          <div class="stat-row"><span class="stat-label">Latency (CPU)</span><span class="stat-val good">~22 ms</span></div>
+          <div class="stat-row"><span class="stat-label">Top-1 Accuracy</span><span class="stat-val" style="color:var(--accent4)">71.8%</span></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F4CA; Hardware Cost Comparison</h3>
+      
+      <div class="bar-row">
+        <div class="bar-meta"><span>Parameters</span><span>94% Reduction</span></div>
+        <div class="bar-track-wrapper">
+          <div class="bar-name">Teacher (60M)</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-p-t" style="width:0%; background:var(--teacher)"></div></div>
+        </div>
+        <div class="bar-track-wrapper">
+          <div class="bar-name" style="color:var(--student)">Student (3.4M)</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-p-s" style="width:0%; background:var(--student)"></div></div>
+        </div>
+      </div>
+      
+      <div class="bar-row">
+        <div class="bar-meta"><span>Inference MACs</span><span>97% Reduction</span></div>
+        <div class="bar-track-wrapper">
+          <div class="bar-name">Teacher (11.6B)</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-m-t" style="width:0%; background:var(--teacher)"></div></div>
+        </div>
+        <div class="bar-track-wrapper">
+          <div class="bar-name" style="color:var(--student)">Student (300M)</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-m-s" style="width:0%; background:var(--student)"></div></div>
+        </div>
+      </div>
+      
+      <div class="bar-row">
+        <div class="bar-meta"><span>Latency</span><span>88% Faster</span></div>
+        <div class="bar-track-wrapper">
+          <div class="bar-name">Teacher (180ms)</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-l-t" style="width:0%; background:var(--teacher)"></div></div>
+        </div>
+        <div class="bar-track-wrapper">
+          <div class="bar-name" style="color:var(--student)">Student (22ms)</div>
+          <div class="bar-track"><div class="bar-fill" id="bar-l-s" style="width:0%; background:var(--student)"></div></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> Knowledge Distillation is a <strong>model-level optimization</strong> that produces smaller, faster models for edge hardware &mdash; directly reducing FLOPs, memory constraints, and latency.
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 2: HARD VS SOFT LABELS
+       ========================================== -->
+  <div class="tab-panel" id="panel-1">
+    <div class="section-header">
+      <h2>&#x1F3F7; Hard Labels vs Soft Labels</h2>
+      <p>Temperature is applied to the <span class="highlight">raw logits</span>, not the probabilities. The logits never change &mdash; only the softmax reshapes them.</p>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F5BC; Choose an Input Image Class</h3>
+      <div class="class-selectors">
+        <button class="class-btn active" onclick="selectClass(0)">&#x1F431; Cat</button>
+        <button class="class-btn" onclick="selectClass(1)">&#x1F436; Dog</button>
+        <button class="class-btn" onclick="selectClass(2)">&#x1F697; Car</button>
+        <button class="class-btn" onclick="selectClass(3)">&#x2708; Airplane</button>
+        <button class="class-btn" onclick="selectClass(4)">&#x1F3E0; House</button>
+      </div>
+      
+      <div class="chart-section">
+        <div class="chart-label">Step 1 &mdash; Raw logits from teacher (pre-softmax, <strong>these never change</strong>)</div>
+        <div class="bar-chart-container" id="logit-bars"></div>
+        <div class="info-tag neu">The teacher's raw network outputs (Logits). Temperature only affects how these are <em>converted</em> into probabilities below.</div>
+      </div>
+      
+      <div class="arrow-separator">&#x2193; &nbsp; Apply softmax with different temperatures &nbsp; &#x2193;</div>
+      
+      <div class="label-comparison">
+        <div>
+          <h4 style="color:var(--accent3)">&#x274C; Hard label (one-hot, T=1)</h4>
+          <div class="bar-chart-container" id="hard-bars"></div>
+          <div class="info-tag warn">All inter-class info <strong>lost</strong>. Student model only learns "this is a cat."</div>
+        </div>
+        <div>
+          <h4 style="color:var(--accent2)">&#x2705; Soft label (teacher, T=2)</h4>
+          <div class="bar-chart-container" id="soft-bars"></div>
+          <div class="info-tag good">"Dark knowledge" &mdash; a cat resembles a dog more than a plane. <strong>Richer signal.</strong></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F311; What is "Dark Knowledge"?</h3>
+      <p style="color:var(--text-dim); margin-bottom: 12px;">The teacher's logits encode inter-class similarity. At T=1, standard softmax hides this by pushing the max value to near 100%. At T&gt;1, the distribution softens, revealing <span class="highlight">"dark knowledge"</span> &mdash; the teacher's uncertainty between related classes.</p>
+      <div class="code-block">
+        <span style="color:var(--accent3)">Hard label:</span> [1, 0, 0, 0, 0] &larr; 1 bit of information<br>
+        <span style="color:var(--accent2)">Soft label:</span> [0.55, 0.32, 0.07, 0.04, 0.02] &larr; rich inter-class signal
+      </div>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> The teacher's logits <strong>never change</strong> &mdash; temperature only reshapes the probability distribution. Soft labels preserve inter-class relationships that hard labels discard entirely.
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 3: TEMPERATURE SCALING
+       ========================================== -->
+  <div class="tab-panel" id="panel-2">
+    <div class="section-header">
+      <h2>&#x1F321; Temperature Scaling</h2>
+      <p>Temperature <span class="highlight">T</span> reshapes the same logits into different probability distributions. Drag to see live changes.</p>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F3DB; Interactive Temperature Control</h3>
+      <div class="temp-display">
+        <div>
+          <div class="temp-val-display" id="temp-val-text">T = 1.0</div>
+          <div class="slider-labels"><span>Sharp (0.1)</span><span>Flat (10)</span></div>
+          <input type="range" id="temp-slider" min="1" max="100" value="10" oninput="updateTemperature(this.value)">
+          
+          <div class="preset-btns">
+            <button class="preset-btn" onclick="setTemperaturePreset(1)">T=0.1</button>
+            <button class="preset-btn active" onclick="setTemperaturePreset(10)">T=1.0</button>
+            <button class="preset-btn" onclick="setTemperaturePreset(20)">T=2.0</button>
+            <button class="preset-btn" onclick="setTemperaturePreset(50)">T=5.0</button>
+            <button class="preset-btn" onclick="setTemperaturePreset(100)">T=10</button>
+          </div>
+          
+          <div class="effect-label" id="temp-effect-text">Normal softmax</div>
+          <div class="formula-box">
+            <div class="math-eq">
+              <span>p<sub>i</sub> = </span>
+              <div class="math-frac">
+                <div class="math-num">exp(z<sub>i</sub> / T)</div>
+                <div class="math-den">&Sigma; exp(z<sub>j</sub> / T)</div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="metrics-grid">
+            <div class="metric-item">
+              <div class="metric-label">Max prob</div>
+              <div class="metric-value" id="max-prob-val" style="color:var(--accent)">&mdash;</div>
+            </div>
+            <div class="metric-item">
+              <div class="metric-label">Entropy</div>
+              <div class="metric-value" id="entropy-val" style="color:var(--accent2)">&mdash;</div>
+            </div>
+          </div>
+        </div>
+        
+        <div>
+          <p style="font-size:0.82rem; color:var(--text-dim); margin-bottom:8px; font-weight:600">Softmax probability output</p>
+          <div class="bar-chart-container" id="temp-bars" style="height: 180px;"></div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F4D0; Why temperature matters</h3>
+      <div class="temp-insights">
+        <div class="temp-card">
+          <h4 style="color:var(--accent3)">&#x1F525; T &lt; 1 (Hot)</h4>
+          <p>Amplifies differences. Winner takes almost all probability mass.</p>
+        </div>
+        <div class="temp-card" style="border-color:rgba(108,99,255,0.4)">
+          <h4 style="color:var(--accent)">&#x2696; T = 1 (Normal)</h4>
+          <p>Standard softmax. Used during standard training and inference.</p>
+        </div>
+        <div class="temp-card">
+          <h4 style="color:var(--accent2)">&#x2744; T &gt; 1 (Cold)</h4>
+          <p>Smooths distribution. More "dark knowledge" exposed for distillation.</p>
+        </div>
+      </div>
+      <p style="color:var(--text-dim); font-size:0.85rem; margin-top:14px;"><strong>Both teacher and student</strong> use the same T during distillation. At inference time, T resets to 1.</p>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> Higher T softens the teacher's confidence, revealing inter-class relationships. Geoffrey Hinton recommended T = 2&ndash;5 &mdash; a sweet spot between information richness and stability.
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 4: DISTILLATION TRAINING PROCESS
+       ========================================== -->
+  <div class="tab-panel" id="panel-3">
+    <div class="section-header">
+      <h2>&#x1F504; Distillation Training Process</h2>
+      <p>The student learns from <span class="highlight">two signals</span> simultaneously. Control the balance with &alpha;.</p>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F30A; Knowledge Flow Diagram</h3>
+      <div class="flow-diagram">
+        <div class="flow-row">
+          <div class="flow-node" style="min-width:160px">&#x1F5BC; Input Image (x)</div>
+        </div>
+        
+        <div class="flow-grid" style="margin-top:14px">
+          <div class="flow-col">
+            <div class="flow-sub">&#x2191; frozen weights</div>
+            <div class="flow-node node-teacher" style="width:100%; box-shadow: 0 0 10px rgba(108,99,255,0.3)">
+              &#x1F3EB; Teacher<br><small style="font-weight:400;font-size:0.7rem">large pretrained model</small>
+            </div>
+          </div>
+          <div class="flow-col">
+            <div class="flow-sub">&#x2191; being trained</div>
+            <div class="flow-node node-student" style="width:100%">
+              &#x1F393; Student<br><small style="font-weight:400;font-size:0.7rem">compact model</small>
+            </div>
+          </div>
+        </div>
+        
+        <div class="flow-grid">
+          <div class="flow-col">
+            <div style="font-size:1.2rem;color:var(--text-dim)">&#x2193;</div>
+            <div class="flow-node node-teacher" style="width:100%;font-size:0.8rem">Soft probs (T &gt; 1) &#x2728;</div>
+          </div>
+          <div class="flow-col">
+            <div style="font-size:1.2rem;color:var(--text-dim)">&#x2193;</div>
+            <div class="flow-node node-student" style="width:100%;font-size:0.8rem">Student probs (T &gt; 1)</div>
+          </div>
+        </div>
+        
+        <div class="flow-grid">
+          <div class="flow-col">
+            <div style="font-size:1.2rem;color:var(--text-dim)">&#x2193;</div>
+            <div class="flow-node node-loss" style="width:100%;font-size:0.8rem">
+              &#x1F4C9; KL Divergence<br><small style="font-weight:400">Distillation Loss</small>
+            </div>
+          </div>
+          <div class="flow-col">
+            <div style="font-size:1.2rem;color:var(--text-dim)">&#x2193;</div>
+            <div class="flow-node node-loss" style="width:100%;font-size:0.8rem">
+              &#x1F4C9; Cross Entropy<br><small style="font-weight:400">Hard Label Loss (T = 1)</small>
+            </div>
+          </div>
+        </div>
+        
+        <div class="flow-row" style="margin-top:0">
+          <div class="flow-node node-combined" style="min-width:240px">
+            &#x26A1; Combined Loss &rarr; Backprop &rarr; Update Student
+          </div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F39A; Loss Weighting &mdash; Control &alpha;</h3>
+      <div class="alpha-control">
+        <label>
+          <span>&alpha; = <span id="alpha-val" style="color:var(--accent)">0.70</span></span>
+          <span style="color:var(--text-dim);font-size:0.78rem">drag to balance</span>
+        </label>
+        <input type="range" id="alpha-slider" min="0" max="100" value="70" oninput="updateAlpha(this.value)">
+        <div style="display:flex; justify-content:space-between; font-size:0.75rem; color:var(--text-dim); margin-top:4px;">
+          <span>Hard only (&alpha;=0)</span><span>Soft only (&alpha;=1)</span>
+        </div>
+      </div>
+      
+      <div class="loss-boxes">
+        <div class="loss-box" style="border-color:rgba(108,99,255,0.3)">
+          <div class="loss-name">&#x1F321; Distillation Loss (KL-div)</div>
+          <div class="loss-val" id="distill-weight" style="color:var(--accent)">70%</div>
+          <div class="loss-desc">Teacher &rarr; Student, uses T</div>
+        </div>
+        <div class="loss-box" style="border-color:rgba(0,212,170,0.3)">
+          <div class="loss-name">&#x1F3AF; CE Loss (Hard Labels)</div>
+          <div class="loss-val" id="ce-weight" style="color:var(--accent2)">30%</div>
+          <div class="loss-desc">Ground truth, standard cross entropy</div>
+        </div>
+      </div>
+      
+      <div class="combined-loss">
+        <div class="combined-loss-lbl">Combined Loss Function</div>
+        <div class="combined-loss-form" id="loss-formula">
+          <span class="math-var">L</span> = 0.70 &times; <span class="math-var">T</span>&sup2; &times; KL(<span class="math-var">p</span><sub>T</sub> &parallel; <span class="math-var">p</span><sub>S</sub>) + 0.30 &times; CE(<span class="math-var">y</span>, <span class="math-var">p</span><sub>S</sub>)
+        </div>
+      </div>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> The T&sup2; scaling factor compensates for the fact that gradients produced by the soft targets scale as 1/T&sup2;. Without it, the distillation signal would be numerically overwhelmed by the hard cross-entropy loss.
+    </div>
+  </div>
+
+  <!-- ==========================================
+       TAB 5: HARDWARE IMPACT & ROOFLINE
+       ========================================== -->
+  <div class="tab-panel" id="panel-4">
+    <div class="section-header">
+      <h2>&#x26A1; Hardware Impact</h2>
+      <p>How much does distillation actually help on <span class="highlight">real hardware</span>? Hover the scatter plot for details.</p>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F4C8; Accuracy vs Model Size Tradeoff</h3>
+      <!-- Canvas for Scatter Plot -->
+      <canvas id="scatter-canvas" height="280" style="display:block; width:100%; cursor:crosshair;"></canvas>
+      
+      <div style="display:flex; gap:16px; margin-top:14px; flex-wrap:wrap; justify-content:center;">
+        <span style="font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+          <span style="width:12px; height:12px; border-radius:50%; background:var(--teacher); display:inline-block"></span>Large teacher
+        </span>
+        <span style="font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+          <span style="width:12px; height:12px; border-radius:50%; background:var(--accent3); display:inline-block"></span>Small (trained from scratch)
+        </span>
+        <span style="font-size:0.8rem; display:flex; align-items:center; gap:6px;">
+          <span style="width:12px; height:12px; border-radius:50%; background:var(--student); display:inline-block"></span>Small (distilled)
+        </span>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F5FA; Roofline Model &mdash; where KD moves your workload</h3>
+      <p style="color:var(--text-dim); font-size:0.88rem; margin-bottom:16px; line-height:1.6;">
+        Knowledge Distillation (coupled with INT8 quantization) pushes models off the <strong style="color:var(--accent3)">memory-bandwidth bound slope</strong> and up into the <strong style="color:var(--accent2)">compute-bound ceiling</strong> &mdash; maximizing actual hardware utilization.
+      </p>
+      
+      <!-- Canvas for Roofline Chart -->
+      <canvas id="roofline-canvas" height="300" style="display:block; width:100%;"></canvas>
+      
+      <div class="roofline-notes">
+        <div class="roofline-note bad">
+          <strong>Teacher (FP32):</strong> Low Arithmetic Intensity. Stuck on the memory slope. Every DRAM fetch costs ~640pJ of energy.
+        </div>
+        <div class="roofline-note good">
+          <strong>Student (INT8) after KD:</strong> High Arithmetic Intensity. Entire model fits in SRAM (~5pJ/access), hitting the peak compute ceiling.
+        </div>
+      </div>
+    </div>
+    
+    <div class="card">
+      <h3>&#x1F680; Hardware Deployment Savings</h3>
+      <div class="hw-grid">
+        <div class="hw-metric">
+          <div class="hw-icon">&#x1F522;</div>
+          <div class="hw-label">Parameters</div>
+          <div class="hw-change"><span class="old-val">60M</span><span>&rarr;</span><span class="new-val">3.4M</span></div>
+          <div style="font-size:0.72rem; color:var(--accent2); margin-top:4px; font-weight:700">94% reduction</div>
+        </div>
+        <div class="hw-metric">
+          <div class="hw-icon">&#x2699;</div>
+          <div class="hw-label">MACs / Inference</div>
+          <div class="hw-change"><span class="old-val">11.6B</span><span>&rarr;</span><span class="new-val">300M</span></div>
+          <div style="font-size:0.72rem; color:var(--accent2); margin-top:4px; font-weight:700">97% reduction</div>
+        </div>
+        <div class="hw-metric">
+          <div class="hw-icon">&#x1F4BE;</div>
+          <div class="hw-label">Memory Footprint</div>
+          <div class="hw-change"><span class="old-val">240MB</span><span>&rarr;</span><span class="new-val">14MB</span></div>
+          <div style="font-size:0.72rem; color:var(--accent2); margin-top:4px; font-weight:700">94% reduction</div>
+        </div>
+        <div class="hw-metric">
+          <div class="hw-icon">&#x23F1;</div>
+          <div class="hw-label">Latency</div>
+          <div class="hw-change"><span class="old-val">180ms</span><span>&rarr;</span><span class="new-val">22ms</span></div>
+          <div style="font-size:0.72rem; color:var(--accent2); margin-top:4px; font-weight:700">88% faster</div>
+        </div>
+        <div class="hw-metric">
+          <div class="hw-icon">&#x1F50B;</div>
+          <div class="hw-label">Energy / Inference</div>
+          <div class="hw-change"><span class="old-val">4.2mJ</span><span>&rarr;</span><span class="new-val">0.3mJ</span></div>
+          <div style="font-size:0.72rem; color:var(--accent2); margin-top:4px; font-weight:700">93% less energy</div>
+        </div>
+        <div class="hw-metric">
+          <div class="hw-icon">&#x1F3AF;</div>
+          <div class="hw-label">Accuracy Drop</div>
+          <div class="hw-change"><span class="old-val">78.3%</span><span>&rarr;</span><span class="new-val">74.7%</span></div>
+          <div style="font-size:0.72rem; color:var(--accent4); margin-top:4px; font-weight:700">Only -3.6%!</div>
+        </div>
+      </div>
+    </div>
+    
+    <div class="insight-box">
+      <strong>&#x1F511; Key Insight:</strong> Knowledge Distillation is fundamentally a <strong>hardware deployment strategy</strong>. A distilled model fits perfectly in fast SRAM, avoids catastrophic DRAM energy penalties, and processes requests instantly.
+    </div>
+  </div>
+
+</div>
+
+<!-- ==========================================================================
+     JAVASCRIPT LOGIC
+     ========================================================================== -->
+<script>
+  // --- Theme Toggle Logic ---
+  function toggleTheme() {
+    const isLight = document.body.classList.toggle('light-mode');
+    const btn = document.getElementById('theme-btn');
+    btn.innerHTML = isLight ? '🌙' : '☀️';
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    
+    // Redraw components that use JS-based colors
+    selectClass(currentClassIndex);
+    
+    if (document.getElementById('panel-4').classList.contains('active')) {
+      drawScatterPlot();
+      drawRoofline();
+    }
+  }
+
+  // --- Tab Switching Logic ---
+  function switchTab(index) {
+    document.querySelectorAll('.tab').forEach((t, j) => t.classList.toggle('active', index === j));
+    document.querySelectorAll('.tab-panel').forEach((p, j) => p.classList.toggle('active', index === j));
+    
+    // Trigger specific animations or canvas redraws based on active tab
+    if (index === 0) setTimeout(animateBars, 100);
+    if (index === 1) setTimeout(() => selectClass(currentClassIndex), 100);
+    if (index === 2) setTimeout(() => {
+      const slider = document.getElementById('temp-slider');
+      if (slider) updateTemperature(slider.value);
+    }, 100);
+    if (index === 4) setTimeout(() => { drawScatterPlot(); drawRoofline(); }, 100);
+  }
+
+  // --- Tab 1: Animate Progress Bars ---
+  function animateBars() {
+    const bars = [
+      ['bar-p-t', 95], ['bar-p-s', Math.round((3.4/60)*95)],
+      ['bar-m-t', 95], ['bar-m-s', Math.round((300/11600)*95)],
+      ['bar-l-t', 90], ['bar-l-s', Math.round((22/180)*90)]
+    ];
+    bars.forEach(([id, width]) => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.style.width = '0%'; // Reset for animation
+        setTimeout(() => el.style.width = width + '%', 60);
+      }
+    });
+  }
+
+  // --- Tab 2: Hard vs Soft Labels (Logit Mock Data) ---
+  const classData = [
+    { logits: [3.2, 1.8, 0.6, 0.2, -0.5], hard: [1, 0, 0, 0, 0], soft: [0.55, 0.32, 0.07, 0.04, 0.02], labels: ['Cat','Dog','Fox','Tiger','Plane'] },
+    { logits: [1.4, 3.5, 0.9, 0.3, -0.4], hard: [0, 1, 0, 0, 0], soft: [0.10, 0.72, 0.11, 0.05, 0.02], labels: ['Cat','Dog','Fox','Tiger','Plane'] },
+    { logits: [3.8, 0.5, 0.2, -0.3, -1.0], hard: [0, 0, 1, 0, 0], soft: [0.73, 0.10, 0.08, 0.05, 0.04], labels: ['Car','Truck','Bus','Bike','Plane'] },
+    { logits: [0.3, 0.6, 0.4, 3.6, 1.2], hard: [0, 0, 0, 1, 0], soft: [0.04, 0.06, 0.05, 0.66, 0.19], labels: ['Car','Heli','Bird','Plane','Ship'] },
+    { logits: [0.2, 0.5, 0.4, 1.1, 3.4], hard: [0, 0, 0, 0, 1], soft: [0.04, 0.06, 0.05, 0.12, 0.73], labels: ['Car','Tree','Church','Apt','House'] }
+  ];
+  
+  let currentClassIndex = 0;
+
+  function selectClass(index) {
+    currentClassIndex = index;
+    // Update button styles
+    document.querySelectorAll('.class-btn').forEach((btn, j) => btn.classList.toggle('active', index === j));
+    
+    const data = classData[index];
+    drawLogitBars('logit-bars', data.logits, data.labels);
+    drawProbabilityBars('hard-bars', data.hard, data.labels, '#ff6b6b');
+    drawProbabilityBars('soft-bars', data.soft, data.labels, '#00d4aa');
+  }
+
+  // Draw Raw Logits (Allows negative values visually)
+  function drawLogitBars(elementId, values, labels) {
+    const container = document.getElementById(elementId);
+    if (!container) return;
+    
+    const minVal = Math.min(...values);
+    const maxVal = Math.max(...values);
+    const range = maxVal - minVal || 1;
+    
+    // Theme aware color
+    const isLight = document.body.classList.contains('light-mode');
+    const barColor = isLight ? '#5a52d6' : '#6c63ff';
+    
+    container.innerHTML = values.map((val, i) => {
+      // Normalize between 0 and 1 for height
+      const normalized = (val - minVal) / range;
+      const height = Math.max(4, Math.round(normalized * 80));
+      // Base opacity + extra opacity for higher values
+      const opacity = (0.35 + normalized * 0.65).toFixed(2);
+      
+      return `
+        <div class="chart-bar-wrapper">
+          <div class="chart-val">${val.toFixed(1)}</div>
+          <div class="chart-bar" style="height:${height}px; background:${barColor}; opacity:${opacity}"></div>
+          <div class="chart-lbl">${labels[i]}</div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  // Draw Probabilities (0 to 1)
+  function drawProbabilityBars(elementId, values, labels, highlightColor) {
+    const container = document.getElementById(elementId);
+    if (!container) return;
+    
+    const maxVal = Math.max(...values) || 1;
+    const isLight = document.body.classList.contains('light-mode');
+    const inactiveColor = isLight ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.12)';
+    
+    // Adjust highlight colors for light mode if needed
+    if (isLight) {
+      if (highlightColor === '#ff6b6b') highlightColor = '#e53935';
+      if (highlightColor === '#00d4aa') highlightColor = '#00bfa5';
+    }
+    
+    container.innerHTML = values.map((val, i) => {
+      const height = Math.max(2, Math.round((val / maxVal) * 80));
+      const bgColor = (val === maxVal) ? highlightColor : inactiveColor;
+      
+      return `
+        <div class="chart-bar-wrapper">
+          <div class="chart-val">${Math.round(val * 100)}%</div>
+          <div class="chart-bar" style="height:${height}px; background:${bgColor}"></div>
+          <div class="chart-lbl">${labels[i]}</div>
+        </div>
+      `;
+    }).join('');
+  }
+  
+  // --- Tab 3: Temperature Scaling Logic ---
+  const temperatureLogits = [3.2, 1.1, 0.4, -0.2, -0.8, 2.1, 0.7, -1.1];
+  const temperatureLabels = ['Cat','Dog','Fox','Tiger','Bird','Lion','Wolf','Fish'];
+
+  // Safe Softmax Function
+  function computeSoftmax(logits, T) {
+    const scaled = logits.map(z => z / T);
+    const maxScaled = Math.max(...scaled); // For numerical stability
+    const exps = scaled.map(z => Math.exp(z - maxScaled));
+    const sumExps = exps.reduce((a, b) => a + b, 0);
+    return exps.map(e => e / sumExps);
+  }
+
+  // Calculate Shannon Entropy
+  function computeEntropy(probs) {
+    return -probs.reduce((sum, p) => sum + (p > 1e-9 ? p * Math.log2(p) : 0), 0);
+  }
+
+  function updateTemperature(sliderVal) {
+    const T = sliderVal / 10; // Maps 1-100 to 0.1-10.0
+    
+    // Update Text UI with safe element checks
+    const tempValEl = document.getElementById('temp-val-text');
+    if (tempValEl) tempValEl.textContent = 'T = ' + T.toFixed(1);
+    
+    const tempSliderEl = document.getElementById('temp-slider');
+    if (tempSliderEl) tempSliderEl.value = sliderVal;
+    
+    // Update Active Preset Buttons
+    document.querySelectorAll('.preset-btn').forEach((btn, i) => {
+      const presets = [1, 10, 20, 50, 100];
+      btn.classList.toggle('active', presets[i] == sliderVal);
+    });
+
+    // Compute Math
+    const probs = computeSoftmax(temperatureLogits, T);
+    const maxProb = Math.max(...probs);
+    const entropy = computeEntropy(probs);
+    
+    // Update Metrics
+    const maxProbEl = document.getElementById('max-prob-val');
+    if (maxProbEl) maxProbEl.textContent = (maxProb * 100).toFixed(1) + '%';
+    
+    const entropyEl = document.getElementById('entropy-val');
+    if (entropyEl) entropyEl.textContent = entropy.toFixed(2) + ' bits';
+    
+    // Set Descriptive Effect Text
+    let effectText = 'Normal softmax';
+    if (T < 0.5) effectText = 'Very sharp - near hard max';
+    else if (T < 1) effectText = 'Sharp - amplified differences';
+    else if (T === 1) effectText = 'Normal softmax';
+    else if (T < 3) effectText = 'Slightly soft - more dark knowledge';
+    else if (T < 6) effectText = 'Soft - rich dark knowledge';
+    else effectText = 'Very flat - near uniform';
+    
+    const tempEffectEl = document.getElementById('temp-effect-text');
+    if (tempEffectEl) tempEffectEl.textContent = effectText;
+
+    // Draw Dynamic Chart
+    const chartContainer = document.getElementById('temp-bars');
+    if (chartContainer) {
+      const isLight = document.body.classList.contains('light-mode');
+      const tempColors = isLight 
+        ? ['#5a52d6','#00bfa5','#e53935','#f59e0b','#26a69a','#7e57c2','#ec407a','#ffb300']
+        : ['#6c63ff','#00d4aa','#ff6b6b','#ffd166','#4ecdc4','#a29bfe','#fd79a8','#fdcb6e'];
+        
+      chartContainer.innerHTML = probs.map((val, i) => {
+        const height = Math.round((val / maxProb) * 130);
+        return `
+          <div class="chart-bar-wrapper">
+            <div class="chart-val">${(val * 100).toFixed(1)}%</div>
+            <div class="chart-bar" style="height:${height}px; background:${tempColors[i]}"></div>
+            <div class="chart-lbl">${temperatureLabels[i]}</div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  function setTemperaturePreset(val) { updateTemperature(val); }
+
+  // --- Tab 4: Distillation Training (Alpha Control) ---
+  function updateAlpha(val) {
+    const alpha = val / 100;
+    const ce = 1 - alpha;
+    
+    const alphaValEl = document.getElementById('alpha-val');
+    if(alphaValEl) alphaValEl.textContent = alpha.toFixed(2);
+    
+    const distillWeightEl = document.getElementById('distill-weight');
+    if(distillWeightEl) distillWeightEl.textContent = Math.round(alpha * 100) + '%';
+    
+    const ceWeightEl = document.getElementById('ce-weight');
+    if(ceWeightEl) ceWeightEl.textContent = Math.round(ce * 100) + '%';
+    
+    const lossFormulaEl = document.getElementById('loss-formula');
+    if(lossFormulaEl) {
+      lossFormulaEl.innerHTML = `<span class="math-var">L</span> = ${alpha.toFixed(2)} &times; <span class="math-var">T</span>&sup2; &times; KL(<span class="math-var">p</span><sub>T</sub> &parallel; <span class="math-var">p</span><sub>S</sub>) + ${ce.toFixed(2)} &times; CE(<span class="math-var">y</span>, <span class="math-var">p</span><sub>S</sub>)`;
+    }
+  }
+
+  // --- Tab 5: Hardware Impact (Canvas Drawing) ---
+  const modelStats = [
+    { name: 'ResNet-152', params: 60, acc: 78.3, r: 18, type: 'Teacher (FP32)', energy: '~8.5mJ', latency: '~180ms', role: 'teacher' },
+    { name: 'VGG-16', params: 138, acc: 74.4, r: 24, type: 'Teacher (FP32)', energy: '~15mJ', latency: '~220ms', role: 'teacher' },
+    { name: 'ResNet-50', params: 25, acc: 76.1, r: 13, type: 'Teacher (FP32)', energy: '~4mJ', latency: '~90ms', role: 'teacher' },
+    { name: 'MobileV2 (scratch)', params: 3.4, acc: 69.8, r: 7, type: 'Small (scratch)', energy: '~1.2mJ', latency: '~30ms', role: 'scratch' },
+    { name: 'MobileV2 (KD)', params: 3.4, acc: 74.7, r: 7, type: 'Student (KD)', energy: '~0.3mJ', latency: '~22ms', role: 'student' },
+    { name: 'EffB0 (KD)', params: 5.3, acc: 75.8, r: 9, type: 'Student (KD)', energy: '~0.5mJ', latency: '~28ms', role: 'student' },
+    { name: 'MobileV3 (scratch)', params: 5.4, acc: 72.3, r: 8, type: 'Small (scratch)', energy: '~1.0mJ', latency: '~26ms', role: 'scratch' }
+  ];
+  
+  let mappedModelPoints = []; // Stores hitboxes for hover events
+
+  // Helper functions for mapping data to canvas coordinates
+  function mapX(params, padLeft, gridWidth) {
+    // Logarithmic scale mapping for parameters (1 to ~150M)
+    return padLeft + (Math.log(params + 1) / Math.log(151)) * gridWidth;
+  }
+  
+  function mapY(acc, padTop, gridHeight) {
+    // Linear scale mapping for accuracy (66% to 82%)
+    return padTop + gridHeight - ((acc - 66) / 16) * gridHeight;
+  }
+
+  // Draw the Scatter Plot
+  function drawScatterPlot() {
+    const canvas = document.getElementById('scatter-canvas');
+    if (!canvas) return;
+    
+    const width = canvas.offsetWidth;
+    const height = 280;
+    canvas.width = width;
+    canvas.height = height;
+    
+    const ctx = canvas.getContext('2d');
+    const padLeft = 60, padRight = 20, padTop = 20, padBottom = 50;
+    const gridWidth = width - padLeft - padRight;
+    const gridHeight = height - padTop - padBottom;
+    
+    const isLight = document.body.classList.contains('light-mode');
+    const gridColor = isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
+    const axisColor = isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)';
+    const textColor = isLight ? 'rgba(0,0,0,0.6)' : 'rgba(255,255,255,0.4)';
+    const textBright = isLight ? '#1e293b' : 'rgba(255,255,255,0.85)';
+    
+    const tColor = isLight ? '#5a52d6' : '#6c63ff';
+    const sColor = isLight ? '#00bfa5' : '#00d4aa';
+    const badColor = isLight ? '#e53935' : '#ff6b6b';
+
+    // Draw Grid Lines (Horizontal)
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 1;
+    for (let a = 68; a <= 80; a += 2) {
+      ctx.beginPath();
+      ctx.moveTo(padLeft, mapY(a, padTop, gridHeight));
+      ctx.lineTo(padLeft + gridWidth, mapY(a, padTop, gridHeight));
+      ctx.stroke();
+    }
+    
+    // Draw Axes
+    ctx.strokeStyle = axisColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, padTop);
+    ctx.lineTo(padLeft, padTop + gridHeight);
+    ctx.lineTo(padLeft + gridWidth, padTop + gridHeight);
+    ctx.stroke();
+    
+    // Draw Y-Axis Labels (Accuracy)
+    ctx.fillStyle = textColor;
+    ctx.font = '11px system-ui';
+    ctx.textAlign = 'right';
+    for (let a = 68; a <= 80; a += 2) {
+      ctx.fillText(a + '%', padLeft - 6, mapY(a, padTop, gridHeight) + 4);
+    }
+    
+    // Draw Axis Titles
+    ctx.fillStyle = textBright;
+    ctx.textAlign = 'center';
+    ctx.fillText('Model Size (parameters) ->', padLeft + gridWidth / 2, height - 8);
+    ctx.save();
+    ctx.translate(14, padTop + gridHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Accuracy (Top-1)', 0, 0);
+    ctx.restore();
+    
+    // Draw Distillation Improvement Arrow (MobileNetV2 scratch -> KD)
+    const mobileX = mapX(3.4, padLeft, gridWidth);
+    const mobileY_scratch = mapY(69.8, padTop, gridHeight);
+    const mobileY_kd = mapY(74.7, padTop, gridHeight);
+    
+    ctx.beginPath();
+    ctx.strokeStyle = sColor;
+    ctx.lineWidth = 1.5;
+    ctx.setLineDash([4, 3]);
+    ctx.moveTo(mobileX, mobileY_scratch);
+    ctx.lineTo(mobileX, mobileY_kd);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    
+    // Arrow text
+    ctx.fillStyle = sColor;
+    ctx.font = 'bold 10px system-ui';
+    ctx.textAlign = 'left';
+    ctx.fillText('+4.9% from KD', mobileX + 12, mobileY_kd + 4);
+    
+    // Draw Data Points
+    mappedModelPoints = []; // Reset hitboxes
+    
+    modelStats.forEach(m => {
+      const cx = mapX(m.params, padLeft, gridWidth);
+      const cy = mapY(m.acc, padTop, gridHeight);
+      
+      let pColor = tColor;
+      if(m.role === 'student') pColor = sColor;
+      if(m.role === 'scratch') pColor = badColor;
+
+      mappedModelPoints.push({ ...m, cx, cy, displayColor: pColor });
+      
+      // Halo
+      ctx.beginPath();
+      ctx.arc(cx, cy, m.r, 0, Math.PI * 2);
+      ctx.fillStyle = pColor + (isLight ? '22' : '33'); 
+      ctx.fill();
+      // Border
+      ctx.strokeStyle = pColor;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+      
+      // Label
+      ctx.fillStyle = pColor;
+      ctx.font = 'bold 9px system-ui';
+      ctx.textAlign = 'center';
+      ctx.fillText(m.name.split(' ')[0], cx, cy - m.r - 4);
+    });
+    
+    // Interactive Tooltip Setup
+    setupScatterTooltip(canvas);
+  }
+
+  // Handle Tooltip Mouse Events
+  function setupScatterTooltip(canvas) {
+    const tooltip = document.getElementById('tooltip');
+    
+    canvas.onmousemove = function(e) {
+      const rect = canvas.getBoundingClientRect();
+      const scaleX = canvas.width / rect.width;
+      const scaleY = canvas.height / rect.height;
+      const mouseX = (e.clientX - rect.left) * scaleX;
+      const mouseY = (e.clientY - rect.top) * scaleY;
+      
+      let hit = null;
+      // Check collision
+      mappedModelPoints.forEach(m => {
+        const dist = Math.sqrt((mouseX - m.cx)**2 + (mouseY - m.cy)**2);
+        if (dist <= m.r + 4) hit = m; // small padding for easier hover
+      });
+      
+      if (hit) {
+        tooltip.style.display = 'block';
+        tooltip.style.left = (e.clientX + 16) + 'px';
+        tooltip.style.top = (e.clientY - 10) + 'px';
+        tooltip.innerHTML = `
+          <strong style="color:${hit.displayColor}; font-size:0.9rem;">${hit.name}</strong><br>
+          <span style="color:var(--text-dim)">Type:</span> ${hit.type}<br>
+          <span style="color:var(--text-dim)">Accuracy:</span> ${hit.acc}%<br>
+          <span style="color:var(--text-dim)">Params:</span> ${hit.params}M<br>
+          <span style="color:var(--text-dim)">Latency:</span> ${hit.latency}<br>
+          <span style="color:var(--text-dim)">Energy:</span> ${hit.energy}
+        `;
+        canvas.style.cursor = 'pointer';
+      } else {
+        tooltip.style.display = 'none';
+        canvas.style.cursor = 'crosshair';
+      }
+    };
+    
+    canvas.onmouseleave = function() {
+      tooltip.style.display = 'none';
+    };
+  }
+
+  // Draw the Roofline Model
+  function drawRoofline() {
+    const canvas = document.getElementById('roofline-canvas');
+    if (!canvas) return;
+    
+    const width = canvas.offsetWidth;
+    const height = 300;
+    canvas.width = width;
+    canvas.height = height;
+    
+    const ctx = canvas.getContext('2d');
+    const padLeft = 60, padRight = 30, padTop = 24, padBottom = 48;
+    const gridWidth = width - padLeft - padRight;
+    const gridHeight = height - padTop - padBottom;
+    
+    const isLight = document.body.classList.contains('light-mode');
+    const gridColor = isLight ? 'rgba(0,0,0,0.05)' : 'rgba(255,255,255,0.05)';
+    const axisColor = isLight ? 'rgba(0,0,0,0.2)' : 'rgba(255,255,255,0.2)';
+    const textBright = isLight ? '#1e293b' : 'rgba(255,255,255,0.85)';
+    const textDim = isLight ? '#64748b' : 'rgba(255,255,255,0.7)';
+    const textFade = isLight ? 'rgba(0,0,0,0.5)' : 'rgba(255,255,255,0.6)';
+    const rooflineArea = isLight ? 'rgba(90,82,214,0.06)' : 'rgba(108,99,255,0.05)';
+    const rooflineLines = isLight ? 'rgba(90,82,214,0.6)' : 'rgba(108,99,255,0.5)';
+    const rooflineText = isLight ? '#5a52d6' : 'rgba(200,200,255,0.95)';
+    
+    const teacherColor = isLight ? '#e53935' : '#ff6b6b';
+    const teacherBorder = isLight ? '#c62828' : '#cc4444';
+    const teacherTextColor = isLight ? '#d32f2f' : '#ff8787';
+    const teacherSubTextColor = isLight ? 'rgba(211,47,47,0.8)' : 'rgba(255,107,107,0.95)';
+
+    const studentColor = isLight ? '#00bfa5' : '#00d4aa';
+    const studentBorder = isLight ? '#00897b' : '#009977';
+    const studentTextColor = isLight ? '#009688' : '#26e0be';
+    const studentSubTextColor = isLight ? 'rgba(0,137,123,0.8)' : 'rgba(0,212,170,0.95)';
+
+    // 1. Draw Grid Lines
+    ctx.strokeStyle = gridColor;
+    ctx.lineWidth = 1;
+    for (let i = 1; i <= 4; i++) {
+      const y = padTop + gridHeight - i * (gridHeight / 4);
+      ctx.beginPath(); ctx.moveTo(padLeft, y); ctx.lineTo(padLeft + gridWidth, y); ctx.stroke();
+      
+      const x = padLeft + i * (gridWidth / 4);
+      ctx.beginPath(); ctx.moveTo(x, padTop); ctx.lineTo(x, padTop + gridHeight); ctx.stroke();
+    }
+    
+    // 2. Draw Axes
+    ctx.strokeStyle = axisColor;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(padLeft, padTop);
+    ctx.lineTo(padLeft, padTop + gridHeight);
+    ctx.lineTo(padLeft + gridWidth, padTop + gridHeight);
+    ctx.stroke();
+    
+    // 3. Draw Labels
+    ctx.fillStyle = textBright; 
+    ctx.font = '12px system-ui'; 
+    ctx.textAlign = 'center';
+    ctx.fillText('Arithmetic Intensity (FLOPs/Byte) ->', padLeft + gridWidth / 2, height - 8);
+    ctx.save();
+    ctx.translate(13, padTop + gridHeight / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText('Performance (GFLOPs/s)', 0, 0);
+    ctx.restore();
+    
+    ctx.textAlign = 'right';
+    ctx.font = '11px system-ui'; 
+    ctx.fillStyle = textDim; 
+    ['Low', '', '', '', 'Peak'].forEach((lbl, i) => {
+      if (lbl) ctx.fillText(lbl, padLeft - 6, padTop + gridHeight - i * (gridHeight / 4) + 4);
+    });
+    
+    ctx.textAlign = 'center';
+    ['Low', '', '', '', 'High'].forEach((lbl, i) => {
+      if (lbl) ctx.fillText(lbl, padLeft + i * (gridWidth / 4), padTop + gridHeight + 14);
+    });
+    
+    // 4. Draw Roofline Shape (Compute ceiling & Memory slope)
+    const ridgeX = padLeft + gridWidth * 0.44; // Knee of the roofline
+    const ridgeY = padTop + gridHeight * 0.06;
+    
+    // Fill region under roofline
+    ctx.beginPath();
+    ctx.moveTo(padLeft + 2, padTop + gridHeight - 2);
+    ctx.lineTo(ridgeX, ridgeY);
+    ctx.lineTo(padLeft + gridWidth - 2, ridgeY);
+    ctx.lineTo(padLeft + gridWidth - 2, padTop + gridHeight - 2);
+    ctx.closePath();
+    ctx.fillStyle = rooflineArea;
+    ctx.fill();
+    
+    // Draw Roofline Lines
+    ctx.strokeStyle = rooflineLines;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(padLeft + 2, padTop + gridHeight - 2);
+    ctx.lineTo(ridgeX, ridgeY); // Memory Bound Slant
+    ctx.lineTo(padLeft + gridWidth - 2, ridgeY); // Compute Bound Flat
+    ctx.stroke();
+    
+    // Roofline Text
+    ctx.fillStyle = rooflineText; 
+    ctx.font = 'bold 12px system-ui'; 
+    ctx.save();
+    ctx.translate(padLeft + gridWidth * 0.26, padTop + gridHeight * 0.45);
+    ctx.rotate(-Math.atan((gridHeight * 0.94) / (ridgeX - padLeft)));
+    ctx.textAlign = 'center';
+    ctx.fillText('Memory bandwidth bound', 0, -6);
+    ctx.restore();
+    
+    ctx.textAlign = 'center';
+    ctx.fillText('Compute bound (peak GFLOPS)', padLeft + gridWidth * 0.84, ridgeY - 10);
+    
+    // Base Regions
+    ctx.fillStyle = textFade; 
+    ctx.font = '11px system-ui'; 
+    ctx.textAlign = 'left';
+    ctx.fillText('bandwidth limited', padLeft + 8, padTop + gridHeight - 10);
+    ctx.textAlign = 'right';
+    ctx.fillText('compute limited', padLeft + gridWidth - 6, padTop + gridHeight - 10);
+    
+    // 5. Plot Teacher Model Dot (Red, Memory Bound)
+    const teacherX = padLeft + gridWidth * 0.12;
+    const teacherY = padTop + gridHeight * 0.65;
+    
+    // Glow
+    const tGlow = ctx.createRadialGradient(teacherX, teacherY, 0, teacherX, teacherY, 22);
+    const tgColor = isLight ? 'rgba(229,57,53,0.2)' : 'rgba(255,107,107,0.3)';
+    const tgColorEnd = isLight ? 'rgba(229,57,53,0)' : 'rgba(255,107,107,0)';
+    tGlow.addColorStop(0, tgColor);
+    tGlow.addColorStop(1, tgColorEnd);
+    ctx.beginPath(); ctx.arc(teacherX, teacherY, 22, 0, Math.PI * 2); ctx.fillStyle = tGlow; ctx.fill();
+    
+    // Solid Dot
+    ctx.beginPath(); ctx.arc(teacherX, teacherY, 9, 0, Math.PI * 2); ctx.fillStyle = teacherColor; ctx.fill();
+    ctx.strokeStyle = teacherBorder; ctx.lineWidth = 1.5; ctx.stroke();
+    
+    // Teacher Text
+    ctx.fillStyle = teacherTextColor; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; 
+    ctx.fillText('Teacher (FP32)', teacherX, teacherY + 24); 
+    ctx.font = '10px system-ui'; ctx.fillStyle = teacherSubTextColor; 
+    ctx.fillText('low AI, DRAM-bound', teacherX, teacherY + 38);
+    
+    // 6. Plot Student Model Dot (Green, Compute Bound)
+    const studentX = padLeft + gridWidth * 0.62;
+    const studentY = padTop + gridHeight * 0.09;
+    
+    // Arrow from Teacher to Student
+    ctx.beginPath();
+    ctx.moveTo(teacherX + 10, teacherY - 5);
+    ctx.bezierCurveTo(teacherX + gridWidth * 0.2, teacherY - 65, studentX - gridWidth * 0.15, studentY + 45, studentX - 10, studentY + 5);
+    ctx.strokeStyle = isLight ? 'rgba(0,191,165,0.6)' : 'rgba(0,212,170,0.6)'; 
+    ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]); ctx.stroke(); ctx.setLineDash([]);
+    
+    // Arrowhead
+    ctx.beginPath();
+    ctx.moveTo(studentX - 10, studentY + 5);
+    ctx.lineTo(studentX - 18, studentY + 1);
+    ctx.lineTo(studentX - 16, studentY + 10);
+    ctx.closePath();
+    ctx.fillStyle = isLight ? 'rgba(0,191,165,0.8)' : 'rgba(0,212,170,0.7)'; ctx.fill();
+    
+    // Arrow Text
+    ctx.fillStyle = isLight ? '#00897b' : 'rgba(0,212,170,1.0)'; 
+    ctx.font = 'bold 11px system-ui'; ctx.textAlign = 'center'; 
+    ctx.fillText('KD + INT8', padLeft + gridWidth * 0.37, teacherY - 58);
+    ctx.fillText('quantization', padLeft + gridWidth * 0.37, teacherY - 44);
+    
+    // Student Glow
+    const sGlow = ctx.createRadialGradient(studentX, studentY, 0, studentX, studentY, 22);
+    const sgColor = isLight ? 'rgba(0,191,165,0.2)' : 'rgba(0,212,170,0.3)';
+    const sgColorEnd = isLight ? 'rgba(0,191,165,0)' : 'rgba(0,212,170,0)';
+    sGlow.addColorStop(0, sgColor);
+    sGlow.addColorStop(1, sgColorEnd);
+    ctx.beginPath(); ctx.arc(studentX, studentY, 22, 0, Math.PI * 2); ctx.fillStyle = sGlow; ctx.fill();
+    
+    // Student Solid Dot
+    ctx.beginPath(); ctx.arc(studentX, studentY, 9, 0, Math.PI * 2); ctx.fillStyle = studentColor; ctx.fill();
+    ctx.strokeStyle = studentBorder; ctx.lineWidth = 1.5; ctx.stroke();
+    
+    // Student Text
+    ctx.fillStyle = studentTextColor; ctx.font = 'bold 12px system-ui'; ctx.textAlign = 'center'; 
+    ctx.fillText('Student (INT8)', studentX, studentY - 16);
+    ctx.font = '10px system-ui'; ctx.fillStyle = studentSubTextColor; 
+    ctx.fillText('high AI, near peak', studentX, studentY + 20);
+  }
+
+  // --- Initialization and Event Listeners ---
+  function initVisualizer() {
+    // Check saved theme
+    if(localStorage.getItem('theme') === 'light') {
+      document.body.classList.add('light-mode');
+      const btn = document.getElementById('theme-btn');
+      if (btn) btn.innerHTML = '🌙';
+    }
+
+    setTimeout(animateBars, 400);
+    selectClass(0);
+    updateTemperature(10);
+    setTimeout(() => { drawScatterPlot(); drawRoofline(); }, 200);
+  }
+
+  // Safely initialize once DOM is fully ready
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', initVisualizer);
+  } else {
+    initVisualizer();
+  }
+
+  // --- Resize Handler ---
+  window.addEventListener('resize', () => {
+    // Only redraw if the hardware tab is active
+    if (document.getElementById('panel-4').classList.contains('active')) {
+      drawScatterPlot();
+      drawRoofline();
+    }
+  });
+</script>
+</body>
+</html>

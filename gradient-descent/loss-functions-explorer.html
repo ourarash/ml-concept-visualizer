@@ -1,0 +1,1025 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #30 by Haiyang Li (@haiyangliee): feat: add Loss Functions Explorer (chain rule stepper + interactive loss comparison). -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Loss Functions Explorer</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+  .toc-link.active { background: #d1fae5; color: #065f46; }
+  input[type=range] { accent-color: #059669; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  /* Computation graph nodes */
+  .cnode {
+    border: 2px solid #cbd5e1; border-radius: 0.5rem;
+    padding: 0.45rem 0.8rem; text-align: center;
+    transition: border-color 0.3s, background 0.3s;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.78rem; white-space: nowrap;
+    background: white;
+  }
+  .cnode.hl-amber   { border-color: #f59e0b; background: #fffbeb; color: #92400e; font-weight: 700; }
+  .cnode.hl-blue    { border-color: #3b82f6; background: #eff6ff; color: #1e40af; font-weight: 700; }
+  .cnode.hl-emerald { border-color: #10b981; background: #ecfdf5; color: #065f46; font-weight: 700; }
+  /* Arrow labels between nodes */
+  .alabel {
+    font-size: 0.68rem; color: #94a3b8; text-align: center; line-height: 1.3;
+    transition: color 0.3s, font-weight 0.3s;
+  }
+  .alabel.hl-amber   { color: #92400e; font-weight: 700; }
+  .alabel.hl-blue    { color: #1d4ed8; font-weight: 700; }
+  .alabel.hl-emerald { color: #065f46; font-weight: 700; }
+  /* Step buttons */
+  .sbtn {
+    padding: 0.3rem 0.9rem; border-radius: 0.375rem; border: 1px solid #cbd5e1;
+    cursor: pointer; font-size: 0.82rem; background: white; transition: background 0.15s;
+  }
+  .sbtn:hover { background: #f1f5f9; }
+  .sbtn.go { background: #059669; color: white; border-color: #059669; }
+  .sbtn.go:hover { background: #047857; }
+  /* 0/1 loss step SVG region */
+  .step-fn-label {
+    font-size: 0.7rem; fill: #64748b;
+  }
+</style>
+</head>
+<body class="bg-slate-50 text-slate-800">
+
+<!-- ═══ HEADER ═══ -->
+<header class="max-w-5xl mx-auto px-4 pt-10 pb-6">
+  <h1 class="text-3xl md:text-4xl font-bold text-slate-900">Loss Functions Explorer</h1>
+  <p class="text-slate-600 mt-2 max-w-3xl">From loss function to weight update: trace the chain rule derivation of ∂L/∂w step by step, then compare every major loss function — MSE, MAE, 0/1 loss, Hinge, Logistic (BCE), and Categorical Cross-Entropy — side by side.</p>
+</header>
+
+<!-- ═══ STICKY TOC ═══ -->
+<nav class="sticky top-0 z-10 bg-slate-50/95 backdrop-blur border-b border-slate-200">
+  <div class="max-w-5xl mx-auto px-4 py-3 flex flex-wrap gap-2 text-sm">
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#chainrule">🔗 Chain Rule</a>
+    <a class="toc-link px-3 py-1 rounded-md text-slate-600 hover:bg-slate-100" href="#zoo">📊 Loss Function Zoo</a>
+  </div>
+</nav>
+
+<main class="max-w-5xl mx-auto px-4 py-8 space-y-14">
+
+<!-- ═══════════ §1 CHAIN RULE ═══════════ -->
+<section id="chainrule" class="bg-white rounded-xl border border-slate-200 shadow-sm p-6 scroll-mt-20">
+  <h2 class="text-xl font-bold text-emerald-700 mb-1">🔗 Chain Rule: How to Compute ∂L/∂w</h2>
+  <p class="text-sm text-slate-600 mb-6">∂L/∂w<sub>j</sub> cannot be computed in one shot — the chain rule decomposes it into two simpler derivatives. Click <strong>▶ Next</strong> to walk through each step of the derivation.</p>
+
+  <!-- ── Computation graph ── -->
+  <div class="overflow-x-auto pb-1">
+    <div class="min-w-[560px]">
+
+      <!-- Forward pass row: w_j → ŷ → L -->
+      <div class="flex items-center gap-0">
+        <!-- node w_j -->
+        <div class="flex flex-col items-center" style="width:90px;">
+          <div id="cnode-w" class="cnode w-full">w<sub>j</sub></div>
+          <span class="text-xs text-slate-400 mt-1">weight</span>
+        </div>
+        <!-- gap + forward arrow w→ŷ -->
+        <div class="flex flex-col items-center" style="width:120px;">
+          <div id="albl-dydw" class="alabel mono mb-1">∂ŷ/∂w = xᵢ (per sample)</div>
+          <div class="flex items-center w-full">
+            <div class="flex-1 h-0.5 bg-slate-300"></div>
+            <svg width="12" height="10" viewBox="0 0 12 10"><polygon points="0,0 12,5 0,10" fill="#94a3b8"/></svg>
+          </div>
+        </div>
+        <!-- node ŷ -->
+        <div class="flex flex-col items-center" style="width:130px;">
+          <div id="cnode-yhat" class="cnode w-full">ŷ = Σw<sub>i</sub>x<sub>i</sub> + b</div>
+          <span class="text-xs text-slate-400 mt-1">prediction</span>
+        </div>
+        <!-- gap + forward arrow ŷ→L -->
+        <div class="flex flex-col items-center" style="width:130px;">
+          <div id="albl-dLdy" class="alabel mono mb-1">∂L/∂ŷᵢ = (2/N)(ŷᵢ−yᵢ)</div>
+          <div class="flex items-center w-full">
+            <div class="flex-1 h-0.5 bg-slate-300"></div>
+            <svg width="12" height="10" viewBox="0 0 12 10"><polygon points="0,0 12,5 0,10" fill="#94a3b8"/></svg>
+          </div>
+        </div>
+        <!-- node L -->
+        <div class="flex flex-col items-center" style="width:140px;">
+          <div id="cnode-L" class="cnode w-full">L = (1/N)Σ(ŷ−y)²</div>
+          <span class="text-xs text-slate-400 mt-1">loss (MSE)</span>
+        </div>
+      </div>
+
+      <!-- Backprop row -->
+      <div class="mt-3 ml-[90px]" style="max-width:500px;">
+        <!-- dashed backprop line -->
+        <div class="flex items-center gap-1">
+          <svg width="12" height="10" viewBox="0 0 12 10"><polygon points="12,0 0,5 12,10" fill="#94a3b8"/></svg>
+          <div class="flex-1 h-0.5 border-t-2 border-dashed border-slate-300"></div>
+          <svg width="12" height="10" viewBox="0 0 12 10"><polygon points="12,0 0,5 12,10" fill="#94a3b8"/></svg>
+          <div class="flex-1 h-0.5 border-t-2 border-dashed border-slate-300"></div>
+        </div>
+        <div id="albl-chain" class="alabel text-center mt-1.5 text-xs">
+          ∂L/∂w = (2/N) Σᵢ (ŷᵢ − yᵢ) · xᵢ
+        </div>
+        <div class="text-center text-slate-400 text-xs mt-0.5">← backpropagation direction</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Stepper controls -->
+  <div class="flex flex-wrap gap-2 mt-6 items-center">
+    <button class="sbtn" onclick="crStep(-1)">◀ Prev</button>
+    <button class="sbtn go" onclick="crStep(1)">▶ Next</button>
+    <button class="sbtn" onclick="crReset()">↺ Reset</button>
+    <span class="text-sm text-slate-400 mono" id="cr-step-lbl">step 0 / 3</span>
+  </div>
+
+  <!-- Two-column: step description + live numbers -->
+  <div class="grid md:grid-cols-2 gap-5 mt-5">
+    <div class="bg-slate-50 rounded-lg border border-slate-200 p-4 min-h-[110px]">
+      <p class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Current step</p>
+      <p id="cr-desc" class="text-sm text-slate-700 leading-relaxed">Click ▶ Next to begin the derivation.</p>
+    </div>
+    <div class="bg-white border border-slate-200 rounded-lg p-4 mono text-xs space-y-1.5">
+      <div class="text-xs font-semibold text-slate-400 uppercase tracking-wide mb-2">Live numbers — N = 20, y = 2x + noise</div>
+      <div class="flex justify-between border-b border-slate-100 pb-1">
+        <span class="text-slate-500">w (slider)</span>
+        <span id="cr-w-show" class="font-bold">3.00</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-slate-500">mean(ŷ − y)</span>
+        <span id="cr-err-show">—</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-amber-600">∂L/∂ŷᵢ = (2/N)(ŷᵢ−yᵢ) per sample</span>
+        <span id="cr-dLdy-show" class="text-amber-700 font-semibold">—</span>
+      </div>
+      <div class="flex justify-between">
+        <span class="text-blue-600">∂ŷ/∂w = xᵢ (each sample)</span>
+        <span id="cr-xj-show" class="text-blue-700">—</span>
+      </div>
+      <div class="flex justify-between border-t border-slate-100 pt-1">
+        <span class="text-emerald-600 font-semibold">∂L/∂w = (2/N)Σ(ŷᵢ−yᵢ)·xᵢ</span>
+        <span id="cr-dLdw-show" class="text-emerald-700 font-bold">—</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Slider -->
+  <div class="mt-4 flex items-center gap-3 max-w-sm">
+    <label class="text-sm text-slate-600 whitespace-nowrap">w = <span id="cr-w-lbl" class="mono font-semibold">3.00</span></label>
+    <input id="cr-w-slider" type="range" min="-1" max="5" step="0.1" value="3.0" oninput="crRender()" class="flex-1">
+  </div>
+
+  <!-- Key insight box -->
+  <div class="mt-5 bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-900">
+    <p class="font-semibold mb-1">Key insight</p>
+    <p>∂ŷ/∂w = xᵢ — for each sample i, the partial derivative of the prediction with respect to w is simply the feature value xᵢ. The chain rule multiplies this with the error signal: <em>"how wrong is the prediction across all samples?"</em> × <em>"what feature value drives w?"</em> — giving ∂L/∂w = (2/N)Σ(ŷᵢ−yᵢ)·xᵢ.</p>
+  </div>
+</section>
+
+<!-- ═══════════ §2 LOSS ZOO ═══════════ -->
+<section id="zoo" class="scroll-mt-20 space-y-8">
+
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+    <h2 class="text-xl font-bold text-emerald-700 mb-1">📊 Loss Function Zoo: Shapes, Properties &amp; Comparison</h2>
+    <p class="text-sm text-slate-600">Every major loss function from the lecture — plotted interactively with formulas alongside. Use the sliders and draggable points to build intuition for the differences.</p>
+  </div>
+
+  <!-- ── 2a: Regression losses ── -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+    <h3 class="text-lg font-bold text-slate-800 mb-1">Regression Losses: MSE vs MAE</h3>
+    <p class="text-sm text-slate-600 mb-4">Drag the point left/right to feel how MSE and MAE respond differently to outliers. At e = 3, MSE penalizes 9× while MAE only penalizes 3×.</p>
+    <div class="grid md:grid-cols-5 gap-6 items-start">
+      <div class="md:col-span-3">
+        <canvas id="regression-canvas" role="img" aria-label="Interactive chart comparing MSE and MAE loss curves. Drag or use the slider below to change the prediction error." class="w-full border border-slate-200 rounded-lg" style="height:260px;cursor:ew-resize;"></canvas>
+        <div class="mt-2 flex items-center gap-3">
+          <label class="text-xs text-slate-500 whitespace-nowrap" for="reg-e-slider">e = <span id="reg-e-lbl" class="mono font-semibold">2.000</span></label>
+          <input id="reg-e-slider" type="range" min="-3" max="3" step="0.05" value="2.0" aria-label="Prediction error value" oninput="regSliderUpdate()" class="flex-1">
+        </div>
+      </div>
+      <div class="md:col-span-2 space-y-3 text-xs mono">
+        <div class="bg-blue-50 border border-blue-200 rounded-lg p-3">
+          <p class="font-bold text-blue-800 text-sm mb-1.5">MSE — Squared Error</p>
+          <p class="text-blue-700">L = (1/N) Σ(ŷ − y)²</p>
+          <p class="text-blue-700">∂L/∂ŷ = (2/N)(ŷ − y)</p>
+          <ul class="mt-2 text-blue-600 space-y-0.5 list-disc pl-3 not-mono" style="font-family:inherit;">
+            <li>Smooth &amp; differentiable everywhere</li>
+            <li>Outliers dominate — quadratic growth</li>
+          </ul>
+        </div>
+        <div class="bg-orange-50 border border-orange-200 rounded-lg p-3">
+          <p class="font-bold text-orange-800 text-sm mb-1.5">MAE — Absolute Error</p>
+          <p class="text-orange-700">L = (1/N) Σ|ŷ − y|</p>
+          <p class="text-orange-700">∂L/∂ŷ = sign(ŷ − y) / N</p>
+          <ul class="mt-2 text-orange-600 space-y-0.5 list-disc pl-3 not-mono" style="font-family:inherit;">
+            <li>Robust to outliers — linear growth</li>
+            <li>Non-differentiable at e = 0</li>
+          </ul>
+        </div>
+        <div class="border border-slate-200 rounded-lg p-3 space-y-1.5">
+          <p class="font-semibold text-slate-500 text-xs mb-1">Current error  e = ŷ − y</p>
+          <div class="flex justify-between"><span class="text-slate-400">e</span><span id="reg-e" class="font-bold">2.000</span></div>
+          <div class="flex justify-between text-blue-700"><span>MSE loss = e²</span><span id="reg-mse">4.000</span></div>
+          <div class="flex justify-between text-blue-600"><span>∂MSE/∂ŷ</span><span id="reg-dmse">+0.2000</span></div>
+          <div class="flex justify-between text-orange-700 border-t border-slate-100 pt-1"><span>MAE loss = |e|</span><span id="reg-mae">2.000</span></div>
+          <div class="flex justify-between text-orange-600"><span>∂MAE/∂ŷ</span><span id="reg-dmae">+0.0500</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2b: Classification losses ── -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+    <h3 class="text-lg font-bold text-slate-800 mb-1">Classification Losses: 0/1, Hinge, Logistic (BCE)</h3>
+    <p class="text-sm text-slate-600 mb-5">All three plotted in the <em>margin</em> view: z = y · ŷ, where y ∈ {−1, +1}. When z &gt; 0 the prediction is on the correct side; z &gt; 1 means "confident and correct".</p>
+
+    <!-- 0/1 loss step-function visual -->
+    <div class="mb-5 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+      <p class="text-sm font-semibold text-slate-700 mb-3">0/1 Loss — step function (non-differentiable)</p>
+      <div class="flex items-end gap-0 overflow-x-auto">
+        <svg viewBox="0 0 420 90" class="w-full max-w-lg" style="height:90px;" preserveAspectRatio="xMidYMid meet">
+          <!-- Axes -->
+          <line x1="40" y1="10" x2="40" y2="75" stroke="#94a3b8" stroke-width="1"/>
+          <line x1="40" y1="75" x2="400" y2="75" stroke="#94a3b8" stroke-width="1"/>
+          <!-- Tick labels x -->
+          <text x="40"  y="85" text-anchor="middle" class="step-fn-label">-2</text>
+          <text x="112" y="85" text-anchor="middle" class="step-fn-label">-1</text>
+          <text x="184" y="85" text-anchor="middle" class="step-fn-label">0</text>
+          <text x="256" y="85" text-anchor="middle" class="step-fn-label">1</text>
+          <text x="328" y="85" text-anchor="middle" class="step-fn-label">2</text>
+          <text x="400" y="85" text-anchor="middle" class="step-fn-label">3</text>
+          <!-- y tick labels -->
+          <text x="33" y="75" text-anchor="end" class="step-fn-label">0</text>
+          <text x="33" y="27" text-anchor="end" class="step-fn-label">1</text>
+          <!-- Axis labels -->
+          <text x="220" y="95" text-anchor="middle" style="font-size:9px;fill:#64748b;">margin z = y · ŷ</text>
+          <!-- 0/1 loss: =1 for z<0, =0 for z≥0 -->
+          <!-- Horizontal segment at loss=1 for z<0 (left of z=0 = x=184) -->
+          <line x1="40" y1="27" x2="183" y2="27" stroke="#64748b" stroke-width="2.5"/>
+          <!-- Vertical step at z=0 -->
+          <line x1="184" y1="27" x2="184" y2="74" stroke="#64748b" stroke-width="2.5" stroke-dasharray="4,3"/>
+          <!-- Horizontal segment at loss=0 for z≥0 -->
+          <line x1="184" y1="74" x2="400" y2="74" stroke="#64748b" stroke-width="2.5"/>
+          <!-- Open/closed dots at discontinuity -->
+          <circle cx="184" cy="27" r="4" fill="white" stroke="#64748b" stroke-width="2"/>
+          <circle cx="184" cy="74" r="4" fill="#64748b"/>
+          <!-- z=1 reference -->
+          <line x1="256" y1="10" x2="256" y2="75" stroke="#fca5a5" stroke-width="1" stroke-dasharray="3,3"/>
+          <text x="256" y="20" text-anchor="middle" style="font-size:8px;fill:#ef4444;">z=1</text>
+          <!-- Label -->
+          <text x="100" y="22" text-anchor="middle" style="font-size:9px;fill:#475569;font-weight:600;">loss = 1 (wrong)</text>
+          <text x="310" y="70" text-anchor="middle" style="font-size:9px;fill:#475569;font-weight:600;">loss = 0 (correct)</text>
+        </svg>
+      </div>
+      <div class="mt-3 bg-rose-50 border border-rose-200 rounded-md p-3 text-xs text-rose-800">
+        <span class="font-semibold">Why 0/1 loss cannot be used with gradient descent:</span> the gradient is 0 almost everywhere (flat), and undefined at z = 0. No gradient → no parameter update. We need a <em>surrogate loss</em> that is convex, differentiable, and upper-bounds 0/1 loss.
+      </div>
+    </div>
+
+    <!-- Canvas: Hinge + Logistic + 0/1 overlay -->
+    <div class="grid md:grid-cols-5 gap-6 items-start">
+      <div class="md:col-span-3">
+        <canvas id="classification-canvas" role="img" aria-label="Interactive chart comparing 0/1 loss, Hinge loss, and Logistic loss against the classification margin z = y·ŷ. Use the slider below to move the marker." class="w-full border border-slate-200 rounded-lg" style="height:280px;"></canvas>
+        <div class="mt-3 flex items-center gap-3">
+          <label class="text-sm text-slate-600 whitespace-nowrap mono">z = <span id="cls-z-lbl" class="font-semibold">0.50</span></label>
+          <input id="cls-z-slider" type="range" min="-2" max="3" step="0.05" value="0.5" oninput="clsUpdateZ()" class="flex-1">
+        </div>
+      </div>
+      <div class="md:col-span-2 space-y-3 text-xs mono">
+        <div class="border border-slate-200 rounded-lg p-3 space-y-1.5">
+          <p class="font-semibold text-slate-400 text-xs mb-1">Loss values at current z</p>
+          <div class="flex justify-between text-slate-500"><span>0/1</span><span id="cls-01" class="font-bold">1</span></div>
+          <div class="flex justify-between text-green-700"><span>Hinge  max(0, 1−z)</span><span id="cls-hinge" class="font-bold">0.500</span></div>
+          <div class="flex justify-between text-purple-700"><span>Logistic  log(1+e<sup>−z</sup>)</span><span id="cls-log" class="font-bold">0.474</span></div>
+        </div>
+        <div class="bg-green-50 border border-green-200 rounded-lg p-3">
+          <p class="font-bold text-green-800 text-sm mb-1.5">Hinge Loss (SVM)</p>
+          <p class="text-green-700">L = max(0, 1 − y · ŷ)</p>
+          <p class="text-green-700">∂L/∂ŷ = −y  if y·ŷ &lt; 1</p>
+          <p class="text-green-700">         0   if y·ŷ ≥ 1</p>
+          <p class="text-green-600 mt-1.5" style="font-family:inherit;">Gradient = 0 when z ≥ 1 (correct + in margin). Piecewise linear — sparse updates, efficient for SVM.</p>
+        </div>
+        <div class="bg-purple-50 border border-purple-200 rounded-lg p-3">
+          <p class="font-bold text-purple-800 text-sm mb-1.5">Logistic Loss / BCE</p>
+          <p class="text-purple-700">L = log(1 + e<sup>−z</sup>)  (margin form, z = y·ŷ, y ∈ {−1,+1})</p>
+          <p class="text-purple-700 mt-0.5">BCE form: −[y′ log p + (1−y′)log(1−p)]</p>
+          <p class="text-purple-500 text-xs mt-0.5">(y′ ∈ {0,1}, p = σ(ŷ) — different label encoding)</p>
+          <p class="text-purple-700 mt-0.5">∂L/∂ŷ = −y(1 − σ(y·ŷ))  (margin form)</p>
+          <p class="text-purple-600 mt-1.5" style="font-family:inherit;">Always smooth (C∞), gradient never exactly 0. "Soft margin" — even confidently correct points receive a small push.</p>
+        </div>
+      </div>
+    </div>
+    <div class="mt-5 bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm text-emerald-900">
+      <p class="font-semibold mb-1">Surrogate losses — the key idea</p>
+      <p>Hinge and Logistic are <strong>convex upper bounds</strong> of the 0/1 loss. Hinge is piecewise-linear (subdifferentiable, not differentiable at z = 1); Logistic is smooth everywhere (C∞). Minimizing either one also upper-bounds the true misclassification error, so gradient descent on a surrogate loss is a principled proxy for minimizing 0/1 loss.</p>
+    </div>
+  </div>
+
+  <!-- ── 2c: Categorical Cross-Entropy ── -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+    <h3 class="text-lg font-bold text-slate-800 mb-1">Multi-Class: Categorical Cross-Entropy</h3>
+    <p class="text-sm text-slate-600 mb-5">Adjust the logits for 3 classes. Softmax converts them to probabilities; CCE penalizes the model for low confidence on the <span class="text-rose-600 font-semibold">correct class</span>.</p>
+    <div class="grid md:grid-cols-5 gap-6 items-start">
+      <div class="md:col-span-3">
+        <canvas id="cce-canvas" role="img" aria-label="Two-part chart: top shows softmax probability bars for 3 classes; bottom shows the −log(p) loss curve with a moving dot tracking the correct-class probability." class="w-full border border-slate-200 rounded-lg" style="height:280px;"></canvas>
+        <div class="mt-4 space-y-2.5">
+          <div class="flex items-center gap-3 text-sm">
+            <span class="mono font-semibold text-rose-600 w-24">z₁ (correct)</span>
+            <input id="cce-z1" type="range" min="-3" max="3" step="0.1" value="2.0" oninput="cceUpdate()" class="flex-1">
+            <span id="cce-z1-val" class="mono text-sm w-10 text-right">2.0</span>
+          </div>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="mono text-slate-500 w-24">z₂</span>
+            <input id="cce-z2" type="range" min="-3" max="3" step="0.1" value="0.0" oninput="cceUpdate()" class="flex-1">
+            <span id="cce-z2-val" class="mono text-sm w-10 text-right">0.0</span>
+          </div>
+          <div class="flex items-center gap-3 text-sm">
+            <span class="mono text-slate-500 w-24">z₃</span>
+            <input id="cce-z3" type="range" min="-3" max="3" step="0.1" value="-1.0" oninput="cceUpdate()" class="flex-1">
+            <span id="cce-z3-val" class="mono text-sm w-10 text-right">-1.0</span>
+          </div>
+        </div>
+      </div>
+      <div class="md:col-span-2 space-y-3 text-xs mono">
+        <div class="bg-rose-50 border border-rose-200 rounded-lg p-3">
+          <p class="font-bold text-rose-800 text-sm mb-1.5">Categorical Cross-Entropy</p>
+          <p class="text-rose-700">L = −Σᵢ yᵢ · log(ŷᵢ)</p>
+          <p class="text-rose-700">  = −log(p<sub>correct</sub>)  (one-hot)</p>
+          <p class="text-rose-700 mt-0.5">∂L/∂zᵢ = pᵢ − yᵢ</p>
+          <p class="text-rose-600 mt-2" style="font-family:inherit;">Gradient = predicted prob minus one-hot target. Elegantly simple and numerically stable with softmax.</p>
+        </div>
+        <div class="bg-slate-50 border border-slate-200 rounded-lg p-3">
+          <p class="font-semibold text-slate-600 mb-1">Softmax</p>
+          <p class="text-slate-600">p̂ᵢ = e<sup>zᵢ</sup> / Σⱼ e<sup>zⱼ</sup></p>
+          <p class="text-slate-500 mt-1" style="font-family:inherit;">Maps any real-valued logits to a valid probability distribution (all positive, sum = 1).</p>
+        </div>
+        <div class="border border-slate-200 rounded-lg p-3 space-y-1.5">
+          <p class="font-semibold text-slate-400 text-xs mb-1">Current values</p>
+          <div class="flex justify-between"><span class="text-rose-600 font-semibold">p₁ (correct)</span><span id="cce-p1" class="text-rose-700 font-bold">0.721</span></div>
+          <div class="flex justify-between text-slate-500"><span>p₂</span><span id="cce-p2">0.212</span></div>
+          <div class="flex justify-between text-slate-500"><span>p₃</span><span id="cce-p3">0.067</span></div>
+          <div class="flex justify-between border-t border-slate-100 pt-1.5"><span class="text-rose-600 font-semibold">CCE Loss</span><span id="cce-loss" class="text-rose-700 font-bold">0.327</span></div>
+        </div>
+        <div class="bg-amber-50 border border-amber-200 rounded-lg p-3 text-xs" style="font-family:inherit;">
+          <p class="font-semibold text-amber-800">Note:</p>
+          <p class="text-amber-700">−log(p) → ∞ as p → 0 (very wrong = very large loss)</p>
+          <p class="text-amber-700">−log(p) → 0 as p → 1 (very confident = small loss) ✓</p>
+          <p class="text-amber-700 mt-1">Softmax + CCE is the standard output layer for multi-class neural networks.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── 2d: Expected vs Average loss ── -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+    <h3 class="text-lg font-bold text-slate-800 mb-4">Expected Loss vs Average Loss</h3>
+    <div class="grid md:grid-cols-2 gap-5">
+      <div class="bg-sky-50 border border-sky-200 rounded-lg p-5">
+        <p class="font-bold text-sky-800 mb-2">Expected Loss <span class="font-normal text-sky-600">(theoretical)</span></p>
+        <p class="mono text-sm text-sky-700">L = E<sub>(x,y)~P</sub>[ℓ(f(x), y)]</p>
+        <ul class="mt-3 text-sm text-sky-700 space-y-1 list-disc pl-4">
+          <li>Expectation over the <em>true</em> distribution P</li>
+          <li>The ultimate goal — minimize real-world error</li>
+          <li>P is unknown → cannot compute directly</li>
+          <li>We never have access to this during training</li>
+        </ul>
+      </div>
+      <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-5">
+        <p class="font-bold text-emerald-800 mb-2">Average Loss <span class="font-normal text-emerald-600">(empirical / training)</span></p>
+        <p class="mono text-sm text-emerald-700">L̂ = (1/N) Σᵢ ℓ(f(xᵢ), yᵢ)</p>
+        <ul class="mt-3 text-sm text-emerald-700 space-y-1 list-disc pl-4">
+          <li>Average over the N training examples</li>
+          <li>What gradient descent <em>actually</em> minimizes</li>
+          <li>A tractable proxy for expected loss</li>
+          <li>Can be made arbitrarily small by overfitting</li>
+        </ul>
+      </div>
+    </div>
+    <div class="mt-4 bg-slate-50 border border-slate-200 rounded-lg p-4 text-sm text-slate-700">
+      <p class="font-semibold text-slate-800 mb-1">Generalization gap = L − L̂</p>
+      <p>When training loss L̂ is low but test loss L is high, the model has overfit to the training sample — it has memorized the training data rather than learning the true pattern. Techniques that help close the gap: L2 / L1 regularization, dropout, data augmentation, early stopping.</p>
+    </div>
+  </div>
+
+</section>
+</main>
+
+<!-- ═══ ASIDE ═══ -->
+<aside class="max-w-5xl mx-auto px-4 pb-14 mt-4 space-y-6">
+
+  <!-- All-in-one comparison canvas -->
+  <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-6">
+    <h3 class="text-lg font-bold text-slate-800 mb-1">Loss Function Comparison Chart</h3>
+    <p class="text-sm text-slate-600 mb-4">All four classification losses on the same axes — the classic "surrogate loss" diagram from the lecture. Horizontal axis: margin z = y · ŷ. Hinge and Logistic both upper-bound the 0/1 loss everywhere.</p>
+    <canvas id="compare-canvas" role="img" aria-label="Comparison chart showing 0/1 loss, MSE margin form, Hinge loss, and Logistic loss on the same axes with margin z = y·ŷ on the horizontal axis." class="w-full border border-slate-200 rounded-lg" style="height:260px;"></canvas>
+    <div class="flex flex-wrap gap-4 mt-3 text-xs mono">
+      <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-slate-400" style="border-top:2px dashed #94a3b8;"></span>0/1 loss</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-green-600"></span>Hinge</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-purple-600"></span>Logistic</span>
+      <span class="flex items-center gap-1.5"><span class="inline-block w-6 h-0.5 bg-blue-500"></span>MSE (in margin view)</span>
+    </div>
+  </div>
+
+  <!-- Where do the formulas come from -->
+  <div class="bg-slate-100 border border-slate-200 rounded-xl p-6 text-sm text-slate-700">
+    <p class="font-bold text-slate-800 mb-2">📊 Where do the formulas come from?</p>
+    <p>Chain rule numbers use a toy linear regression dataset: N = 20 points, x ∈ [−2, 2], y = 2x + noise (TRUE_W = 2.0). All loss function curves are exact analytic formulas — no model training involved. The MSE gradient ∂L/∂ŷ = (2/N)Σ(ŷ−y) matches the exam formula; gradient values in the live panel reflect the current slider w applied to this synthetic dataset.</p>
+    <div class="mt-3 flex flex-wrap gap-5 text-xs">
+      <a href="back-propagation.html" class="text-emerald-700 hover:underline font-semibold">← Backpropagation &amp; Chain Rule (deeper dive)</a>
+    </div>
+  </div>
+</aside>
+
+<footer class="border-t border-slate-200 py-6 text-center text-xs text-slate-400">
+  Loss Functions Explorer · EE508 ML Fundamentals · Visualization only — not real model training
+</footer>
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  DATA
+// ═══════════════════════════════════════════════════════
+const N_CR = 20, TRUE_W = 2.0;
+const CR_DATA = [];
+(function() {
+  // Fixed seed-like sequence so numbers are stable on reload
+  const xs = [-2,-1.78,-1.56,-1.33,-1.11,-0.89,-0.67,-0.44,-0.22,0,
+               0.22,0.44,0.67,0.89,1.11,1.33,1.56,1.78,2,2];
+  const noise = [0.12,-0.09,0.18,-0.14,0.07,-0.11,0.16,-0.08,0.13,-0.05,
+                 0.09,-0.17,0.11,-0.06,0.15,-0.12,0.08,-0.19,0.14,-0.03];
+  for (let i = 0; i < N_CR; i++) {
+    CR_DATA.push({ x: xs[i], y: TRUE_W * xs[i] + noise[i] });
+  }
+})();
+
+// ═══════════════════════════════════════════════════════
+//  §1  CHAIN RULE STEPPER
+// ═══════════════════════════════════════════════════════
+let crStepIdx = 0;
+
+const CR_STEPS = [
+  {
+    desc: 'Start at the <strong class="text-amber-700">loss node L</strong> on the right. For MSE, L = (1/N)Σ(ŷ−y)². We first ask: how does L change when ŷ changes?',
+    hlW: false, hlYhat: false, hlL: true, hlDydw: false, hlDLdy: true, hlChain: false,
+  },
+  {
+    desc: '<strong>Step 1 — ∂L/∂ŷᵢ:</strong> For MSE, L = (1/N)Σ(ŷᵢ−yᵢ)², the per-sample derivative is <span class="text-amber-700 font-semibold">(2/N)(ŷᵢ−yᵢ)</span>. Each sample contributes its own error signal — zero only when ŷᵢ = yᵢ for that sample.',
+    hlW: false, hlYhat: true, hlL: true, hlDydw: false, hlDLdy: true, hlChain: false,
+  },
+  {
+    desc: '<strong>Step 2 — ∂ŷ/∂w<sub>j</sub>:</strong> The prediction ŷ = Σwᵢxᵢ + b is linear. Differentiating with respect to w<sub>j</sub> gives <span class="text-blue-700 font-semibold">x<sub>j</sub></span> — just the j-th feature. All other terms vanish.',
+    hlW: true, hlYhat: true, hlL: false, hlDydw: true, hlDLdy: false, hlChain: false,
+  },
+  {
+    desc: '<strong>Step 3 — Chain rule:</strong> Sum the per-sample products: <span class="text-emerald-700 font-semibold">∂L/∂w = (2/N)Σᵢ (ŷᵢ−yᵢ)·xᵢ</span>. Each sample contributes its own error × feature value. Drag the w slider to see how the gradient changes.',
+    hlW: true, hlYhat: true, hlL: true, hlDydw: true, hlDLdy: true, hlChain: true,
+  },
+];
+
+function crCalc() {
+  const w = parseFloat(document.getElementById('cr-w-slider').value);
+  let sumErr = 0, sumGrad = 0;
+  CR_DATA.forEach(function(d) {
+    const err = w * d.x - d.y;
+    sumErr  += err;
+    sumGrad += err * d.x;   // each sample contributes (ŷᵢ−yᵢ)·xᵢ
+  });
+  const meanErr = sumErr / N_CR;
+  const dLdy  = 2 * meanErr;           // ∂L/∂ŷ = (2/N)Σ(ŷ−y)
+  const dLdw  = 2 * sumGrad / N_CR;    // ∂L/∂w = (2/N)Σ(ŷᵢ−yᵢ)·xᵢ
+  return { w, meanErr, dLdy, dLdw };
+}
+
+function crApplyHL(s) {
+  function hl(id, cls, on) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    ['hl-amber','hl-blue','hl-emerald'].forEach(function(c){ el.classList.remove(c); });
+    if (on) el.classList.add(cls);
+  }
+  hl('cnode-L',    'hl-amber',   s.hlL);
+  hl('cnode-yhat', 'hl-blue',    s.hlYhat);
+  hl('cnode-w',    'hl-emerald', s.hlW);
+  hl('albl-dLdy',  'hl-amber',   s.hlDLdy);
+  hl('albl-dydw',  'hl-blue',    s.hlDydw);
+  hl('albl-chain', 'hl-emerald', s.hlChain);
+}
+
+function crRender() {
+  const n = crCalc();
+  document.getElementById('cr-w-lbl').textContent  = n.w.toFixed(2);
+  document.getElementById('cr-w-show').textContent  = n.w.toFixed(2);
+  document.getElementById('cr-step-lbl').textContent = 'step ' + crStepIdx + ' / 3';
+
+  const show = function(id, val) { document.getElementById(id).textContent = val; };
+  show('cr-err-show',  crStepIdx >= 1 ? n.meanErr.toFixed(4)             : '—');
+  show('cr-dLdy-show', crStepIdx >= 1 ? n.dLdy.toFixed(4)               : '—');
+  show('cr-xj-show',   crStepIdx >= 2 ? 'xᵢ varies (−2 … 2 in dataset)' : '—');
+  show('cr-dLdw-show', crStepIdx >= 3 ? n.dLdw.toFixed(4)               : '—');
+
+  if (crStepIdx === 0) {
+    document.getElementById('cr-desc').innerHTML = 'Click ▶ Next to begin the derivation.';
+    ['cnode-L','cnode-yhat','cnode-w','albl-dLdy','albl-dydw','albl-chain'].forEach(function(id) {
+      const el = document.getElementById(id);
+      if (el) ['hl-amber','hl-blue','hl-emerald'].forEach(function(c){ el.classList.remove(c); });
+    });
+  } else {
+    document.getElementById('cr-desc').innerHTML = CR_STEPS[crStepIdx - 1].desc;
+    crApplyHL(CR_STEPS[crStepIdx - 1]);
+  }
+}
+
+function crStep(d) { crStepIdx = Math.max(0, Math.min(3, crStepIdx + d)); crRender(); }
+function crReset() { crStepIdx = 0; crRender(); }
+
+// ═══════════════════════════════════════════════════════
+//  §2a  REGRESSION CANVAS
+// ═══════════════════════════════════════════════════════
+let regE = 2.0, regDrag = false;
+
+function drawRegression(ctx, W, H) {
+  ctx.clearRect(0, 0, W, H);
+  const PL = 52, PR = 20, PT = 18, PB = 38;
+  const pw = W - PL - PR, ph = H - PT - PB;
+  const eMin = -3, eMax = 3, lMax = 9;
+
+  const ex = function(e) { return PL + (e - eMin) / (eMax - eMin) * pw; };
+  const ey = function(l) { return PT + ph - Math.min(l, lMax) / lMax * ph; };
+
+  // Grid lines
+  ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 1;
+  [3,6,9].forEach(function(v) {
+    ctx.beginPath(); ctx.moveTo(PL, ey(v)); ctx.lineTo(PL + pw, ey(v)); ctx.stroke();
+  });
+
+  // Axes
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PL, PT); ctx.lineTo(PL, PT + ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(PL, PT + ph); ctx.lineTo(PL + pw, PT + ph); ctx.stroke();
+
+  ctx.fillStyle = '#64748b'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('error  e = ŷ − y', PL + pw / 2, H - 6);
+  ctx.save(); ctx.translate(14, PT + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('loss', 0, 0); ctx.restore();
+
+  [-3,-2,-1,0,1,2,3].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(v, ex(v), PT + ph + 15);
+  });
+  [0,3,6,9].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, PL - 5, ey(v) + 4);
+  });
+
+  // Zero line
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+  ctx.beginPath(); ctx.moveTo(ex(0), PT); ctx.lineTo(ex(0), PT + ph); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // MSE curve
+  ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const e = eMin + (eMax - eMin) * i / 300;
+    if (i === 0) ctx.moveTo(ex(e), ey(e * e)); else ctx.lineTo(ex(e), ey(e * e));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#3b82f6'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('MSE = e²', ex(1.7) + 5, ey(1.7 * 1.7) - 7);
+
+  // MAE curve
+  ctx.strokeStyle = '#f97316'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const e = eMin + (eMax - eMin) * i / 300;
+    if (i === 0) ctx.moveTo(ex(e), ey(Math.abs(e))); else ctx.lineTo(ex(e), ey(Math.abs(e)));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#f97316'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('MAE = |e|', ex(1.7) + 5, ey(1.7) + 14);
+
+  // Vertical guide at current e
+  const x0 = ex(regE);
+  ctx.strokeStyle = '#fbbf24'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(x0, PT); ctx.lineTo(x0, PT + ph); ctx.stroke();
+  ctx.setLineDash([]);
+
+  // MSE dot
+  ctx.beginPath(); ctx.arc(x0, ey(regE * regE), 7, 0, Math.PI * 2);
+  ctx.fillStyle = '#3b82f6'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+  // MAE dot
+  ctx.beginPath(); ctx.arc(x0, ey(Math.abs(regE)), 7, 0, Math.PI * 2);
+  ctx.fillStyle = '#f97316'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+
+  // Update panel + keep slider in sync with drag
+  const N = 20;
+  document.getElementById('reg-e').textContent    = regE.toFixed(3);
+  document.getElementById('reg-mse').textContent  = (regE * regE).toFixed(3);
+  document.getElementById('reg-dmse').textContent = ((2 / N) * regE).toFixed(4);
+  document.getElementById('reg-mae').textContent  = Math.abs(regE).toFixed(3);
+  document.getElementById('reg-dmae').textContent = (Math.sign(regE) / N).toFixed(4);
+  const sl = document.getElementById('reg-e-slider');
+  if (sl && parseFloat(sl.value) !== regE) sl.value = regE;
+  const lbl = document.getElementById('reg-e-lbl');
+  if (lbl) lbl.textContent = regE.toFixed(3);
+}
+
+function regSliderUpdate() {
+  regE = parseFloat(document.getElementById('reg-e-slider').value);
+  redraw('regression-canvas', drawRegression);
+}
+
+(function setupRegDrag() {
+  const cv = document.getElementById('regression-canvas');
+  const PAD_L = 52, PAD_R = 20;
+  function eFromX(clientX) {
+    const r = cv.getBoundingClientRect();
+    const pw = r.width - PAD_L - PAD_R;
+    return Math.max(-3, Math.min(3, -3 + (clientX - r.left - PAD_L) / pw * 6));
+  }
+  cv.addEventListener('mousedown', function(ev) { regDrag = true; regE = eFromX(ev.clientX); redraw('regression-canvas', drawRegression); });
+  window.addEventListener('mousemove', function(ev) { if (!regDrag) return; regE = eFromX(ev.clientX); redraw('regression-canvas', drawRegression); });
+  window.addEventListener('mouseup', function() { regDrag = false; });
+  cv.addEventListener('touchstart', function(ev) { ev.preventDefault(); regDrag = true; regE = eFromX(ev.touches[0].clientX); redraw('regression-canvas', drawRegression); }, { passive: false });
+  window.addEventListener('touchmove', function(ev) { if (!regDrag) return; ev.preventDefault(); regE = eFromX(ev.touches[0].clientX); redraw('regression-canvas', drawRegression); }, { passive: false });
+  window.addEventListener('touchend', function() { regDrag = false; });
+})();
+
+// ═══════════════════════════════════════════════════════
+//  §2b  CLASSIFICATION CANVAS
+// ═══════════════════════════════════════════════════════
+let clsZ = 0.5;
+
+function drawClassification(ctx, W, H) {
+  ctx.clearRect(0, 0, W, H);
+  const PL = 48, PR = 20, PT = 18, PB = 38;
+  const pw = W - PL - PR, ph = H - PT - PB;
+  const zMin = -2, zMax = 3, lMax = 4;
+
+  const zx = function(z) { return PL + (z - zMin) / (zMax - zMin) * pw; };
+  const ly = function(l) { return PT + ph - Math.min(l, lMax) / lMax * ph; };
+
+  // Light grid
+  ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 1;
+  [1,2,3,4].forEach(function(v) {
+    ctx.beginPath(); ctx.moveTo(PL, ly(v)); ctx.lineTo(PL + pw, ly(v)); ctx.stroke();
+  });
+
+  // Axes
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PL, PT); ctx.lineTo(PL, PT + ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(PL, PT + ph); ctx.lineTo(PL + pw, PT + ph); ctx.stroke();
+
+  ctx.fillStyle = '#64748b'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('margin  z = y · ŷ', PL + pw / 2, H - 6);
+  ctx.save(); ctx.translate(14, PT + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('loss', 0, 0); ctx.restore();
+
+  [-2,-1,0,1,2,3].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(v, zx(v), PT + ph + 15);
+  });
+  [0,1,2,3,4].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, PL - 5, ly(v) + 4);
+  });
+
+  // Decision boundary z=0
+  ctx.strokeStyle = '#cbd5e1'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(zx(0), PT); ctx.lineTo(zx(0), PT + ph); ctx.stroke();
+  // SVM margin z=1
+  ctx.strokeStyle = '#fca5a5'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(zx(1), PT); ctx.lineTo(zx(1), PT + ph); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#ef4444'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('z=1', zx(1), PT + 10);
+
+  // 0/1 loss (gray dashed)
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.setLineDash([5,4]);
+  ctx.beginPath(); ctx.moveTo(PL, ly(1)); ctx.lineTo(zx(0) - 1, ly(1));
+  ctx.moveTo(zx(0) + 1, ly(0)); ctx.lineTo(PL + pw, ly(0)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('0/1', PL + 4, ly(1) - 5);
+
+  // Hinge
+  ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const z = zMin + (zMax - zMin) * i / 300;
+    const l = Math.max(0, 1 - z);
+    if (i === 0) ctx.moveTo(zx(z), ly(l)); else ctx.lineTo(zx(z), ly(l));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#16a34a'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('Hinge', zx(0.5), ly(0.5) - 7);
+
+  // Logistic
+  ctx.strokeStyle = '#9333ea'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const z = zMin + (zMax - zMin) * i / 300;
+    const l = Math.log(1 + Math.exp(-z));
+    if (i === 0) ctx.moveTo(zx(z), ly(l)); else ctx.lineTo(zx(z), ly(l));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#9333ea'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Logistic', zx(-1.8), ly(Math.log(1 + Math.exp(1.8))) - 7);
+
+  // Moving dots
+  const cx = zx(clsZ);
+  const hL = Math.max(0, 1 - clsZ);
+  const lL = Math.log(1 + Math.exp(-clsZ));
+  const o1L = clsZ >= 0 ? 0 : 1;
+  [[ly(o1L),'#94a3b8'],[ly(hL),'#16a34a'],[ly(lL),'#9333ea']].forEach(function(pair) {
+    ctx.beginPath(); ctx.arc(cx, pair[0], 6, 0, Math.PI * 2);
+    ctx.fillStyle = pair[1]; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+  });
+
+  document.getElementById('cls-z-lbl').textContent   = clsZ.toFixed(2);
+  document.getElementById('cls-01').textContent       = clsZ >= 0 ? '0' : '1';
+  document.getElementById('cls-hinge').textContent    = hL.toFixed(3);
+  document.getElementById('cls-log').textContent      = lL.toFixed(3);
+}
+
+function clsUpdateZ() {
+  clsZ = parseFloat(document.getElementById('cls-z-slider').value);
+  redraw('classification-canvas', drawClassification);
+}
+
+// ═══════════════════════════════════════════════════════
+//  §2c  CCE CANVAS
+// ═══════════════════════════════════════════════════════
+function softmax(zs) {
+  const m = Math.max(...zs);
+  const e = zs.map(function(z) { return Math.exp(z - m); });
+  const s = e.reduce(function(a,b) { return a + b; }, 0);
+  return e.map(function(v) { return v / s; });
+}
+
+function drawCCE(ctx, W, H) {
+  const zs = [
+    parseFloat(document.getElementById('cce-z1').value),
+    parseFloat(document.getElementById('cce-z2').value),
+    parseFloat(document.getElementById('cce-z3').value),
+  ];
+  const ps  = softmax(zs);
+  const lv  = -Math.log(ps[0]);
+
+  document.getElementById('cce-z1-val').textContent = zs[0].toFixed(1);
+  document.getElementById('cce-z2-val').textContent = zs[1].toFixed(1);
+  document.getElementById('cce-z3-val').textContent = zs[2].toFixed(1);
+  document.getElementById('cce-p1').textContent     = ps[0].toFixed(3);
+  document.getElementById('cce-p2').textContent     = ps[1].toFixed(3);
+  document.getElementById('cce-p3').textContent     = ps[2].toFixed(3);
+  document.getElementById('cce-loss').textContent   = lv.toFixed(3);
+
+  ctx.clearRect(0, 0, W, H);
+  const splitY = Math.round(H * 0.46);
+
+  // ── Top: softmax bars ──
+  const BP = { l: 30, r: 20, t: 18, b: 6 };
+  const bw = W - BP.l - BP.r, bh = splitY - BP.t - BP.b;
+  const COLS = ['#f43f5e','#6366f1','#0ea5e9'];
+  const LABS = ['class 1 ✓','class 2','class 3'];
+  const nB = 3, barW = bw / nB * 0.55, gap = bw / nB;
+
+  ctx.fillStyle = '#475569'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Softmax output', BP.l, BP.t - 4);
+
+  ps.forEach(function(p, i) {
+    const x = BP.l + i * gap + (gap - barW) / 2;
+    const barH = Math.max(bh * p, 2);
+    const y = BP.t + bh - barH;
+    ctx.fillStyle = COLS[i]; ctx.globalAlpha = 0.85;
+    ctx.fillRect(x, y, barW, barH);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#1e293b'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText((p * 100).toFixed(1) + '%', x + barW / 2, y - 3);
+    ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif';
+    ctx.fillText(LABS[i], x + barW / 2, BP.t + bh + 12);
+  });
+
+  // Divider
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(0, splitY); ctx.lineTo(W, splitY); ctx.stroke();
+
+  // ── Bottom: -log(p_c) curve ──
+  const CP = { l: 50, r: 20, t: 12, b: 30 };
+  const cpw = W - CP.l - CP.r, cph = H - splitY - CP.t - CP.b;
+  const pMin = 0.01, lMaxC = 4.6;
+
+  const px  = function(p) { return CP.l + (p - pMin) / (1 - pMin) * cpw; };
+  const ply = function(l) { return splitY + CP.t + cph - Math.min(l, lMaxC) / lMaxC * cph; };
+
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(CP.l, splitY + CP.t); ctx.lineTo(CP.l, splitY + CP.t + cph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(CP.l, splitY + CP.t + cph); ctx.lineTo(CP.l + cpw, splitY + CP.t + cph); ctx.stroke();
+
+  ctx.fillStyle = '#64748b'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('p_correct (probability of correct class)', CP.l + cpw / 2, H - 7);
+  ctx.save(); ctx.translate(14, splitY + CP.t + cph / 2); ctx.rotate(-Math.PI / 2);
+  ctx.fillText('−log(p)', 0, 0); ctx.restore();
+
+  [0.25, 0.5, 0.75, 1].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(v, px(v), splitY + CP.t + cph + 14);
+  });
+
+  // Light grid
+  ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 1;
+  [1,2,3,4].forEach(function(v) {
+    ctx.beginPath(); ctx.moveTo(CP.l, ply(v)); ctx.lineTo(CP.l + cpw, ply(v)); ctx.stroke();
+    ctx.fillStyle = '#94a3b8'; ctx.font = '9px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, CP.l - 4, ply(v) + 4);
+  });
+
+  // Curve
+  ctx.strokeStyle = '#f43f5e'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 1; i <= 300; i++) {
+    const p = pMin + (1 - pMin) * i / 300;
+    const l = -Math.log(p);
+    if (i === 1) ctx.moveTo(px(p), ply(l)); else ctx.lineTo(px(p), ply(l));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#f43f5e'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('L = −log(p)', px(0.35) + 5, ply(-Math.log(0.35)) - 7);
+
+  // Current dot
+  const pC = Math.max(ps[0], pMin);
+  const lC = -Math.log(pC);
+  ctx.beginPath(); ctx.arc(px(pC), ply(lC), 7, 0, Math.PI * 2);
+  ctx.fillStyle = '#f43f5e'; ctx.fill(); ctx.strokeStyle = 'white'; ctx.lineWidth = 2; ctx.stroke();
+  // value label
+  ctx.fillStyle = '#be123c'; ctx.font = 'bold 10px sans-serif';
+  const lblX = px(pC) > CP.l + cpw - 60 ? px(pC) - 55 : px(pC) + 10;
+  ctx.textAlign = 'left';
+  ctx.fillText('L=' + lC.toFixed(2), lblX, ply(lC) - 5);
+}
+
+function cceUpdate() { redraw('cce-canvas', drawCCE); }
+
+// ═══════════════════════════════════════════════════════
+//  ASIDE — COMPARISON CANVAS
+// ═══════════════════════════════════════════════════════
+function drawCompare(ctx, W, H) {
+  ctx.clearRect(0, 0, W, H);
+  const PL = 48, PR = 20, PT = 18, PB = 40;
+  const pw = W - PL - PR, ph = H - PT - PB;
+  const zMin = -2, zMax = 3, lMax = 5;
+
+  const zx = function(z) { return PL + (z - zMin) / (zMax - zMin) * pw; };
+  const ly = function(l) { return PT + ph - Math.min(l, lMax) / lMax * ph; };
+
+  // Grid
+  ctx.strokeStyle = '#f1f5f9'; ctx.lineWidth = 1;
+  [1,2,3,4,5].forEach(function(v) {
+    ctx.beginPath(); ctx.moveTo(PL, ly(v)); ctx.lineTo(PL + pw, ly(v)); ctx.stroke();
+  });
+
+  // Axes
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 1;
+  ctx.beginPath(); ctx.moveTo(PL, PT); ctx.lineTo(PL, PT + ph); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(PL, PT + ph); ctx.lineTo(PL + pw, PT + ph); ctx.stroke();
+
+  ctx.fillStyle = '#64748b'; ctx.font = '11px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('margin  z = y · ŷ', PL + pw / 2, H - 8);
+  ctx.save(); ctx.translate(14, PT + ph / 2); ctx.rotate(-Math.PI / 2); ctx.fillText('loss', 0, 0); ctx.restore();
+
+  [-2,-1,0,1,2,3].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText(v, zx(v), PT + ph + 15);
+  });
+  [0,1,2,3,4,5].forEach(function(v) {
+    ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'right';
+    ctx.fillText(v, PL - 5, ly(v) + 4);
+  });
+
+  // Decision and margin lines
+  ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1; ctx.setLineDash([4,4]);
+  ctx.beginPath(); ctx.moveTo(zx(0), PT); ctx.lineTo(zx(0), PT + ph); ctx.stroke();
+  ctx.strokeStyle = '#fca5a5';
+  ctx.beginPath(); ctx.moveTo(zx(1), PT); ctx.lineTo(zx(1), PT + ph); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#ef4444'; ctx.font = '9px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('z=1', zx(1), PT + 10);
+
+  // 0/1 loss
+  ctx.strokeStyle = '#94a3b8'; ctx.lineWidth = 2; ctx.setLineDash([5,4]);
+  ctx.beginPath(); ctx.moveTo(PL, ly(1)); ctx.lineTo(zx(0) - 1, ly(1));
+  ctx.moveTo(zx(0) + 1, ly(0)); ctx.lineTo(PL + pw, ly(0)); ctx.stroke();
+  ctx.setLineDash([]);
+  ctx.fillStyle = '#94a3b8'; ctx.font = '10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('0/1', PL + 4, ly(1) - 6);
+
+  // MSE in margin view: max(0, 1-z)^2 / 2  (clipped squared loss, zeroed for confident predictions)
+  ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const z = zMin + (zMax - zMin) * i / 300;
+    const l = Math.max(0, (1 - z)) * Math.max(0, (1 - z)) / 2;
+    if (i === 0) ctx.moveTo(zx(z), ly(l)); else ctx.lineTo(zx(z), ly(l));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#3b82f6'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'right';
+  ctx.fillText('MSE', zx(-0.2), ly(0.4 * 0.4 / 2) - 8);
+
+  // Hinge
+  ctx.strokeStyle = '#16a34a'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const z = zMin + (zMax - zMin) * i / 300;
+    const l = Math.max(0, 1 - z);
+    if (i === 0) ctx.moveTo(zx(z), ly(l)); else ctx.lineTo(zx(z), ly(l));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#16a34a'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Hinge', zx(-1.0), ly(2.0) - 7);
+
+  // Logistic
+  ctx.strokeStyle = '#9333ea'; ctx.lineWidth = 2.5;
+  ctx.beginPath();
+  for (let i = 0; i <= 300; i++) {
+    const z = zMin + (zMax - zMin) * i / 300;
+    const l = Math.log(1 + Math.exp(-z));
+    if (i === 0) ctx.moveTo(zx(z), ly(l)); else ctx.lineTo(zx(z), ly(l));
+  }
+  ctx.stroke();
+  ctx.fillStyle = '#9333ea'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+  ctx.fillText('Logistic', zx(-1.8), ly(Math.log(1 + Math.exp(1.8))) - 8);
+
+  // Upper-bound annotation
+  ctx.fillStyle = '#475569'; ctx.font = '10px sans-serif'; ctx.textAlign = 'center';
+  ctx.fillText('Hinge & Logistic are convex upper bounds of 0/1 loss', PL + pw / 2, PT + 14);
+}
+
+// ═══════════════════════════════════════════════════════
+//  CANVAS INFRASTRUCTURE
+// ═══════════════════════════════════════════════════════
+function redraw(id, fn) {
+  const c = document.getElementById(id);
+  if (!c) return;
+  const dpr  = window.devicePixelRatio || 1;
+  const w    = Math.max(c.getBoundingClientRect().width, 1);
+  const h    = parseFloat(c.style.height) || 260;
+  const newW = Math.round(w * dpr);
+  const newH = Math.round(h * dpr);
+  // Only reallocate the backing store when dimensions actually change
+  if (c.width !== newW || c.height !== newH) {
+    c.width        = newW;
+    c.height       = newH;
+    c.style.width  = w + 'px';
+    c.style.height = h + 'px';
+  }
+  const ctx = c.getContext('2d');
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.scale(dpr, dpr);
+  fn(ctx, w, h);
+}
+
+const CANVASES = [
+  { id: 'regression-canvas',     fn: drawRegression },
+  { id: 'classification-canvas', fn: drawClassification },
+  { id: 'cce-canvas',            fn: drawCCE },
+  { id: 'compare-canvas',        fn: drawCompare },
+];
+
+function resizeAll() {
+  CANVASES.forEach(function(c) { redraw(c.id, c.fn); });
+}
+
+// ═══════════════════════════════════════════════════════
+//  TOC HIGHLIGHT
+// ═══════════════════════════════════════════════════════
+(function setupToc() {
+  const all = document.querySelectorAll('.toc-link');
+  const map = {};
+  all.forEach(function(a) {
+    const h = a.getAttribute('href');
+    if (h && h[0] === '#') map[h.slice(1)] = a;
+  });
+  const obs = new IntersectionObserver(function(entries) {
+    entries.forEach(function(e) {
+      if (e.isIntersecting) {
+        all.forEach(function(a) { a.classList.remove('active'); });
+        if (map[e.target.id]) map[e.target.id].classList.add('active');
+      }
+    });
+  }, { rootMargin: '-30% 0px -60% 0px', threshold: 0 });
+  ['chainrule','zoo'].forEach(function(id) {
+    const el = document.getElementById(id);
+    if (el) obs.observe(el);
+  });
+})();
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+document.addEventListener('DOMContentLoaded', function() {
+  crRender();
+});
+
+window.addEventListener('load', function() {
+  resizeAll();
+});
+window.addEventListener('resize', resizeAll);
+</script>
+</body>
+</html>

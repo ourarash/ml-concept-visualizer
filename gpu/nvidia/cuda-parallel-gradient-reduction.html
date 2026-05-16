@@ -1,0 +1,703 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #42 by Adwaith Nirmal (@anirmal-usc): Add CUDA Parallel Gradient Reduction visualizer to gradient-descent/. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>CUDA Parallel Gradient Reduction</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet" />
+  <style>
+    body {
+      background-color: #0f172a;
+      color: #f8fafc;
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      overflow-x: hidden;
+    }
+    .glass-panel {
+      background: rgba(30, 41, 59, 0.75);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    input[type=range] { accent-color: #6366f1; }
+    .tab-btn { transition: all 0.18s ease; }
+    .tab-btn.active {
+      background: rgba(99, 102, 241, 0.2);
+      border-color: rgba(99, 102, 241, 0.6);
+      color: #a5b4fc;
+    }
+    .code-block {
+      font-family: 'Courier New', Courier, monospace;
+      font-size: 0.76rem;
+      line-height: 1.7;
+      background: rgba(2, 6, 23, 0.85);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 0.75rem;
+      padding: 1rem;
+      overflow-x: auto;
+      white-space: pre;
+    }
+    .code-line { transition: background 0.22s ease; border-radius: 3px; }
+    .code-line.highlight { background: rgba(99,102,241,0.28); }
+    .mem-badge {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      padding: 0.18rem 0.55rem; border-radius: 9999px;
+      font-size: 0.7rem; font-weight: 600;
+    }
+    canvas { display: block; }
+    .metric-card {
+      background: rgba(15, 23, 42, 0.7);
+      border: 1px solid rgba(255,255,255,0.07);
+      border-radius: 0.75rem;
+      padding: 0.75rem 1rem;
+    }
+    .phase-dot {
+      width: 0.55rem; height: 0.55rem; border-radius: 9999px;
+      transition: background 0.22s;
+    }
+    @keyframes pulse-glow {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(99,102,241,0); }
+      50% { box-shadow: 0 0 14px 4px rgba(99,102,241,0.45); }
+    }
+    .glow { animation: pulse-glow 1.2s ease infinite; }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+
+  <!-- HEADER -->
+  <header class="glass-panel px-5 py-4 border-b border-slate-700/60 flex flex-col md:flex-row md:items-center md:justify-between gap-3">
+    <div>
+      <h1 class="text-2xl font-bold text-indigo-300">CUDA Parallel Gradient Reduction</h1>
+      <p class="text-slate-400 text-sm mt-0.5">
+        How a GPU sums gradients across a batch — registers → shared memory → global memory
+      </p>
+    </div>
+    <div class="flex flex-wrap gap-2 text-xs">
+      <span class="mem-badge bg-blue-900/50 border border-blue-500/40 text-blue-300">
+        <span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span> Registers
+      </span>
+      <span class="mem-badge bg-amber-900/40 border border-amber-500/40 text-amber-300">
+        <span class="w-2 h-2 rounded-full bg-amber-400 inline-block"></span> Shared Memory
+      </span>
+      <span class="mem-badge bg-rose-900/40 border border-rose-500/40 text-rose-300">
+        <span class="w-2 h-2 rounded-full bg-rose-400 inline-block"></span> Global Memory
+      </span>
+    </div>
+  </header>
+
+  <div class="flex flex-col lg:flex-row flex-1 gap-0">
+
+    <!-- LEFT SIDEBAR: Controls -->
+    <aside class="w-full lg:w-72 glass-panel border-r border-slate-700/60 p-5 flex flex-col gap-5 overflow-y-auto">
+
+      <section>
+        <div class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Strategy</div>
+        <div class="space-y-2">
+          <button class="tab-btn active w-full text-left px-4 py-3 rounded-xl border border-slate-600 text-sm" data-strategy="warp_shuffle">
+            <div class="font-semibold text-indigo-300">Warp Shuffle</div>
+            <div class="text-xs text-slate-400 mt-0.5">__shfl_down_sync → shared → global</div>
+          </button>
+          <button class="tab-btn w-full text-left px-4 py-3 rounded-xl border border-slate-600 text-sm" data-strategy="shared_mem">
+            <div class="font-semibold text-amber-300">Shared Memory Tree</div>
+            <div class="text-xs text-slate-400 mt-0.5">Classic strided tree in shared mem</div>
+          </button>
+          <button class="tab-btn w-full text-left px-4 py-3 rounded-xl border border-slate-600 text-sm" data-strategy="naive">
+            <div class="font-semibold text-rose-300">Naive atomicAdd</div>
+            <div class="text-xs text-slate-400 mt-0.5">Every thread hits global memory</div>
+          </button>
+        </div>
+      </section>
+
+      <section class="space-y-4 bg-slate-900/50 rounded-xl border border-slate-700/60 p-4">
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span>Threads / block</span>
+            <span id="threadsLabel" class="text-indigo-300 font-medium">32</span>
+          </div>
+          <input id="threadsRange" type="range" min="1" max="3" step="1" value="1" class="w-full" />
+          <div class="flex justify-between text-xs text-slate-500 mt-1">
+            <span>32 (1 warp)</span><span>64</span><span>128</span>
+          </div>
+        </div>
+        <div>
+          <div class="flex justify-between text-sm mb-1">
+            <span>Num blocks</span>
+            <span id="blocksLabel" class="text-indigo-300 font-medium">4</span>
+          </div>
+          <input id="blocksRange" type="range" min="1" max="4" step="1" value="2" class="w-full" />
+          <div class="flex justify-between text-xs text-slate-500 mt-1">
+            <span>1</span><span>2</span><span>3</span><span>4</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="space-y-2">
+        <div class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-2">Playback</div>
+        <button id="playBtn" class="w-full py-2.5 px-4 bg-indigo-600 hover:bg-indigo-500 rounded-xl font-medium text-sm transition flex items-center justify-center gap-2">
+          <i class="fas fa-play"></i> Play Animation
+        </button>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="prevBtn" class="py-2 px-4 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm transition">
+            <i class="fas fa-step-backward"></i> Prev
+          </button>
+          <button id="nextBtn" class="py-2 px-4 bg-slate-700 hover:bg-slate-600 rounded-xl text-sm transition">
+            Next <i class="fas fa-step-forward"></i>
+          </button>
+        </div>
+        <button id="resetBtn" class="w-full py-2 px-4 bg-slate-800 hover:bg-slate-700 rounded-xl text-sm transition">
+          <i class="fas fa-undo mr-1"></i> Reset
+        </button>
+      </section>
+
+      <section>
+        <div class="text-xs font-semibold uppercase tracking-widest text-slate-400 mb-3">Phase Progress</div>
+        <div id="phaseList" class="space-y-1.5 text-sm"></div>
+      </section>
+
+      <section class="grid grid-cols-2 gap-2 text-sm">
+        <div class="metric-card text-center">
+          <div class="text-xs text-slate-500 uppercase tracking-wider">Global reads</div>
+          <div id="metricGlobal" class="text-xl font-bold text-rose-300 mt-1">0</div>
+        </div>
+        <div class="metric-card text-center">
+          <div class="text-xs text-slate-500 uppercase tracking-wider">Sync barriers</div>
+          <div id="metricSync" class="text-xl font-bold text-amber-300 mt-1">0</div>
+        </div>
+        <div class="metric-card text-center col-span-2">
+          <div class="text-xs text-slate-500 uppercase tracking-wider">Steps to complete</div>
+          <div id="metricSteps" class="text-xl font-bold text-indigo-300 mt-1">0 / 0</div>
+        </div>
+      </section>
+
+    </aside>
+
+    <!-- MAIN: Canvas + Inspector -->
+    <main class="flex-1 flex flex-col min-h-0 overflow-hidden">
+
+      <!-- Canvas area -->
+      <div class="flex-1 relative bg-slate-950/40 p-4 overflow-auto">
+        <canvas id="mainCanvas" class="w-full rounded-2xl border border-slate-700/50"></canvas>
+      </div>
+
+      <!-- Inspector bar -->
+      <div class="glass-panel border-t border-slate-700/60 p-4 md:p-5">
+        <div class="flex flex-col md:flex-row md:items-start gap-4">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-3 mb-1">
+              <span id="phaseIcon" class="text-xl">📡</span>
+              <h3 id="phaseTitle" class="font-semibold text-lg text-indigo-200">Thread Initialization</h3>
+              <span id="memTag" class="mem-badge bg-blue-900/50 border border-blue-500/40 text-blue-300">
+                <span class="w-2 h-2 rounded-full bg-blue-400 inline-block"></span> Registers
+              </span>
+            </div>
+            <p id="phaseDesc" class="text-sm text-slate-300 leading-6 max-w-2xl">Each thread computes its own partial gradient for one element of the batch. All gradient values live in thread-private registers at this stage — zero global memory traffic.</p>
+          </div>
+          <div class="shrink-0 w-full md:w-80">
+            <div class="code-block" id="codeBlock"></div>
+          </div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+<script>
+const state = {
+  strategy: 'warp_shuffle',
+  threadsPerBlock: 32,
+  numBlocks: 4,
+  phase: 0,
+  playing: false,
+  timer: null,
+  values: [],
+};
+
+// ---- Strategy definitions ----
+function getPhases(strategy, threadsPerBlock) {
+  const warps = threadsPerBlock / 32;
+  if (strategy === 'warp_shuffle') {
+    const shufflePhases = [5,4,3,2,1].map((offset, i) => ({
+      label: `Warp shuffle offset=${offset}`,
+      icon: '🔀',
+      mem: 'registers',
+      globalReads: 0, syncBarriers: 0,
+      desc: `__shfl_down_sync(mask, val, ${offset}): each active lane adds the value from the lane ${offset} positions ahead. No shared memory touched — pure register-to-register exchange within the warp.`,
+      code: `// Warp-level reduce (registers only)\nfor (int offset = 16; offset >= 1; offset >>= 1) {\n  val += __shfl_down_sync(0xFFFFFFFF,\n                          val, offset);\n}${offset === 1 ? '\n// lane 0 now holds warp sum' : ''}`,
+      highlight: [1,2,3],
+      reduceOffset: offset,
+      reduceType: 'warp',
+    }));
+    const crossWarpPhases = warps > 1 ? [{
+      label: 'Write warp sums → shared mem',
+      icon: '💾',
+      mem: 'shared',
+      globalReads: 0, syncBarriers: 1,
+      desc: `Lane 0 of each warp writes its partial sum into shared memory (one slot per warp). __syncthreads() ensures all warp sums are visible to all threads before the next step.`,
+      code: `// Lane 0 stores warp result\nif (laneId == 0)\n  sdata[warpId] = val;\n__syncthreads();`,
+      highlight: [1,2,3],
+      reduceType: 'write_shared',
+    }, {
+      label: 'Reduce across warp sums',
+      icon: '🔗',
+      mem: 'shared',
+      globalReads: 0, syncBarriers: 1,
+      desc: `Thread 0 reads all ${warps} warp sums from shared memory and adds them. This is a serial loop across only ${warps} values — very fast since warps ≤ 32.`,
+      code: `// Single thread reduces warp sums\nif (threadIdx.x == 0) {\n  for (int i = 1; i < numWarps; i++)\n    sdata[0] += sdata[i];\n}`,
+      highlight: [1,2,3,4],
+      reduceType: 'reduce_warps',
+    }] : [];
+    return [
+      { label: 'Thread init — partial grads', icon: '⚡', mem: 'registers', globalReads: threadsPerBlock, syncBarriers: 0,
+        desc: `Each thread loads one batch-element's gradient from global memory into its register. This is a coalesced read — threads in the same warp access consecutive addresses.`,
+        code: `int tid = blockIdx.x * blockDim.x + threadIdx.x;\nfloat val = grad_input[tid]; // coalesced load`,
+        highlight: [0,1], reduceType: 'init' },
+      ...shufflePhases,
+      ...crossWarpPhases,
+      { label: 'Block result → global mem', icon: '🌐', mem: 'global', globalReads: 0, syncBarriers: 0,
+        desc: `Thread 0 of the block writes the block's partial sum to global memory. With ${state.numBlocks} blocks, there will be ${state.numBlocks} partial sums — a final grid-level atomicAdd or second kernel handles the last reduction.`,
+        code: `if (threadIdx.x == 0)\n  atomicAdd(grad_output, sdata[0]);`,
+        highlight: [0,1], reduceType: 'write_global' },
+    ];
+  }
+  if (strategy === 'shared_mem') {
+    const strides = [];
+    for (let s = threadsPerBlock / 2; s >= 1; s >>= 1) {
+      strides.push({ stride: s });
+    }
+    return [
+      { label: 'Thread init — partial grads', icon: '⚡', mem: 'registers', globalReads: threadsPerBlock, syncBarriers: 0,
+        desc: `Each thread computes a partial gradient and writes it directly to shared memory at index threadIdx.x.`,
+        code: `int tid = blockIdx.x * blockDim.x + threadIdx.x;\nsdata[threadIdx.x] = grad_input[tid];\n__syncthreads();`, highlight: [0,1,2], reduceType: 'init' },
+      ...strides.map(({stride}, i) => ({
+        label: `Tree reduce stride=${stride}`,
+        icon: '🌲', mem: 'shared', globalReads: 0, syncBarriers: 1,
+        desc: `Active threads with index < ${stride} each add the element ${stride} positions ahead in shared memory. Half the threads become idle each step — classic binary tree reduction.`,
+        code: `for (int s = blockDim.x/2; s > 0; s >>= 1) {\n  if (threadIdx.x < s)\n    sdata[threadIdx.x] += sdata[threadIdx.x + s];\n  __syncthreads();\n}`,
+        highlight: [1,2,3], reduceStride: stride, reduceType: 'shared_tree',
+      })),
+      { label: 'Block result → global mem', icon: '🌐', mem: 'global', globalReads: 0, syncBarriers: 0,
+        desc: `Thread 0 holds the complete block sum in sdata[0]. A single atomicAdd writes it to global memory with minimal contention.`,
+        code: `if (threadIdx.x == 0)\n  atomicAdd(grad_output, sdata[0]);`,
+        highlight: [0,1], reduceType: 'write_global' },
+    ];
+  }
+  // naive
+  return [
+    { label: 'Thread init — partial grads', icon: '⚡', mem: 'registers', globalReads: threadsPerBlock, syncBarriers: 0,
+      desc: `Each thread loads a partial gradient from global memory. So far identical to other strategies.`,
+      code: `int tid = blockIdx.x * blockDim.x + threadIdx.x;\nfloat val = grad_input[tid];`, highlight: [0,1], reduceType: 'init' },
+    { label: 'atomicAdd to global mem (wave 1)', icon: '🔴', mem: 'global', globalReads: 0, syncBarriers: 0,
+      desc: `All threads call atomicAdd simultaneously. The GPU serializes conflicting writes — with ${threadsPerBlock} threads all hitting one address, only 1 can proceed per cycle. This creates massive contention.`,
+      code: `// ALL threads race to write at once\natomicAdd(grad_output, val);\n// → serialized: ${threadsPerBlock} atomic ops queued`, highlight: [0,1,2], reduceType: 'naive_atomic1' },
+    { label: 'Serialized atomic contention', icon: '⛔', mem: 'global', globalReads: 0, syncBarriers: 0,
+      desc: `Because atomicAdd locks the cache line, threads queue up in hardware. Effective throughput drops to 1 add per cycle instead of 32. With ${state.numBlocks} blocks this is ${state.numBlocks * threadsPerBlock} serial atomic ops total.`,
+      code: `// Effective execution:\n// t[0]: atomicAdd ✓\n// t[1]: wait... atomicAdd ✓\n// ...\n// t[${threadsPerBlock-1}]: wait... wait... atomicAdd ✓`,
+      highlight: [0,1,2,3,4], reduceType: 'naive_atomic2' },
+  ];
+}
+
+// ---- Render helpers ----
+const COLORS = {
+  registers: '#6366f1',
+  shared:    '#f59e0b',
+  global:    '#ef4444',
+  inactive:  '#1e293b',
+  idle:      '#334155',
+  border:    'rgba(255,255,255,0.1)',
+};
+
+function lerpColor(a, b, t) {
+  const ah = a.replace('#',''); const bh = b.replace('#','');
+  const ar = parseInt(ah.slice(0,2),16); const ag = parseInt(ah.slice(2,4),16); const ab = parseInt(ah.slice(4,6),16);
+  const br = parseInt(bh.slice(0,2),16); const bg = parseInt(bh.slice(2,4),16); const bb = parseInt(bh.slice(4,6),16);
+  const r = Math.round(ar+(br-ar)*t); const g = Math.round(ag+(bg-ag)*t); const bv = Math.round(ab+(bb-ab)*t);
+  return `rgb(${r},${g},${bv})`;
+}
+
+function hexToRgba(hex, a) {
+  const h = hex.replace('#','');
+  return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${a})`;
+}
+
+function initValues() {
+  const n = state.numBlocks * state.threadsPerBlock;
+  state.values = Array.from({length: n}, () => +(Math.random() * 2 - 1).toFixed(3));
+  state.currentVals = [...state.values];
+  state.warpSums = null;
+  state.blockSums = new Array(state.numBlocks).fill(null);
+}
+
+function drawCanvas() {
+  const canvas = document.getElementById('mainCanvas');
+  const dpr = window.devicePixelRatio || 1;
+  const W = canvas.parentElement.clientWidth - 32;
+  const H = Math.max(340, Math.min(480, window.innerHeight * 0.45));
+  canvas.style.width = W + 'px';
+  canvas.style.height = H + 'px';
+  canvas.width = W * dpr;
+  canvas.height = H * dpr;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(dpr, dpr);
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#020617';
+  ctx.fillRect(0, 0, W, H);
+
+  const phases = getPhases(state.strategy, state.threadsPerBlock);
+  const phase = phases[state.phase] || phases[0];
+  const T = state.threadsPerBlock;
+  const B = state.numBlocks;
+
+  // Layout
+  const marginX = 24;
+  const blockW = (W - marginX * 2 - (B - 1) * 12) / B;
+  const threadW = Math.min(28, (blockW - 20) / T);
+  const threadH = 34;
+  const threadY = 40;
+  const barMaxH = 60;
+  const barY = threadY + threadH + 8;
+
+  const memColor = COLORS[phase.mem] || COLORS.registers;
+
+  // Draw each block
+  for (let b = 0; b < B; b++) {
+    const bx = marginX + b * (blockW + 12);
+
+    // Block background
+    ctx.fillStyle = 'rgba(15,23,42,0.7)';
+    roundedRect(ctx, bx, 14, blockW, H - 28, 10);
+    ctx.fill();
+    ctx.strokeStyle = hexToRgba(memColor, 0.3);
+    ctx.lineWidth = 1;
+    roundedRect(ctx, bx, 14, blockW, H - 28, 10);
+    ctx.stroke();
+
+    // Block label
+    ctx.fillStyle = '#64748b';
+    ctx.font = 'bold 11px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`Block ${b}`, bx + blockW / 2, 10);
+
+    // Warp dividers
+    const warps = T / 32;
+    const warpW = (blockW - 20) / warps;
+    for (let w = 0; w < warps; w++) {
+      const wx = bx + 10 + w * warpW;
+      ctx.fillStyle = 'rgba(99,102,241,0.07)';
+      ctx.fillRect(wx, threadY - 4, warpW - 2, threadH + 8);
+      ctx.fillStyle = '#4338ca';
+      ctx.font = '9px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`W${w}`, wx + warpW / 2, threadY - 7);
+
+      // Draw threads in this warp
+      for (let t = 0; t < 32; t++) {
+        const tIdx = b * T + w * 32 + t;
+        const tx = wx + t * threadW + (warpW - 32 * threadW) / 2;
+        const val = state.currentVals[tIdx];
+        const isActive = isThreadActive(phase, b, w, t, T);
+        const color = isActive ? memColor : COLORS.idle;
+
+        // Thread box
+        ctx.fillStyle = hexToRgba(color, isActive ? 0.85 : 0.2);
+        roundedRect(ctx, tx, threadY, threadW - 2, threadH, 4);
+        ctx.fill();
+        if (isActive) {
+          ctx.strokeStyle = hexToRgba(color, 0.9);
+          ctx.lineWidth = 1;
+          roundedRect(ctx, tx, threadY, threadW - 2, threadH, 4);
+          ctx.stroke();
+        }
+
+        // Thread label (only if wide enough)
+        if (threadW >= 14) {
+          ctx.fillStyle = isActive ? '#fff' : '#475569';
+          ctx.font = `${Math.max(7, threadW - 6)}px Inter`;
+          ctx.textAlign = 'center';
+          ctx.fillText(t, tx + (threadW - 2) / 2, threadY + threadH / 2 + 4);
+        }
+
+        // Value bar
+        const norm = Math.max(0, Math.min(1, (val + 1) / 2));
+        const bh = norm * barMaxH;
+        ctx.fillStyle = hexToRgba(color, isActive ? 0.65 : 0.15);
+        ctx.fillRect(tx, barY + barMaxH - bh, threadW - 2, bh);
+      }
+    }
+
+    // Reduction animation arrows
+    drawReductionArrows(ctx, phase, b, bx + 10, blockW - 20, threadY, threadH, T, barY + barMaxH + 4, memColor);
+
+    // Block sum display
+    if (state.blockSums[b] !== null && (phase.reduceType === 'write_global' || state.phase === phases.length - 1)) {
+      const sumX = bx + blockW / 2;
+      const sumY = barY + barMaxH + 38;
+      ctx.fillStyle = hexToRgba(COLORS.global, 0.85);
+      roundedRect(ctx, bx + blockW / 2 - 34, sumY - 12, 68, 22, 5);
+      ctx.fill();
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 10px Inter';
+      ctx.textAlign = 'center';
+      ctx.fillText(`Σ = ${state.blockSums[b].toFixed(3)}`, sumX, sumY + 3);
+    }
+  }
+
+  // Memory tier label
+  const tierLabel = { registers: 'REGISTERS (per thread)', shared: 'SHARED MEMORY (per block)', global: 'GLOBAL MEMORY (device-wide)' }[phase.mem] || '';
+  ctx.fillStyle = hexToRgba(memColor, 0.9);
+  ctx.font = 'bold 11px Inter';
+  ctx.textAlign = 'right';
+  ctx.fillText('Active memory tier: ' + tierLabel, W - 8, H - 8);
+}
+
+function isThreadActive(phase, blockIdx, warpIdx, laneIdx, T) {
+  const t = warpIdx * 32 + laneIdx;
+  if (phase.reduceType === 'init') return true;
+  if (phase.reduceType === 'warp') {
+    const { reduceOffset } = phase;
+    const activeLanes = 32 - reduceOffset;
+    return laneIdx < activeLanes;
+  }
+  if (phase.reduceType === 'write_shared') return laneIdx === 0;
+  if (phase.reduceType === 'reduce_warps') return t === 0;
+  if (phase.reduceType === 'shared_tree') {
+    return t < phase.reduceStride;
+  }
+  if (phase.reduceType === 'naive_atomic1') return true;
+  if (phase.reduceType === 'naive_atomic2') return laneIdx === 0 && warpIdx === 0;
+  if (phase.reduceType === 'write_global') return t === 0;
+  return true;
+}
+
+function drawReductionArrows(ctx, phase, blockIdx, startX, width, threadY, threadH, T, arrowY, color) {
+  if (phase.reduceType !== 'warp' && phase.reduceType !== 'shared_tree') return;
+  const warps = T / 32;
+  const warpW = width / warps;
+
+  for (let w = 0; w < warps; w++) {
+    const wx = startX + w * warpW;
+    const step = phase.reduceOffset || phase.reduceStride || 1;
+    const active = phase.reduceType === 'warp' ? (32 - step) : step;
+    const count = phase.reduceType === 'warp' ? active : step;
+    const tw = warpW / 32;
+
+    for (let t = 0; t < Math.min(count, 32); t++) {
+      const src = phase.reduceType === 'warp' ? (t + step) : (t + step);
+      if (src >= 32) continue;
+      const x1 = wx + src * tw + tw / 2;
+      const x0 = wx + t * tw + tw / 2;
+      const y0 = threadY + threadH;
+      const yMid = arrowY + 6;
+
+      ctx.strokeStyle = hexToRgba(color, 0.45);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x1, y0);
+      ctx.bezierCurveTo(x1, yMid, x0, yMid, x0, y0);
+      ctx.stroke();
+
+      ctx.fillStyle = hexToRgba(color, 0.6);
+      ctx.beginPath();
+      ctx.moveTo(x0 - 3, y0 + 1);
+      ctx.lineTo(x0 + 3, y0 + 1);
+      ctx.lineTo(x0, y0 - 5);
+      ctx.fill();
+    }
+  }
+}
+
+function roundedRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
+function applyPhaseLogic() {
+  const phases = getPhases(state.strategy, state.threadsPerBlock);
+  const phase = phases[state.phase] || phases[0];
+  const T = state.threadsPerBlock;
+  const B = state.numBlocks;
+
+  if (phase.reduceType === 'init') {
+    state.currentVals = [...state.values];
+    state.blockSums = new Array(B).fill(null);
+  } else if (phase.reduceType === 'warp') {
+    const offset = phase.reduceOffset;
+    const newVals = [...state.currentVals];
+    for (let b = 0; b < B; b++) {
+      for (let w = 0; w < T / 32; w++) {
+        for (let lane = 0; lane < 32 - offset; lane++) {
+          const idx = b * T + w * 32 + lane;
+          const srcIdx = b * T + w * 32 + lane + offset;
+          newVals[idx] = state.currentVals[idx] + state.currentVals[srcIdx];
+        }
+      }
+    }
+    state.currentVals = newVals;
+  } else if (phase.reduceType === 'shared_tree') {
+    const s = phase.reduceStride;
+    const newVals = [...state.currentVals];
+    for (let b = 0; b < B; b++) {
+      for (let t = 0; t < s; t++) {
+        const idx = b * T + t;
+        const srcIdx = b * T + t + s;
+        newVals[idx] = state.currentVals[idx] + state.currentVals[srcIdx];
+      }
+    }
+    state.currentVals = newVals;
+  } else if (phase.reduceType === 'naive_atomic1' || phase.reduceType === 'naive_atomic2') {
+    // no change to vals, just visual
+  } else if (phase.reduceType === 'write_global') {
+    for (let b = 0; b < B; b++) {
+      state.blockSums[b] = +(state.currentVals[b * T].toFixed(4));
+    }
+  }
+}
+
+function updateInspector() {
+  const phases = getPhases(state.strategy, state.threadsPerBlock);
+  const phase = phases[state.phase] || phases[0];
+
+  document.getElementById('phaseIcon').textContent = phase.icon;
+  document.getElementById('phaseTitle').textContent = phase.label;
+  document.getElementById('phaseDesc').textContent = phase.desc;
+
+  const memColors = {
+    registers: 'bg-blue-900/50 border-blue-500/40 text-blue-300',
+    shared: 'bg-amber-900/40 border-amber-500/40 text-amber-300',
+    global: 'bg-rose-900/40 border-rose-500/40 text-rose-300',
+  };
+  const dotColors = { registers: 'bg-blue-400', shared: 'bg-amber-400', global: 'bg-rose-400' };
+  const labels = { registers: 'Registers', shared: 'Shared Memory', global: 'Global Memory' };
+  const tag = document.getElementById('memTag');
+  tag.className = `mem-badge border ${memColors[phase.mem] || memColors.registers}`;
+  tag.innerHTML = `<span class="w-2 h-2 rounded-full ${dotColors[phase.mem] || dotColors.registers} inline-block"></span> ${labels[phase.mem] || 'Registers'}`;
+
+  // code
+  const lines = (phase.code || '').split('\n');
+  const hl = phase.highlight || [];
+  document.getElementById('codeBlock').innerHTML = lines.map((l, i) =>
+    `<div class="code-line${hl.includes(i) ? ' highlight' : ''}">${escHtml(l) || ' '}</div>`
+  ).join('');
+
+  // metrics
+  let gReads = 0, syncs = 0;
+  for (let i = 0; i <= state.phase; i++) {
+    const p = phases[i];
+    if (p) { gReads += (p.globalReads || 0); syncs += (p.syncBarriers || 0); }
+  }
+  document.getElementById('metricGlobal').textContent = gReads;
+  document.getElementById('metricSync').textContent = syncs;
+  document.getElementById('metricSteps').textContent = `${state.phase + 1} / ${phases.length}`;
+
+  // phase list
+  const list = document.getElementById('phaseList');
+  list.innerHTML = phases.map((p, i) => `
+    <div class="flex items-center gap-2 ${i === state.phase ? 'text-slate-100' : 'text-slate-500'}">
+      <div class="phase-dot flex-shrink-0 ${i < state.phase ? 'bg-indigo-500' : i === state.phase ? 'bg-indigo-300 glow' : 'bg-slate-700'}"></div>
+      <span class="text-xs truncate">${p.icon} ${p.label}</span>
+    </div>
+  `).join('');
+}
+
+function escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+function render() {
+  applyPhaseLogic();
+  drawCanvas();
+  updateInspector();
+}
+
+function step(dir) {
+  const phases = getPhases(state.strategy, state.threadsPerBlock);
+  state.phase = Math.max(0, Math.min(phases.length - 1, state.phase + dir));
+  render();
+}
+
+function resetAll() {
+  stopPlay();
+  state.phase = 0;
+  initValues();
+  render();
+}
+
+function startPlay() {
+  state.playing = true;
+  document.getElementById('playBtn').innerHTML = '<i class="fas fa-pause"></i> Pause';
+  document.getElementById('playBtn').classList.replace('bg-indigo-600', 'bg-slate-600');
+  document.getElementById('playBtn').classList.replace('hover:bg-indigo-500', 'hover:bg-slate-500');
+  function tick() {
+    const phases = getPhases(state.strategy, state.threadsPerBlock);
+    if (state.phase < phases.length - 1) {
+      state.phase++;
+      render();
+      state.timer = setTimeout(tick, 1100);
+    } else {
+      stopPlay();
+    }
+  }
+  state.timer = setTimeout(tick, 1100);
+}
+
+function stopPlay() {
+  state.playing = false;
+  clearTimeout(state.timer);
+  document.getElementById('playBtn').innerHTML = '<i class="fas fa-play"></i> Play Animation';
+  document.getElementById('playBtn').classList.replace('bg-slate-600', 'bg-indigo-600');
+  document.getElementById('playBtn').classList.replace('hover:bg-slate-500', 'hover:bg-indigo-500');
+}
+
+// Events
+document.getElementById('playBtn').addEventListener('click', () => {
+  if (state.playing) stopPlay();
+  else { resetAll(); startPlay(); }
+});
+document.getElementById('nextBtn').addEventListener('click', () => { stopPlay(); step(1); });
+document.getElementById('prevBtn').addEventListener('click', () => { stopPlay(); step(-1); });
+document.getElementById('resetBtn').addEventListener('click', resetAll);
+
+document.getElementById('threadsRange').addEventListener('input', e => {
+  const map = [32, 64, 128];
+  state.threadsPerBlock = map[+e.target.value - 1];
+  document.getElementById('threadsLabel').textContent = state.threadsPerBlock;
+  state.phase = 0;
+  initValues();
+  render();
+});
+
+document.getElementById('blocksRange').addEventListener('input', e => {
+  const map = [1, 2, 3, 4];
+  state.numBlocks = map[+e.target.value - 1];
+  document.getElementById('blocksLabel').textContent = state.numBlocks;
+  state.phase = 0;
+  initValues();
+  render();
+});
+
+document.querySelectorAll('[data-strategy]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('[data-strategy]').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.strategy = btn.dataset.strategy;
+    state.phase = 0;
+    initValues();
+    render();
+  });
+});
+
+window.addEventListener('resize', drawCanvas);
+
+// Init
+initValues();
+render();
+</script>
+</body>
+</html>

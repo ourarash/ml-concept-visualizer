@@ -1,0 +1,968 @@
+<!doctype html>
+<!-- Source: Integrated from PR #29 by Krish Modi (@krish-modi1): Add 2D convolution on real images visualizer. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>2D Convolution on Real Images — EE508</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    .patch-cell {
+      width: 48px; height: 48px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+      border: 1px solid #e2e8f0;
+      border-radius: 3px;
+      font-family: monospace;
+    }
+    .mac-cell {
+      width: 48px; height: 48px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 12px; font-weight: 700;
+      border-radius: 3px;
+      border: 1px solid #e2e8f0;
+      font-family: monospace;
+    }
+    .kernel-btn { transition: all 0.15s ease; cursor: pointer; }
+    .kernel-btn.active {
+      border-color: #3b82f6 !important;
+      background-color: #eff6ff !important;
+    }
+    #inputCanvasWrap { position: relative; display: inline-block; line-height: 0; }
+    #overlayCanvas { position: absolute; top: 0; left: 0; pointer-events: none; }
+    @keyframes fadeIn { from { opacity:0; transform:scale(0.96); } to { opacity:1; transform:scale(1); } }
+    .fade-in { animation: fadeIn 0.3s ease forwards; }
+  </style>
+</head>
+<body class="bg-slate-50 min-h-screen text-slate-800 font-sans">
+<div class="max-w-[1440px] mx-auto p-4 md:p-6">
+
+  <!-- Header -->
+  <header class="mb-6 text-center">
+    <div class="inline-block bg-slate-900 text-white px-4 py-1 rounded-full text-xs font-semibold tracking-widest uppercase mb-3">
+      EE508 · CNN Architectures
+    </div>
+    <h1 class="text-3xl font-bold text-slate-900 mb-2">2D Convolution on Real Images</h1>
+    <p class="text-slate-500 max-w-2xl mx-auto text-sm leading-relaxed">
+      Apply real CNN kernels to a photograph and watch the feature map build pixel by pixel.
+      The sliding kernel makes the sliding-window operation viscerally clear — edge detection produces outlines,
+      blur averages neighbors, sharpening amplifies gradients.
+    </p>
+  </header>
+
+  <!--
+    Flat grid: each card is a direct child with explicit lg:col-start / lg:row-start.
+    On mobile (flex-col) elements render in document order:
+      upload → input canvas → kernel → parameters → output canvas → MAC → patch → info
+    On desktop (3-col grid) they reflow into sidebar + two canvas columns.
+  -->
+  <div class="flex flex-col gap-5 lg:grid lg:grid-cols-3 lg:items-stretch">
+
+    <!-- ① Upload + samples — mobile: 1st | desktop: col1 row1 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-1 lg:row-start-1">
+      <div id="dropZone"
+           class="border-2 border-dashed border-slate-300 rounded-lg p-4 text-center cursor-pointer
+                  hover:border-blue-400 hover:bg-blue-50 transition-colors mb-3">
+        <div class="text-2xl mb-1">📷</div>
+        <div class="text-xs text-slate-500">
+          Drop image here or <span class="text-blue-600 font-medium">click to upload</span>
+        </div>
+        <input type="file" id="fileInput" accept="image/*" class="hidden"/>
+      </div>
+      <div class="flex-1">
+        <div class="text-xs text-slate-500 mb-2 font-medium">Or choose a sample:</div>
+        <div class="flex gap-3 flex-wrap" id="sampleThumbs"></div>
+      </div>
+    </div>
+
+    <!-- ② Input canvas — mobile: 2nd | desktop: col2 row1 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-2 lg:row-start-1">
+      <h2 class="font-semibold text-slate-700 mb-3 flex items-center gap-2 text-sm">
+        <span class="bg-blue-100 text-blue-700 w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold">1</span>
+        Input Image
+      </h2>
+      <div class="w-full flex justify-center">
+        <div id="inputCanvasWrap">
+          <canvas id="inputCanvas" class="rounded-lg border border-slate-200" style="display:block;"></canvas>
+          <canvas id="overlayCanvas"></canvas>
+        </div>
+      </div>
+      <div id="imageDims" class="text-xs text-slate-400 mt-1.5 text-center"></div>
+    </div>
+
+    <!-- ③ Kernel selector — mobile: 3rd | desktop: col1 row2 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-1 lg:row-start-2">
+      <h2 class="font-semibold text-slate-700 mb-3 flex items-center gap-2 text-sm">
+        <span class="bg-emerald-100 text-emerald-700 w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold">2</span>
+        Kernel
+      </h2>
+      <div class="grid grid-cols-2 gap-2" id="kernelBtns"></div>
+    </div>
+
+    <!-- ④ Parameters — mobile: 4th | desktop: col3 row2 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-3 lg:row-start-2">
+      <h3 class="font-semibold text-slate-700 mb-3 text-sm">Parameters</h3>
+      <div class="space-y-3">
+        <div>
+          <div class="text-xs font-medium text-slate-600 mb-1.5">Stride (S)</div>
+          <div class="flex gap-4">
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+              <input type="radio" name="stride" value="1" checked class="accent-blue-600"/> 1
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+              <input type="radio" name="stride" value="2" class="accent-blue-600"/> 2
+            </label>
+          </div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-slate-600 mb-1.5">Padding (P)</div>
+          <div class="flex gap-4">
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+              <input type="radio" name="padding" value="0" checked class="accent-blue-600"/> None (P=0)
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+              <input type="radio" name="padding" value="1" class="accent-blue-600"/> Zero-pad (P=1)
+            </label>
+          </div>
+        </div>
+        <div class="bg-blue-50 rounded-lg p-3 border border-blue-100">
+          <div class="text-xs font-semibold text-blue-700 mb-1">Output Size Formula</div>
+          <div class="font-mono text-xs text-slate-600 mb-1">⌊(W − F + 2P) / S⌋ + 1</div>
+          <div id="outputSizeCalc" class="text-sm font-semibold text-blue-800"></div>
+        </div>
+        <div>
+          <div class="text-xs font-medium text-slate-600 mb-1.5">Output Display</div>
+          <div class="flex gap-4">
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+              <input type="radio" name="displayMode" value="raw" checked class="accent-blue-600"/> Grayscale
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm">
+              <input type="radio" name="displayMode" value="abs" class="accent-blue-600"/> Absolute value
+            </label>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑤ Output canvas — mobile: 5th | desktop: col3 row1 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-3 lg:row-start-1">
+      <h2 class="font-semibold text-slate-700 mb-3 flex items-center gap-2 text-sm">
+        <span class="bg-violet-100 text-violet-700 w-6 h-6 rounded-full text-xs flex items-center justify-center font-bold">3</span>
+        Output Feature Map
+      </h2>
+      <div class="w-full flex justify-center mb-2">
+        <canvas id="outputCanvas" class="rounded-lg border border-slate-200" style="display:block;"></canvas>
+      </div>
+      <div id="outputPlaceholder"
+           class="flex-1 flex items-center justify-center text-slate-400 text-sm text-center px-4 py-8 italic">
+        Press Animate or Full Image to run convolution
+      </div>
+      <div id="outputDims" class="text-xs text-slate-400 text-center mb-3"></div>
+      <div class="flex gap-2">
+        <button id="animateBtn"
+                class="flex-1 bg-blue-600 hover:bg-blue-700 active:bg-blue-800 text-white text-sm
+                       font-medium py-2 px-3 rounded-lg transition-colors">
+          ▶ Animate
+        </button>
+        <button id="applyBtn"
+                class="flex-1 bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white text-sm
+                       font-medium py-2 px-3 rounded-lg transition-colors">
+          ⚡ Full Image
+        </button>
+        <button id="resetBtn"
+                class="bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm
+                       font-medium py-2 px-3 rounded-lg transition-colors">
+          ✕
+        </button>
+      </div>
+      <div class="mt-3">
+        <div class="flex justify-between text-xs text-slate-500 mb-1">
+          <span id="progressLabel">Load an image to begin</span>
+          <span id="progressPct"></span>
+        </div>
+        <div class="bg-slate-100 rounded-full h-1.5 overflow-hidden">
+          <div id="progressBar" class="bg-blue-500 h-1.5 rounded-full transition-all duration-75"
+               style="width:0%"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ⑥ MAC panel — mobile: 6th | desktop: col2 row2 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-2 lg:row-start-2">
+      <div class="font-semibold text-slate-700 mb-3 text-sm">Live MAC Computation</div>
+      <div class="flex items-center gap-2 flex-wrap justify-center">
+        <div>
+          <div class="text-xs text-blue-600 font-medium text-center mb-1">Patch</div>
+          <div id="macPatch" class="grid gap-0.5" style="grid-template-columns:repeat(3,48px);"></div>
+        </div>
+        <div class="text-slate-400 font-bold text-xl select-none">×</div>
+        <div>
+          <div class="text-xs text-emerald-600 font-medium text-center mb-1">Kernel</div>
+          <div id="macKernel" class="grid gap-0.5" style="grid-template-columns:repeat(3,48px);"></div>
+        </div>
+        <div class="text-slate-400 font-bold text-xl select-none">=</div>
+        <div id="macResult" class="text-2xl font-bold text-amber-600 min-w-[3rem] text-center"></div>
+      </div>
+      <div id="macFormula" class="text-xs text-slate-500 mt-2 text-center font-mono leading-relaxed"></div>
+    </div>
+
+    <!-- ⑦ Patch grid — mobile: 7th | desktop: col1 row3 -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4 flex flex-col lg:col-start-1 lg:col-span-1 lg:row-start-3">
+      <h3 class="font-semibold text-slate-700 mb-2 text-sm">
+        Current 3×3 Patch <span class="font-normal text-slate-400">(grayscale)</span>
+      </h3>
+      <div class="flex-1 flex flex-col items-center justify-center">
+        <div id="patchGrid" class="grid gap-1"
+             style="grid-template-columns:repeat(3,48px); width:fit-content;"></div>
+        <div class="text-xs text-slate-400 mt-2 text-center">Updates live as kernel sweeps</div>
+      </div>
+    </div>
+
+    <!-- ⑧ How It Works — mobile: 8th | desktop: col2-3 row3 -->
+    <div class="bg-slate-900 rounded-xl p-4 text-white text-xs space-y-1.5 flex flex-col lg:col-start-2 lg:col-span-2 lg:row-start-3">
+      <div class="font-semibold text-slate-200 text-sm mb-2">How It Works</div>
+      <div class="text-slate-400 leading-relaxed space-y-1">
+        <div><span class="text-slate-300">RGB → Grayscale:</span> Y = 0.299R + 0.587G + 0.114B</div>
+        <div><span class="text-slate-300">Each position:</span> multiply patch × kernel element-wise, sum 9 values → 1 output pixel</div>
+        <div><span class="text-slate-300">3-channel image:</span> each RGB channel convolved independently, then summed</div>
+        <div><span class="text-slate-300">Display:</span> output normalized to [0, 255] for visualization</div>
+      </div>
+      <div id="kernelDesc" class="text-amber-400 pt-1 font-medium leading-relaxed"></div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────
+// KERNEL DEFINITIONS
+// ─────────────────────────────────────────────────────────────
+const KERNELS = {
+  'Sobel X': {
+    data: [[-1,0,1],[-2,0,2],[-1,0,1]],
+    desc: 'Detects horizontal edges — responds to left/right intensity changes. Produces bright lines at vertical boundaries.'
+  },
+  'Sobel Y': {
+    data: [[-1,-2,-1],[0,0,0],[1,2,1]],
+    desc: 'Detects vertical edges — responds to top/bottom intensity changes. Highlights horizontal lines and surfaces.'
+  },
+  'Laplacian': {
+    data: [[0,1,0],[1,-4,1],[0,1,0]],
+    desc: 'Detects all edges regardless of direction. Second derivative of intensity — highlights rapid changes.'
+  },
+  'Gaussian Blur': {
+    data: [[1,2,1],[2,4,2],[1,2,1]],
+    scale: 1/16,
+    desc: 'Weighted average of neighboring pixels. Reduces noise and detail — the center pixel contributes most.'
+  },
+  'Sharpen': {
+    data: [[0,-1,0],[-1,5,-1],[0,-1,0]],
+    desc: 'Amplifies fine detail by subtracting a blurred version from the original. Center weight > 1 boosts local contrast.'
+  },
+  'Emboss': {
+    data: [[-2,-1,0],[-1,1,1],[0,1,2]],
+    desc: 'Simulates a raised-relief effect by emphasizing diagonal edges (top-left to bottom-right direction).'
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────────────────────
+const state = {
+  grayData: null,
+  srcW: 0, srcH: 0,
+  activeKernel: 'Sobel X',
+  stride: 1,
+  padding: 0,
+  outW: 0, outH: 0,
+  animFrame: null,
+  animIdx: 0,
+  isAnimating: false,
+  curOX: 0, curOY: 0,  // current kernel output position
+};
+
+const DISPLAY_SIZE = 380;
+const MAX_INTERNAL = 200;
+
+// ─────────────────────────────────────────────────────────────
+// DOM REFS
+// ─────────────────────────────────────────────────────────────
+const inputCanvas  = document.getElementById('inputCanvas');
+const overlayCanvas = document.getElementById('overlayCanvas');
+const outputCanvas  = document.getElementById('outputCanvas');
+const inputCtx   = inputCanvas.getContext('2d', { willReadFrequently: true });
+const overlayCtx = overlayCanvas.getContext('2d');
+const outputCtx  = outputCanvas.getContext('2d');
+
+// ─────────────────────────────────────────────────────────────
+// SAMPLE IMAGE GENERATION
+// ─────────────────────────────────────────────────────────────
+function makeSampleCanvas(type) {
+  const c = document.createElement('canvas');
+  c.width = 200; c.height = 200;
+  const ctx = c.getContext('2d');
+
+  if (type === 'city') {
+    ctx.fillStyle = '#0f172a'; ctx.fillRect(0,0,200,200);
+    // Stars
+    for (let i=0; i<50; i++) {
+      ctx.fillStyle = `rgba(255,255,255,${0.4+Math.random()*0.6})`;
+      ctx.fillRect(Math.random()*200, Math.random()*70, 1+Math.random(), 1+Math.random());
+    }
+    // Moon
+    ctx.fillStyle = '#fef9c3';
+    ctx.beginPath(); ctx.arc(170,25,12,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath(); ctx.arc(176,22,10,0,Math.PI*2); ctx.fill();
+
+    const blds = [
+      {x:0,  y:95,  w:28, h:105, c:'#475569'},
+      {x:32, y:75,  w:22, h:125, c:'#94a3b8'},
+      {x:58, y:100, w:30, h:100, c:'#64748b'},
+      {x:92, y:60,  w:32, h:140, c:'#cbd5e1'},
+      {x:128,y:80,  w:20, h:120, c:'#94a3b8'},
+      {x:152,y:50,  w:28, h:150, c:'#e2e8f0'},
+      {x:184,y:90,  w:16, h:110, c:'#64748b'},
+    ];
+    blds.forEach(b => {
+      ctx.fillStyle = b.c; ctx.fillRect(b.x, b.y, b.w, b.h);
+      ctx.fillStyle = '#fef08a';
+      for (let wy=b.y+6; wy<200-8; wy+=11) {
+        for (let wx=b.x+3; wx<b.x+b.w-3; wx+=7) {
+          if (Math.random() > 0.3) ctx.fillRect(wx, wy, 4, 6);
+        }
+      }
+    });
+    // Ground
+    ctx.fillStyle = '#334155'; ctx.fillRect(0,190,200,10);
+  }
+
+  else if (type === 'face') {
+    const bg = ctx.createRadialGradient(100,100,10,100,100,110);
+    bg.addColorStop(0,'#dbeafe'); bg.addColorStop(1,'#1e3a5f');
+    ctx.fillStyle = bg; ctx.fillRect(0,0,200,200);
+
+    // Shoulders
+    ctx.fillStyle = '#2563eb';
+    ctx.beginPath(); ctx.moveTo(20,200); ctx.lineTo(70,148); ctx.lineTo(130,148); ctx.lineTo(180,200); ctx.fill();
+
+    // Neck
+    ctx.fillStyle = '#fcd5b4'; ctx.fillRect(86,145,28,30);
+
+    // Head
+    const headGrad = ctx.createRadialGradient(100,95,5,105,90,70);
+    headGrad.addColorStop(0,'#fde8d8'); headGrad.addColorStop(1,'#e8a07c');
+    ctx.fillStyle = headGrad;
+    ctx.beginPath(); ctx.ellipse(100,95,55,68,0,0,Math.PI*2); ctx.fill();
+
+    // Hair
+    ctx.fillStyle = '#1e293b';
+    ctx.beginPath(); ctx.ellipse(100,54,57,38,0,0,Math.PI); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(55,90,10,30,-0.3,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(145,90,10,30,0.3,0,Math.PI*2); ctx.fill();
+
+    // Ears
+    ctx.fillStyle = '#e8a07c';
+    ctx.beginPath(); ctx.ellipse(45,100,8,12,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(155,100,8,12,0,0,Math.PI*2); ctx.fill();
+
+    // Eyebrows
+    ctx.strokeStyle = '#1e293b'; ctx.lineWidth=2.5; ctx.lineCap='round';
+    ctx.beginPath(); ctx.moveTo(72,80); ctx.quadraticCurveTo(84,76,92,79); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(108,79); ctx.quadraticCurveTo(116,76,128,80); ctx.stroke();
+
+    // Eyes (whites)
+    ctx.fillStyle = '#fff';
+    ctx.beginPath(); ctx.ellipse(82,92,11,8,0,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.ellipse(118,92,11,8,0,0,Math.PI*2); ctx.fill();
+    // Irises
+    ctx.fillStyle = '#1d4ed8';
+    ctx.beginPath(); ctx.arc(82,92,6,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(118,92,6,0,Math.PI*2); ctx.fill();
+    // Pupils
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath(); ctx.arc(82,92,3,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(118,92,3,0,Math.PI*2); ctx.fill();
+    // Shine
+    ctx.fillStyle = 'white';
+    ctx.beginPath(); ctx.arc(84,90,1.5,0,Math.PI*2); ctx.fill();
+    ctx.beginPath(); ctx.arc(120,90,1.5,0,Math.PI*2); ctx.fill();
+
+    // Nose
+    ctx.strokeStyle = '#c08060'; ctx.lineWidth=1.5;
+    ctx.beginPath(); ctx.moveTo(100,100); ctx.lineTo(93,118); ctx.lineTo(107,118); ctx.stroke();
+
+    // Mouth
+    ctx.strokeStyle = '#c06050'; ctx.lineWidth=2;
+    ctx.beginPath(); ctx.arc(100,124,14,0.15,Math.PI-0.15); ctx.stroke();
+  }
+
+  else if (type === 'brick') {
+    ctx.fillStyle = '#9ca3af'; ctx.fillRect(0,0,200,200);
+    const BH=20, BW=40, M=3;
+    const brickPalette = ['#b45309','#92400e','#c2440f','#78350f','#d97706'];
+    for (let row=0; row*BH < 220; row++) {
+      const off = (row%2===0) ? 0 : 21;
+      for (let col=-1; col*(BW+M) < 220; col++) {
+        const x = col*(BW+M) + off, y = row*(BH+M);
+        ctx.fillStyle = brickPalette[Math.floor(Math.random()*brickPalette.length)];
+        ctx.fillRect(x+M, y+M, BW, BH);
+        // Highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.12)';
+        ctx.fillRect(x+M, y+M, BW, 3);
+        // Shadow
+        ctx.fillStyle = 'rgba(0,0,0,0.15)';
+        ctx.fillRect(x+M, y+BH, BW, M);
+      }
+    }
+  }
+
+  else if (type === 'graphic') {
+    // High-contrast concentric shapes
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(0,0,200,200);
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath(); ctx.arc(100,100,85,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(100,100,60,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#0f172a';
+    ctx.beginPath(); ctx.arc(100,100,36,0,Math.PI*2); ctx.fill();
+    ctx.fillStyle = '#ffffff';
+    ctx.beginPath(); ctx.arc(100,100,16,0,Math.PI*2); ctx.fill();
+    // Cross lines
+    ctx.fillStyle = '#0f172a';
+    ctx.fillRect(93,0,14,200);
+    ctx.fillRect(0,93,200,14);
+    // Corner triangles
+    ctx.fillStyle = '#334155';
+    ctx.beginPath(); ctx.moveTo(0,0); ctx.lineTo(40,0); ctx.lineTo(0,40); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(200,0); ctx.lineTo(160,0); ctx.lineTo(200,40); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(0,200); ctx.lineTo(40,200); ctx.lineTo(0,160); ctx.fill();
+    ctx.beginPath(); ctx.moveTo(200,200); ctx.lineTo(160,200); ctx.lineTo(200,160); ctx.fill();
+  }
+
+  return c;
+}
+
+// ─────────────────────────────────────────────────────────────
+// SAMPLE THUMBNAILS
+// ─────────────────────────────────────────────────────────────
+const SAMPLES = [
+  { key:'city',    label:'City'     },
+  { key:'face',    label:'Portrait' },
+  { key:'brick',   label:'Brick'    },
+  { key:'graphic', label:'Graphic'  },
+];
+
+let sampleCanvases = {};
+
+function initSampleThumbs() {
+  const container = document.getElementById('sampleThumbs');
+  SAMPLES.forEach((s, i) => {
+    const sc = makeSampleCanvas(s.key);
+    sampleCanvases[s.key] = sc;
+
+    const outer = document.createElement('div');
+    outer.className = 'flex flex-col items-center gap-1 cursor-pointer group';
+    outer.dataset.key = s.key;
+
+    const frame = document.createElement('div');
+    frame.className = 'rounded border-2 border-slate-200 group-hover:border-blue-500 transition-colors overflow-hidden';
+    frame.style.width = '48px'; frame.style.height = '48px';
+
+    const thumb = document.createElement('canvas');
+    thumb.width = 48; thumb.height = 48;
+    thumb.getContext('2d').drawImage(sc, 0, 0, 48, 48);
+    frame.appendChild(thumb);
+
+    const lbl = document.createElement('div');
+    lbl.className = 'text-xs text-slate-500 group-hover:text-blue-600 transition-colors';
+    lbl.textContent = s.label;
+
+    outer.appendChild(frame); outer.appendChild(lbl);
+    outer.addEventListener('click', () => loadImageFromCanvas(sc, s.label));
+    container.appendChild(outer);
+
+    if (i === 0) loadImageFromCanvas(sc, s.label);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// IMAGE LOADING
+// ─────────────────────────────────────────────────────────────
+function loadImageFromCanvas(srcCanvas, label) {
+  stopAnimation();
+
+  let sw = srcCanvas.width, sh = srcCanvas.height;
+  const scale = Math.min(MAX_INTERNAL/sw, MAX_INTERNAL/sh, 1);
+  const iw = Math.round(sw*scale), ih = Math.round(sh*scale);
+
+  // Set internal canvas
+  inputCanvas.width  = iw; inputCanvas.height  = ih;
+  overlayCanvas.width = inputCanvas.width;
+  overlayCanvas.height = inputCanvas.height;
+
+  inputCtx.drawImage(srcCanvas, 0, 0, iw, ih);
+
+  state.srcW = iw; state.srcH = ih;
+
+  // CSS display size
+  const ds = Math.min(DISPLAY_SIZE/iw, DISPLAY_SIZE/ih);
+  const dw = Math.round(iw*ds), dh = Math.round(ih*ds);
+  inputCanvas.style.width   = dw+'px'; inputCanvas.style.height  = dh+'px';
+  overlayCanvas.style.width  = inputCanvas.style.width;
+  overlayCanvas.style.height = inputCanvas.style.height;
+
+  document.getElementById('imageDims').textContent =
+    `Internal: ${iw}×${ih}px · ${label}`;
+
+  // Extract grayscale
+  const id = inputCtx.getImageData(0,0,iw,ih).data;
+  const gray = new Float32Array(iw*ih);
+  for (let i=0; i<iw*ih; i++) {
+    gray[i] = 0.299*id[i*4] + 0.587*id[i*4+1] + 0.114*id[i*4+2];
+  }
+  state.grayData = gray;
+
+  clearOutput();
+  updateOutputSize();
+  state.curOX = 0; state.curOY = 0;
+  drawKernelOverlay(0, 0);
+  updatePatchAndMac(0, 0);
+}
+
+function loadImageFromFile(file) {
+  const reader = new FileReader();
+  reader.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const sc = document.createElement('canvas');
+      sc.width = img.width; sc.height = img.height;
+      sc.getContext('2d').drawImage(img, 0, 0);
+      loadImageFromCanvas(sc, file.name);
+    };
+    img.src = e.target.result;
+  };
+  reader.readAsDataURL(file);
+}
+
+// ─────────────────────────────────────────────────────────────
+// KERNEL BUTTONS
+// ─────────────────────────────────────────────────────────────
+function initKernelBtns() {
+  const container = document.getElementById('kernelBtns');
+  Object.keys(KERNELS).forEach(name => {
+    const kdef = KERNELS[name];
+    const flat = kdef.data.flat();
+    const ks   = kdef.scale || 1;
+
+    const btn = document.createElement('button');
+    btn.className = 'kernel-btn border-2 border-slate-200 rounded-lg p-2 text-left';
+    btn.dataset.kernel = name;
+
+    const nameDiv = document.createElement('div');
+    nameDiv.className = 'text-xs font-semibold text-slate-700 mb-1.5 truncate';
+    nameDiv.textContent = name;
+    btn.appendChild(nameDiv);
+
+    const grid = document.createElement('div');
+    grid.className = 'grid gap-px';
+    grid.style.gridTemplateColumns = 'repeat(3,1fr)';
+    flat.forEach(v => {
+      const cell = document.createElement('div');
+      cell.className = 'text-center rounded py-0.5 font-mono';
+      cell.style.fontSize = '9px'; cell.style.fontWeight = '700';
+      cell.textContent = kdef.scale ? (v*ks).toFixed(3) : String(v);
+      cell.style.background = v>0 ? 'rgba(16,185,129,0.12)' : v<0 ? 'rgba(239,68,68,0.12)' : 'rgba(148,163,184,0.08)';
+      cell.style.color = v>0 ? '#059669' : v<0 ? '#dc2626' : '#64748b';
+      grid.appendChild(cell);
+    });
+    btn.appendChild(grid);
+
+    if (kdef.scale) {
+      const note = document.createElement('div');
+      note.className = 'text-xs text-slate-400 mt-1';
+      note.style.fontSize = '8px';
+      note.textContent = '÷16 normalized';
+      btn.appendChild(note);
+    }
+
+    btn.addEventListener('click', () => selectKernel(name));
+    container.appendChild(btn);
+  });
+}
+
+function selectKernel(name) {
+  state.activeKernel = name;
+
+  document.querySelectorAll('.kernel-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.kernel === name);
+  });
+
+  document.getElementById('kernelDesc').textContent = KERNELS[name].desc;
+  renderMacKernelGrid();
+  clearOutput();
+  updateOutputSize();
+  updatePatchAndMac(state.curOX, state.curOY);
+
+  if (state.isAnimating) { stopAnimation(); clearOutput(); startAnimation(); }
+}
+
+// ─────────────────────────────────────────────────────────────
+// CONVOLUTION
+// ─────────────────────────────────────────────────────────────
+function computeConvolution() {
+  const { grayData, srcW, srcH, stride, padding, activeKernel } = state;
+  if (!grayData) return null;
+
+  const kdef  = KERNELS[activeKernel];
+  const kFlat = kdef.data.flat();
+  const kScale = kdef.scale || 1;
+  const F=3, P=padding, S=stride;
+  const outW = Math.floor((srcW - F + 2*P) / S) + 1;
+  const outH = Math.floor((srcH - F + 2*P) / S) + 1;
+
+  const output = new Float32Array(outW * outH);
+  for (let oy=0; oy<outH; oy++) {
+    for (let ox=0; ox<outW; ox++) {
+      let sum = 0;
+      for (let fy=0; fy<F; fy++) {
+        for (let fx=0; fx<F; fx++) {
+          const iy = oy*S - P + fy;
+          const ix = ox*S - P + fx;
+          const pv = (iy>=0&&iy<srcH&&ix>=0&&ix<srcW) ? grayData[iy*srcW+ix] : 0;
+          sum += pv * kFlat[fy*F+fx] * kScale;
+        }
+      }
+      output[oy*outW+ox] = sum;
+    }
+  }
+  return { output, outW, outH };
+}
+
+function normalizeOutput(output, mode) {
+  const useAbs = mode === 'abs';
+  let min=Infinity, max=-Infinity;
+  for (let i=0; i<output.length; i++) {
+    const v = useAbs ? Math.abs(output[i]) : output[i];
+    if (v<min) min=v; if (v>max) max=v;
+  }
+  const range = max-min;
+  const out = new Uint8ClampedArray(output.length);
+  if (range === 0) {
+    out.fill(128);
+    return out;
+  }
+  for (let i=0; i<output.length; i++) {
+    const v = useAbs ? Math.abs(output[i]) : output[i];
+    out[i] = Math.round(((v-min)/range)*255);
+  }
+  return out;
+}
+
+// ─────────────────────────────────────────────────────────────
+// KERNEL OVERLAY ON INPUT CANVAS
+// ─────────────────────────────────────────────────────────────
+function drawKernelOverlay(ox, oy) {
+  state.curOX = ox; state.curOY = oy;
+  const { srcW, srcH, stride, padding } = state;
+  const F=3, S=stride, P=padding;
+
+  const ix = ox*S - P;  // top-left of kernel on input
+  const iy = oy*S - P;
+
+  overlayCtx.clearRect(0, 0, overlayCanvas.width, overlayCanvas.height);
+
+  // Shade entire input image slightly
+  overlayCtx.fillStyle = 'rgba(0,0,0,0.25)';
+  overlayCtx.fillRect(0, 0, srcW, srcH);
+
+  // Reveal the 3×3 patch
+  const px = Math.max(0,ix), py = Math.max(0,iy);
+  const pw = Math.min(srcW,ix+F) - px, ph = Math.min(srcH,iy+F) - py;
+  if (pw>0 && ph>0) overlayCtx.clearRect(px, py, pw, ph);
+
+  // Glowing border
+  overlayCtx.save();
+  overlayCtx.shadowColor = 'rgba(251,191,36,0.9)';
+  overlayCtx.shadowBlur  = 8;
+  overlayCtx.strokeStyle = '#fbbf24';
+  overlayCtx.lineWidth   = 1.5;
+  overlayCtx.strokeRect(ix+0.5, iy+0.5, F-1, F-1);
+  overlayCtx.restore();
+
+  // Corner dots
+  overlayCtx.fillStyle = '#fbbf24';
+  [[ix,iy],[ix+F,iy],[ix,iy+F],[ix+F,iy+F]].forEach(([cx,cy]) => {
+    overlayCtx.beginPath(); overlayCtx.arc(cx,cy,2,0,Math.PI*2); overlayCtx.fill();
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// PATCH DISPLAY + MAC PANEL
+// ─────────────────────────────────────────────────────────────
+function getPatch(ox, oy) {
+  const { grayData, srcW, srcH, stride, padding } = state;
+  if (!grayData) return Array(9).fill(0);
+  const F=3, S=stride, P=padding;
+  const patch = [];
+  for (let fy=0; fy<F; fy++) {
+    for (let fx=0; fx<F; fx++) {
+      const iy=oy*S-P+fy, ix=ox*S-P+fx;
+      patch.push((iy>=0&&iy<srcH&&ix>=0&&ix<srcW) ? Math.round(grayData[iy*srcW+ix]) : 0);
+    }
+  }
+  return patch;
+}
+
+function updatePatchAndMac(ox, oy) {
+  const patch = getPatch(ox, oy);
+
+  // Patch grid
+  const pg = document.getElementById('patchGrid');
+  pg.innerHTML = '';
+  patch.forEach(v => {
+    const cell = document.createElement('div');
+    cell.className = 'patch-cell';
+    cell.style.background = `rgb(${v},${v},${v})`;
+    cell.style.color = v>127 ? '#1e293b' : '#f8fafc';
+    cell.textContent = v;
+    pg.appendChild(cell);
+  });
+
+  // MAC patch grid
+  const mp = document.getElementById('macPatch');
+  mp.innerHTML = '';
+  patch.forEach(v => {
+    const cell = document.createElement('div');
+    cell.className = 'mac-cell';
+    cell.style.background = `rgba(59,130,246,${0.05+v/380})`;
+    cell.style.border = '1px solid #bfdbfe';
+    cell.style.color = '#1e40af';
+    cell.textContent = v;
+    mp.appendChild(cell);
+  });
+
+  // Sum
+  const kdef  = KERNELS[state.activeKernel];
+  const kFlat = kdef.data.flat();
+  const kScale = kdef.scale || 1;
+  let sum = 0;
+  for (let i=0; i<9; i++) sum += patch[i] * kFlat[i] * kScale;
+
+  document.getElementById('macResult').textContent = Math.round(sum);
+  document.getElementById('macFormula').textContent =
+    `Σ(patch × kernel) = ${Math.round(sum)}  at output[${oy}][${ox}]`;
+}
+
+function renderMacKernelGrid() {
+  const kdef  = KERNELS[state.activeKernel];
+  const kFlat = kdef.data.flat();
+  const kScale = kdef.scale || 1;
+  const mk = document.getElementById('macKernel');
+  mk.innerHTML = '';
+  kFlat.forEach(v => {
+    const cell = document.createElement('div');
+    cell.className = 'mac-cell';
+    cell.style.background = v>0 ? 'rgba(16,185,129,0.15)' : v<0 ? 'rgba(239,68,68,0.15)' : 'rgba(148,163,184,0.08)';
+    cell.style.border = '1px solid #d1fae5';
+    cell.style.color = v>0 ? '#059669' : v<0 ? '#dc2626' : '#64748b';
+    cell.textContent = kdef.scale ? (v*kScale).toFixed(3) : String(v);
+    mk.appendChild(cell);
+  });
+}
+
+// ─────────────────────────────────────────────────────────────
+// OUTPUT SIZE FORMULA
+// ─────────────────────────────────────────────────────────────
+function updateOutputSize() {
+  const { srcW, srcH, stride, padding } = state;
+  if (!srcW) return;
+  const F=3, S=stride, P=padding;
+  const outW = Math.floor((srcW-F+2*P)/S)+1;
+  const outH = Math.floor((srcH-F+2*P)/S)+1;
+  state.outW = outW; state.outH = outH;
+
+  document.getElementById('outputSizeCalc').textContent =
+    `⌊(${srcW}−3+${2*P})/${S}⌋+1 = ${outW} × ${outH}`;
+  document.getElementById('outputDims').textContent =
+    `Output: ${outW} × ${outH} feature map`;
+
+  outputCanvas.width = outW; outputCanvas.height = outH;
+  const ds = Math.min(DISPLAY_SIZE/outW, DISPLAY_SIZE/outH);
+  outputCanvas.style.width  = Math.round(outW*ds)+'px';
+  outputCanvas.style.height = Math.round(outH*ds)+'px';
+}
+
+// ─────────────────────────────────────────────────────────────
+// ANIMATION & APPLY
+// ─────────────────────────────────────────────────────────────
+function clearOutput() {
+  outputCtx.clearRect(0, 0, outputCanvas.width, outputCanvas.height);
+  setProgress(0, 0);
+  document.getElementById('outputPlaceholder').style.display = '';
+}
+
+function setProgress(done, total) {
+  const pct = total ? Math.round((done/total)*100) : 0;
+  document.getElementById('progressBar').style.width = (total ? pct : 0)+'%';
+  document.getElementById('progressLabel').textContent = total
+    ? `${done.toLocaleString()} / ${total.toLocaleString()} pixels`
+    : (state.grayData ? 'Ready' : 'Load an image to begin');
+  document.getElementById('progressPct').textContent = total ? pct+'%' : '';
+}
+
+function stopAnimation() {
+  if (state.animFrame) { cancelAnimationFrame(state.animFrame); state.animFrame=null; }
+  state.isAnimating = false;
+  document.getElementById('animateBtn').textContent = '▶ Animate';
+}
+
+function startAnimation() {
+  if (!state.grayData) return;
+  stopAnimation();
+  document.getElementById('outputPlaceholder').style.display = 'none';
+
+  const result = computeConvolution();
+  if (!result) return;
+  const { output, outW, outH } = result;
+
+  const displayMode = document.querySelector('input[name="displayMode"]:checked').value;
+  const normalized  = normalizeOutput(output, displayMode);
+  const imgData     = outputCtx.createImageData(outW, outH);
+
+  const total = outW * outH;
+  // Aim for ~10 second animation; at ~60fps each frame advances this many pixels
+  const SPEED = Math.max(1, Math.round(total / 600));
+
+  state.animIdx = 0;
+  state.isAnimating = true;
+  document.getElementById('animateBtn').textContent = '⏹ Stop';
+
+  function frame() {
+    const end = Math.min(state.animIdx + SPEED, total);
+    for (let i=state.animIdx; i<end; i++) {
+      const v = normalized[i];
+      imgData.data[i*4]   = v;
+      imgData.data[i*4+1] = v;
+      imgData.data[i*4+2] = v;
+      imgData.data[i*4+3] = 255;
+    }
+    outputCtx.putImageData(imgData, 0, 0);
+
+    const lastI = end - 1;
+    const lox = lastI % outW;
+    const loy = Math.floor(lastI / outW);
+    drawKernelOverlay(lox, loy);
+    updatePatchAndMac(lox, loy);
+
+    state.animIdx = end;
+    setProgress(end, total);
+
+    if (end < total) {
+      state.animFrame = requestAnimationFrame(frame);
+    } else {
+      state.isAnimating = false;
+      state.animFrame = null;
+      document.getElementById('animateBtn').textContent = '▶ Animate';
+    }
+  }
+  state.animFrame = requestAnimationFrame(frame);
+}
+
+function applyFullImage() {
+  if (!state.grayData) return;
+  stopAnimation();
+  document.getElementById('outputPlaceholder').style.display = 'none';
+
+  const result = computeConvolution();
+  if (!result) return;
+  const { output, outW, outH } = result;
+
+  const displayMode = document.querySelector('input[name="displayMode"]:checked').value;
+  const normalized  = normalizeOutput(output, displayMode);
+  const imgData     = outputCtx.createImageData(outW, outH);
+
+  for (let i=0; i<outW*outH; i++) {
+    const v = normalized[i];
+    imgData.data[i*4]   = v;
+    imgData.data[i*4+1] = v;
+    imgData.data[i*4+2] = v;
+    imgData.data[i*4+3] = 255;
+  }
+  outputCtx.putImageData(imgData, 0, 0);
+  setProgress(outW*outH, outW*outH);
+
+  // Move overlay to last position
+  drawKernelOverlay(outW-1, outH-1);
+  updatePatchAndMac(outW-1, outH-1);
+}
+
+// ─────────────────────────────────────────────────────────────
+// EVENT LISTENERS
+// ─────────────────────────────────────────────────────────────
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) loadImageFromFile(e.target.files[0]);
+});
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('border-blue-400','bg-blue-50');
+});
+dropZone.addEventListener('dragleave', () => {
+  dropZone.classList.remove('border-blue-400','bg-blue-50');
+});
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('border-blue-400','bg-blue-50');
+  if (e.dataTransfer.files[0]) loadImageFromFile(e.dataTransfer.files[0]);
+});
+
+document.querySelectorAll('input[name="stride"]').forEach(r => r.addEventListener('change', () => {
+  state.stride = parseInt(r.value);
+  stopAnimation(); clearOutput(); updateOutputSize();
+}));
+document.querySelectorAll('input[name="padding"]').forEach(r => r.addEventListener('change', () => {
+  state.padding = parseInt(r.value);
+  stopAnimation(); clearOutput(); updateOutputSize();
+}));
+
+document.getElementById('animateBtn').addEventListener('click', () => {
+  if (state.isAnimating) stopAnimation(); else startAnimation();
+});
+document.getElementById('applyBtn').addEventListener('click', applyFullImage);
+document.getElementById('resetBtn').addEventListener('click', () => {
+  stopAnimation(); clearOutput();
+  if (!state.grayData) return;
+  drawKernelOverlay(0, 0);
+  updatePatchAndMac(0, 0);
+  setProgress(0, 0);
+});
+
+// Input canvas — click to set kernel position
+inputCanvas.addEventListener('click', e => {
+  if (!state.grayData) return;
+  const rect = inputCanvas.getBoundingClientRect();
+  const scaleX = state.srcW / rect.width;
+  const scaleY = state.srcH / rect.height;
+  const ix = (e.clientX - rect.left) * scaleX;
+  const iy = (e.clientY - rect.top)  * scaleY;
+  const F=3, S=state.stride, P=state.padding;
+  const outW = state.outW, outH = state.outH;
+  const ox = Math.max(0, Math.min(outW-1, Math.round((ix+P-1)/S)));
+  const oy = Math.max(0, Math.min(outH-1, Math.round((iy+P-1)/S)));
+  drawKernelOverlay(ox, oy);
+  updatePatchAndMac(ox, oy);
+});
+
+// ─────────────────────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────────────────────
+initKernelBtns();
+selectKernel('Sobel X');
+initSampleThumbs();
+</script>
+</body>
+</html>

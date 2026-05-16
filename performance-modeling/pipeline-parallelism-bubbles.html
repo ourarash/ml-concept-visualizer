@@ -1,0 +1,817 @@
+<!doctype html>
+<!-- Source: Integrated from PR #58 by Wenjin Li (@MarcuX009): feat: add pipeline parallelism bubble visualizer. -->
+<!-- Brief: Interactive visualization of GPipe and 1F1B pipeline-parallel training schedules, bubble slots, and utilization. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Pipeline Parallelism Bubble Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --ink: #0f172a;
+            --muted: #64748b;
+            --line: #dbe4ef;
+            --panel: #ffffff;
+            --wash: #f6f8fb;
+            --forward: #2563eb;
+            --backward: #f97316;
+            --idle: #e2e8f0;
+            --accent: #be185d;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            background: linear-gradient(180deg, #f8fafc 0%, #edf2f7 100%);
+            color: var(--ink);
+            font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+
+        .hero {
+            background: #111827;
+            color: #f8fafc;
+        }
+
+        .surface {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
+        }
+
+        .control-label {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            color: #334155;
+            font-size: 0.86rem;
+            font-weight: 700;
+        }
+
+        .range {
+            width: 100%;
+            accent-color: var(--accent);
+        }
+
+        .mode-btn {
+            border: 1px solid #cbd5e1;
+            background: #fff;
+            color: #334155;
+            border-radius: 8px;
+            padding: 0.65rem 0.75rem;
+            font-weight: 800;
+            font-size: 0.86rem;
+            transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+        }
+
+        .mode-btn.active {
+            background: #be185d;
+            color: #fff;
+            border-color: #be185d;
+        }
+
+        .metric {
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: #f8fafc;
+            padding: 0.85rem;
+        }
+
+        .metric span {
+            display: block;
+            color: #64748b;
+            font-size: 0.72rem;
+            font-weight: 800;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .metric strong {
+            display: block;
+            margin-top: 0.2rem;
+            color: #0f172a;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 1.3rem;
+            line-height: 1.1;
+        }
+
+        .timeline-wrap {
+            overflow-x: auto;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #fff;
+        }
+
+        .timeline {
+            position: relative;
+            min-width: 760px;
+            padding: 16px 14px 20px;
+        }
+
+        .grid-shell {
+            display: grid;
+            grid-template-columns: 88px repeat(var(--cols), minmax(36px, 1fr));
+            gap: 4px;
+        }
+
+        .time-cell,
+        .stage-label,
+        .slot {
+            min-height: 36px;
+            border-radius: 6px;
+        }
+
+        .time-cell {
+            color: #64748b;
+            font-size: 0.72rem;
+            font-weight: 800;
+            text-align: center;
+            line-height: 36px;
+        }
+
+        .stage-label {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 0.78rem;
+            font-weight: 900;
+        }
+
+        .slot {
+            position: relative;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+            background: #f8fafc;
+            color: #94a3b8;
+            font-size: 0.72rem;
+            font-weight: 900;
+        }
+
+        .slot.work-forward {
+            border-color: rgba(37, 99, 235, 0.4);
+            background: rgba(37, 99, 235, 0.12);
+            color: #1d4ed8;
+        }
+
+        .slot.work-backward {
+            border-color: rgba(249, 115, 22, 0.45);
+            background: rgba(249, 115, 22, 0.14);
+            color: #c2410c;
+        }
+
+        .slot.active::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            border: 3px solid #be185d;
+            border-radius: 6px;
+            animation: pulse-frame 0.9s ease-in-out infinite;
+        }
+
+        @keyframes pulse-frame {
+            0%, 100% { opacity: 0.45; }
+            50% { opacity: 1; }
+        }
+
+        .bubble {
+            background: repeating-linear-gradient(
+                -45deg,
+                #f8fafc 0,
+                #f8fafc 7px,
+                #e2e8f0 7px,
+                #e2e8f0 9px
+            );
+        }
+
+        .legend-dot {
+            display: inline-block;
+            width: 0.8rem;
+            height: 0.8rem;
+            border-radius: 999px;
+            vertical-align: -0.1rem;
+        }
+
+        .code-chip {
+            border-radius: 6px;
+            background: #0f172a;
+            color: #e2e8f0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+            font-size: 0.78rem;
+            line-height: 1.5;
+        }
+
+        .step-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            border-radius: 999px;
+            border: 1px solid #dbe4ef;
+            background: #f8fafc;
+            padding: 0.35rem 0.65rem;
+            color: #334155;
+            font-size: 0.78rem;
+            font-weight: 800;
+        }
+
+        .compare-card {
+            border: 1px solid #dbe4ef;
+            border-radius: 8px;
+            background: #f8fafc;
+            padding: 1rem;
+        }
+
+        .compare-bar {
+            height: 0.6rem;
+            overflow: hidden;
+            border-radius: 999px;
+            background: #e2e8f0;
+        }
+
+        .compare-bar > span {
+            display: block;
+            height: 100%;
+            border-radius: inherit;
+            background: #be185d;
+        }
+
+        @media (max-width: 740px) {
+            .timeline {
+                min-width: 640px;
+            }
+
+            .grid-shell {
+                grid-template-columns: 72px repeat(var(--cols), minmax(30px, 1fr));
+                gap: 3px;
+            }
+
+            .time-cell,
+            .stage-label,
+            .slot {
+                min-height: 32px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="hero px-4 py-8 md:py-10">
+        <div class="mx-auto max-w-7xl">
+            <a href="../index.html" class="inline-flex text-sm font-bold text-pink-200 hover:text-white">Back to catalog</a>
+            <div class="mt-5 grid gap-6 lg:grid-cols-[1.3fr_0.7fr] lg:items-end">
+                <div>
+                    <p class="text-sm font-black uppercase tracking-[0.18em] text-pink-200">EE508 · Performance Modeling · Distributed Training</p>
+                    <h1 class="mt-3 text-4xl font-black tracking-tight md:text-5xl">Pipeline Parallelism Bubble Visualizer</h1>
+                    <p class="mt-4 max-w-3xl text-base leading-7 text-slate-300">
+                        Split transformer layers across devices, then watch microbatches move through the pipeline. Compare
+                        GPipe flush scheduling with 1F1B scheduling and see exactly where idle bubbles waste accelerator time.
+                    </p>
+                </div>
+                <div class="grid grid-cols-3 gap-3">
+                    <div class="rounded-lg border border-white/10 bg-white/5 p-3">
+                        <div class="text-2xl font-black" id="heroUtil">0%</div>
+                        <div class="mt-1 text-xs font-bold uppercase tracking-wider text-slate-400">Utilization</div>
+                    </div>
+                    <div class="rounded-lg border border-white/10 bg-white/5 p-3">
+                        <div class="text-2xl font-black" id="heroBubbles">0</div>
+                        <div class="mt-1 text-xs font-bold uppercase tracking-wider text-slate-400">Bubble Slots</div>
+                    </div>
+                    <div class="rounded-lg border border-white/10 bg-white/5 p-3">
+                        <div class="text-2xl font-black" id="heroSteps">0</div>
+                        <div class="mt-1 text-xs font-bold uppercase tracking-wider text-slate-400">Steps</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="mx-auto grid max-w-7xl gap-6 px-4 py-6 lg:grid-cols-[320px_1fr]">
+        <aside class="surface h-fit p-5">
+            <h2 class="text-lg font-black">Controls</h2>
+            <p class="mt-1 text-sm leading-6 text-slate-600">Change the model split and microbatch count, then play or step through the schedule.</p>
+
+            <div class="mt-5 space-y-5">
+                <div>
+                    <label class="control-label" for="stageSlider">Pipeline stages <strong id="stageValue">4</strong></label>
+                    <input id="stageSlider" class="range mt-2" type="range" min="2" max="8" step="1" value="4" />
+                </div>
+
+                <div>
+                    <label class="control-label" for="microSlider">Microbatches <strong id="microValue">8</strong></label>
+                    <input id="microSlider" class="range mt-2" type="range" min="1" max="16" step="1" value="8" />
+                </div>
+
+                <div>
+                    <label class="control-label" for="speedSlider">Animation speed <strong id="speedValue">1.0x</strong></label>
+                    <input id="speedSlider" class="range mt-2" type="range" min="0.5" max="3" step="0.25" value="1" />
+                </div>
+
+                <div>
+                    <div class="mb-2 text-sm font-black text-slate-700">Schedule</div>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="gpipeBtn" class="mode-btn active" type="button">GPipe Flush</button>
+                        <button id="oneFOneBBtn" class="mode-btn" type="button">1F1B</button>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-3 gap-2">
+                    <button id="backBtn" class="mode-btn" type="button">Prev</button>
+                    <button id="playBtn" class="mode-btn active" type="button">Play</button>
+                    <button id="nextBtn" class="mode-btn" type="button">Next</button>
+                </div>
+
+                <div>
+                    <label class="control-label" for="timeScrubber">Timeline step <strong id="timeValue">t0</strong></label>
+                    <input id="timeScrubber" class="range mt-2" type="range" min="0" max="1" step="1" value="0" />
+                </div>
+
+                <button id="resetBtn" class="mode-btn w-full" type="button">Reset Timeline</button>
+            </div>
+
+            <div class="mt-5 grid grid-cols-2 gap-3">
+                <div class="metric">
+                    <span>Utilization</span>
+                    <strong id="utilMetric">0%</strong>
+                </div>
+                <div class="metric">
+                    <span>Bubble ratio</span>
+                    <strong id="bubbleRatioMetric">0%</strong>
+                </div>
+                <div class="metric">
+                    <span>Useful work</span>
+                    <strong id="workMetric">0</strong>
+                </div>
+                <div class="metric">
+                    <span>Total slots</span>
+                    <strong id="slotMetric">0</strong>
+                </div>
+            </div>
+        </aside>
+
+        <section class="min-w-0 space-y-6">
+            <div class="surface p-4 md:p-5">
+                <div class="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
+                    <div>
+                        <h2 class="text-xl font-black">Animated Stage Timeline</h2>
+                        <p id="scheduleSummary" class="mt-1 text-sm leading-6 text-slate-600"></p>
+                    </div>
+                    <div class="flex flex-wrap gap-3 text-sm font-bold text-slate-600">
+                        <span><span class="legend-dot" style="background: rgba(37,99,235,.72);"></span> Forward</span>
+                        <span><span class="legend-dot" style="background: rgba(249,115,22,.78);"></span> Backward</span>
+                        <span><span class="legend-dot" style="background: #e2e8f0;"></span> Bubble</span>
+                    </div>
+                </div>
+
+                <div class="timeline-wrap mt-5">
+                    <div id="timeline" class="timeline" aria-label="Pipeline schedule timeline"></div>
+                </div>
+
+                <div class="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <div class="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                        <div>
+                            <h3 class="text-sm font-black uppercase tracking-wider text-slate-500">Current Time Step</h3>
+                            <p id="currentStepText" class="mt-1 text-sm leading-6 text-slate-700"></p>
+                        </div>
+                        <div id="currentStepPills" class="flex flex-wrap gap-2"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="surface p-5">
+                <div class="flex flex-col gap-2 md:flex-row md:items-end md:justify-between">
+                    <div>
+                        <h2 class="text-xl font-black">Same Settings, Two Schedules</h2>
+                        <p class="mt-1 text-sm leading-6 text-slate-600">Use this comparison to separate the effect of microbatch count from the effect of the schedule itself.</p>
+                    </div>
+                    <div class="text-sm font-black text-pink-700" id="comparisonWinner"></div>
+                </div>
+                <div id="comparisonGrid" class="mt-4 grid gap-4 md:grid-cols-2"></div>
+            </div>
+
+            <div class="grid gap-6 lg:grid-cols-2">
+                <div class="surface p-5">
+                    <h2 class="text-xl font-black">What The Animation Shows</h2>
+                    <div id="insightText" class="mt-3 space-y-3 text-sm leading-6 text-slate-700"></div>
+                </div>
+
+                <div class="surface p-5">
+                    <h2 class="text-xl font-black">Schedule Model</h2>
+                    <div class="code-chip mt-3 p-4">
+                        <div id="formulaText"></div>
+                    </div>
+                    <p class="mt-3 text-sm leading-6 text-slate-600">
+                        This model uses one equal-duration forward or backward unit per stage. Real systems also include
+                        activation communication and uneven layer times, but the bubble behavior is the same scheduling issue:
+                        devices are idle while waiting for dependencies.
+                    </p>
+                </div>
+            </div>
+
+            <div class="surface p-5">
+                <h2 class="text-xl font-black">Why Students Should Care</h2>
+                <div class="mt-3 grid gap-4 md:grid-cols-3">
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h3 class="font-black text-slate-900">Layer Splitting Is Not Enough</h3>
+                        <p class="mt-2 text-sm leading-6 text-slate-600">Pipeline parallelism reduces memory per device, but idle bubbles can erase much of the throughput gain.</p>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h3 class="font-black text-slate-900">Microbatches Fill The Pipe</h3>
+                        <p class="mt-2 text-sm leading-6 text-slate-600">More microbatches amortize warmup and drain time, which raises utilization for the same number of stages.</p>
+                    </div>
+                    <div class="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                        <h3 class="font-black text-slate-900">Scheduling Changes Memory</h3>
+                        <p class="mt-2 text-sm leading-6 text-slate-600">1F1B starts backward work sooner than GPipe, which usually lowers activation residency while keeping the pipeline busy.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <script>
+        const els = {
+            stageSlider: document.getElementById("stageSlider"),
+            microSlider: document.getElementById("microSlider"),
+            speedSlider: document.getElementById("speedSlider"),
+            stageValue: document.getElementById("stageValue"),
+            microValue: document.getElementById("microValue"),
+            speedValue: document.getElementById("speedValue"),
+            gpipeBtn: document.getElementById("gpipeBtn"),
+            oneFOneBBtn: document.getElementById("oneFOneBBtn"),
+            backBtn: document.getElementById("backBtn"),
+            playBtn: document.getElementById("playBtn"),
+            nextBtn: document.getElementById("nextBtn"),
+            resetBtn: document.getElementById("resetBtn"),
+            timeScrubber: document.getElementById("timeScrubber"),
+            timeValue: document.getElementById("timeValue"),
+            timeline: document.getElementById("timeline"),
+            scheduleSummary: document.getElementById("scheduleSummary"),
+            insightText: document.getElementById("insightText"),
+            formulaText: document.getElementById("formulaText"),
+            utilMetric: document.getElementById("utilMetric"),
+            bubbleRatioMetric: document.getElementById("bubbleRatioMetric"),
+            workMetric: document.getElementById("workMetric"),
+            slotMetric: document.getElementById("slotMetric"),
+            heroUtil: document.getElementById("heroUtil"),
+            heroBubbles: document.getElementById("heroBubbles"),
+            heroSteps: document.getElementById("heroSteps"),
+            currentStepText: document.getElementById("currentStepText"),
+            currentStepPills: document.getElementById("currentStepPills"),
+            comparisonGrid: document.getElementById("comparisonGrid"),
+            comparisonWinner: document.getElementById("comparisonWinner"),
+        };
+
+        const state = {
+            stages: 4,
+            microbatches: 8,
+            mode: "gpipe",
+            activeStep: 0,
+            playing: true,
+            speed: 1,
+            timer: null,
+            schedule: null,
+        };
+
+        function buildSchedule(stages, microbatches, mode) {
+            const tasks = [];
+            const forwardDone = Array.from({ length: microbatches }, () => Array(stages).fill(false));
+            const backwardDone = Array.from({ length: microbatches }, () => Array(stages).fill(false));
+            const totalWork = 2 * stages * microbatches;
+            let completed = 0;
+            let time = 0;
+
+            function allForwardDone() {
+                return forwardDone.every(row => row.every(Boolean));
+            }
+
+            function firstReadyBackward(stage) {
+                for (let m = 0; m < microbatches; m++) {
+                    if (backwardDone[m][stage] || !forwardDone[m][stage]) continue;
+                    const dependencyReady = stage === stages - 1 || backwardDone[m][stage + 1];
+                    if (dependencyReady) return m;
+                }
+                return -1;
+            }
+
+            function firstReadyForward(stage) {
+                for (let m = 0; m < microbatches; m++) {
+                    if (forwardDone[m][stage]) continue;
+                    const dependencyReady = stage === 0 || forwardDone[m][stage - 1];
+                    if (dependencyReady) return m;
+                }
+                return -1;
+            }
+
+            while (completed < totalWork) {
+                const assignments = [];
+                for (let s = 0; s < stages; s++) {
+                    let selected = null;
+                    const canRunBackward = mode === "1f1b" || allForwardDone();
+                    const backwardMicro = canRunBackward ? firstReadyBackward(s) : -1;
+                    if (backwardMicro !== -1) {
+                        selected = { type: "B", micro: backwardMicro, stage: s, time };
+                    } else {
+                        const forwardMicro = firstReadyForward(s);
+                        if (forwardMicro !== -1) {
+                            selected = { type: "F", micro: forwardMicro, stage: s, time };
+                        }
+                    }
+                    if (selected) assignments.push(selected);
+                }
+
+                assignments.forEach(task => {
+                    tasks.push(task);
+                    if (task.type === "F") forwardDone[task.micro][task.stage] = true;
+                    else backwardDone[task.micro][task.stage] = true;
+                    completed += 1;
+                });
+                time += 1;
+            }
+
+            const totalSteps = time;
+            const grid = Array.from({ length: stages }, () => Array.from({ length: totalSteps }, () => null));
+            tasks.forEach(task => {
+                grid[task.stage][task.time] = task;
+            });
+
+            const seenForward = Array.from({ length: microbatches }, () => Array(stages).fill(false));
+            const seenBackward = Array.from({ length: microbatches }, () => Array(stages).fill(false));
+            let peakLiveActivations = 0;
+            for (let t = 0; t < totalSteps; t++) {
+                tasks.filter(task => task.time === t).forEach(task => {
+                    if (task.type === "F") seenForward[task.micro][task.stage] = true;
+                    else seenBackward[task.micro][task.stage] = true;
+                });
+                let live = 0;
+                for (let m = 0; m < microbatches; m++) {
+                    for (let s = 0; s < stages; s++) {
+                        if (seenForward[m][s] && !seenBackward[m][s]) live += 1;
+                    }
+                }
+                peakLiveActivations = Math.max(peakLiveActivations, live);
+            }
+
+            const workSlots = tasks.length;
+            const totalSlots = stages * totalSteps;
+            const bubbleSlots = totalSlots - workSlots;
+            const utilization = workSlots / totalSlots;
+            return { tasks, grid, totalSteps, workSlots, totalSlots, bubbleSlots, utilization, peakLiveActivations };
+        }
+
+        function clampActiveStep() {
+            state.activeStep = Math.max(0, Math.min(state.activeStep, state.schedule.totalSteps - 1));
+        }
+
+        function formatPct(value) {
+            return `${Math.round(value * 100)}%`;
+        }
+
+        function renderTimeline() {
+            const { grid, totalSteps } = state.schedule;
+            const maxVisibleCols = Math.max(totalSteps, 10);
+            els.timeline.style.setProperty("--cols", maxVisibleCols);
+
+            const cells = [];
+            cells.push("<div></div>");
+            for (let t = 0; t < totalSteps; t++) {
+                cells.push(`<div class="time-cell">t${t}</div>`);
+            }
+
+            for (let s = 0; s < state.stages; s++) {
+                cells.push(`<div class="stage-label">Stage ${s}</div>`);
+                for (let t = 0; t < totalSteps; t++) {
+                    const task = grid[s][t];
+                    const active = t === state.activeStep ? " active" : "";
+                    if (task) {
+                        const cls = task.type === "F" ? "work-forward" : "work-backward";
+                        cells.push(`<div class="slot ${cls}${active}" title="${task.type}${task.micro} on stage ${s}, time ${t}">${task.type}${task.micro}</div>`);
+                    } else {
+                        cells.push(`<div class="slot bubble${active}" title="Idle bubble on stage ${s}, time ${t}">idle</div>`);
+                    }
+                }
+            }
+            els.timeline.innerHTML = `<div class="grid-shell">${cells.join("")}</div>`;
+        }
+
+        function updateMetrics() {
+            const schedule = state.schedule;
+            const bubbleRatio = schedule.bubbleSlots / schedule.totalSlots;
+            els.utilMetric.textContent = formatPct(schedule.utilization);
+            els.bubbleRatioMetric.textContent = formatPct(bubbleRatio);
+            els.workMetric.textContent = schedule.workSlots;
+            els.slotMetric.textContent = schedule.totalSlots;
+            els.heroUtil.textContent = formatPct(schedule.utilization);
+            els.heroBubbles.textContent = schedule.bubbleSlots;
+            els.heroSteps.textContent = schedule.totalSteps;
+        }
+
+        function tasksAtStep(schedule, step) {
+            return schedule.tasks
+                .filter(task => task.time === step)
+                .sort((a, b) => a.stage - b.stage);
+        }
+
+        function updateCurrentStep() {
+            const active = tasksAtStep(state.schedule, state.activeStep);
+            const idleCount = state.stages - active.length;
+            const forwardCount = active.filter(task => task.type === "F").length;
+            const backwardCount = active.filter(task => task.type === "B").length;
+            els.currentStepText.textContent =
+                `At t${state.activeStep}, ${active.length} of ${state.stages} stages are doing useful work. ` +
+                `${forwardCount} forward task(s), ${backwardCount} backward task(s), and ${idleCount} idle bubble slot(s).`;
+
+            if (active.length === 0) {
+                els.currentStepPills.innerHTML = `<span class="step-pill">All stages idle</span>`;
+                return;
+            }
+
+            els.currentStepPills.innerHTML = active.map(task => {
+                const phase = task.type === "F" ? "Forward" : "Backward";
+                return `<span class="step-pill">Stage ${task.stage}: ${phase} microbatch ${task.micro}</span>`;
+            }).join("");
+        }
+
+        function updateComparison() {
+            const gpipe = buildSchedule(state.stages, state.microbatches, "gpipe");
+            const onef = buildSchedule(state.stages, state.microbatches, "1f1b");
+            const rows = [
+                { label: "GPipe Flush", data: gpipe, note: "Easy mental model: finish forward for every microbatch, then drain backward." },
+                { label: "1F1B", data: onef, note: "Prioritizes ready backward work, so backward starts before all forwards finish." },
+            ];
+            const maxSteps = Math.max(gpipe.totalSteps, onef.totalSteps);
+            const activationDelta = gpipe.peakLiveActivations - onef.peakLiveActivations;
+            const winner = activationDelta > 0
+                ? `1F1B lowers peak live activations by ${activationDelta}`
+                : "Both schedules have the same peak live activations here";
+            els.comparisonWinner.textContent = winner;
+            els.comparisonGrid.innerHTML = rows.map(row => {
+                const bubbleRatio = row.data.bubbleSlots / row.data.totalSlots;
+                const stepWidth = Math.max(4, Math.round((row.data.totalSteps / maxSteps) * 100));
+                const utilWidth = Math.round(row.data.utilization * 100);
+                return `
+                    <div class="compare-card">
+                        <div class="flex items-start justify-between gap-4">
+                            <div>
+                                <h3 class="font-black text-slate-900">${row.label}</h3>
+                                <p class="mt-1 text-sm leading-6 text-slate-600">${row.note}</p>
+                            </div>
+                            <div class="text-right font-mono text-xl font-black text-pink-700">${formatPct(row.data.utilization)}</div>
+                        </div>
+                        <div class="mt-4 space-y-3">
+                            <div>
+                                <div class="mb-1 flex justify-between text-xs font-black uppercase tracking-wider text-slate-500">
+                                    <span>Total steps</span><span>${row.data.totalSteps}</span>
+                                </div>
+                                <div class="compare-bar"><span style="width:${stepWidth}%"></span></div>
+                            </div>
+                            <div>
+                                <div class="mb-1 flex justify-between text-xs font-black uppercase tracking-wider text-slate-500">
+                                    <span>Utilization</span><span>${formatPct(row.data.utilization)}</span>
+                                </div>
+                                <div class="compare-bar"><span style="width:${utilWidth}%; background:#2563eb"></span></div>
+                            </div>
+                            <div class="grid grid-cols-2 gap-2 text-sm">
+                                <div class="rounded-md bg-white p-2"><strong class="block text-slate-900">${row.data.bubbleSlots}</strong><span class="text-slate-500">bubble slots</span></div>
+                                <div class="rounded-md bg-white p-2"><strong class="block text-slate-900">${row.data.peakLiveActivations}</strong><span class="text-slate-500">peak live activations</span></div>
+                            </div>
+                            <p class="text-xs leading-5 text-slate-500">Bubble ratio: ${formatPct(bubbleRatio)}. Live activations count forward results that have not yet been consumed by backward.</p>
+                        </div>
+                    </div>
+                `;
+            }).join("");
+        }
+
+        function updateText() {
+            const modeName = state.mode === "gpipe" ? "GPipe flush" : "1F1B";
+            const schedule = state.schedule;
+            els.scheduleSummary.textContent =
+                `${modeName} schedule with ${state.stages} stages and ${state.microbatches} microbatches. Time t${state.activeStep} is highlighted across all stages.`;
+
+            const fill = state.stages - 1;
+            const drain = state.stages - 1;
+            const bubbleRatio = Math.round((schedule.bubbleSlots / schedule.totalSlots) * 100);
+            const activationNote = state.mode === "gpipe"
+                ? "GPipe runs all forward passes first, then all backward passes. This makes the warmup and drain easy to see, but activations wait longer before backward consumes them."
+                : "1F1B begins backward passes as soon as dependencies are ready. The pipe still has warmup and drain bubbles, but backward work interleaves with later forward work.";
+
+            els.insightText.innerHTML = `
+                <p><strong>Current schedule:</strong> ${activationNote}</p>
+                <p><strong>Bubble intuition:</strong> a ${state.stages}-stage pipeline needs about ${fill} fill steps and ${drain} drain steps. With only a few microbatches, those idle slots dominate; with more microbatches, useful work occupies more of the timeline.</p>
+                <p><strong>At this setting:</strong> ${schedule.workSlots} useful forward/backward slots are placed into ${schedule.totalSlots} possible device-time slots, so ${bubbleRatio}% of the slots are idle bubbles.</p>
+            `;
+
+            els.formulaText.innerHTML = state.mode === "gpipe"
+                ? `Policy: run all legal forward tasks first, then run legal backward tasks.<br>Dependencies: F(m,s) waits for F(m,s-1); B(m,s) waits for B(m,s+1).<br>Useful work = 2MS<br>Utilization = useful work / (S · total steps)`
+                : `Policy: at each stage, run the oldest ready backward task first; otherwise run the oldest ready forward task.<br>Dependencies: no stage can execute two tasks in the same time slot, and backward cannot pass a forward dependency.`;
+        }
+
+        function renderAll() {
+            state.schedule = buildSchedule(state.stages, state.microbatches, state.mode);
+            clampActiveStep();
+            els.timeScrubber.max = state.schedule.totalSteps - 1;
+            els.timeScrubber.value = state.activeStep;
+            els.timeValue.textContent = `t${state.activeStep}`;
+            els.stageValue.textContent = state.stages;
+            els.microValue.textContent = state.microbatches;
+            els.speedValue.textContent = `${state.speed.toFixed(2).replace(/\\.00$/, "")}x`;
+            els.gpipeBtn.classList.toggle("active", state.mode === "gpipe");
+            els.oneFOneBBtn.classList.toggle("active", state.mode === "1f1b");
+            els.playBtn.textContent = state.playing ? "Pause" : "Play";
+            els.playBtn.classList.toggle("active", state.playing);
+            renderTimeline();
+            updateMetrics();
+            updateCurrentStep();
+            updateComparison();
+            updateText();
+            updateTimer();
+        }
+
+        function updateTimer() {
+            if (state.timer) {
+                window.clearInterval(state.timer);
+                state.timer = null;
+            }
+            if (!state.playing) return;
+            const delay = Math.max(240, 1050 / state.speed);
+            state.timer = window.setInterval(() => {
+                state.activeStep = (state.activeStep + 1) % state.schedule.totalSteps;
+                els.timeScrubber.value = state.activeStep;
+                els.timeValue.textContent = `t${state.activeStep}`;
+                renderTimeline();
+                updateCurrentStep();
+                updateText();
+            }, delay);
+        }
+
+        function setMode(mode) {
+            state.mode = mode;
+            state.activeStep = 0;
+            renderAll();
+        }
+
+        els.stageSlider.addEventListener("input", () => {
+            state.stages = Number(els.stageSlider.value);
+            state.activeStep = 0;
+            renderAll();
+        });
+
+        els.microSlider.addEventListener("input", () => {
+            state.microbatches = Number(els.microSlider.value);
+            state.activeStep = 0;
+            renderAll();
+        });
+
+        els.speedSlider.addEventListener("input", () => {
+            state.speed = Number(els.speedSlider.value);
+            renderAll();
+        });
+
+        els.timeScrubber.addEventListener("input", () => {
+            state.playing = false;
+            state.activeStep = Number(els.timeScrubber.value);
+            renderAll();
+        });
+
+        els.gpipeBtn.addEventListener("click", () => setMode("gpipe"));
+        els.oneFOneBBtn.addEventListener("click", () => setMode("1f1b"));
+
+        els.playBtn.addEventListener("click", () => {
+            state.playing = !state.playing;
+            renderAll();
+        });
+
+        els.backBtn.addEventListener("click", () => {
+            state.playing = false;
+            state.activeStep = (state.activeStep - 1 + state.schedule.totalSteps) % state.schedule.totalSteps;
+            renderAll();
+        });
+
+        els.nextBtn.addEventListener("click", () => {
+            state.playing = false;
+            state.activeStep = (state.activeStep + 1) % state.schedule.totalSteps;
+            renderAll();
+        });
+
+        els.resetBtn.addEventListener("click", () => {
+            state.activeStep = 0;
+            state.playing = false;
+            renderAll();
+        });
+
+        window.addEventListener("beforeunload", () => {
+            if (state.timer) window.clearInterval(state.timer);
+        });
+
+        renderAll();
+    </script>
+</body>
+
+</html>

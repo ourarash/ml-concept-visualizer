@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #53 by Taha (@teezee4): Transformer training memory visualization. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Transformer Training Memory | EE508</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
+
+        input[type=range] {
+            -webkit-appearance: none;
+            appearance: none;
+            height: 6px;
+            background: #e2e8f0;
+            border-radius: 3px;
+            outline: none;
+            cursor: pointer;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            box-shadow: 0 1px 4px rgba(99,102,241,.4);
+        }
+        input[type=range]::-moz-range-thumb {
+            width: 18px; height: 18px;
+            border-radius: 50%;
+            background: #6366f1;
+            cursor: pointer;
+            border: none;
+        }
+
+        .seg-bar {
+            transition: width 0.45s cubic-bezier(.4,0,.2,1);
+        }
+
+        @keyframes pulse-warn {
+            0%, 100% { opacity: 1; filter: brightness(1); }
+            50%       { opacity: .7; filter: brightness(1.3); }
+        }
+        .pulse-warn { animation: pulse-warn 1.1s ease-in-out infinite; }
+
+        .stage-box {
+            transition: border-color .25s ease, background-color .25s ease, box-shadow .25s ease;
+            border: 2px solid #e2e8f0;
+            background: #f8fafc;
+        }
+        .stage-active  { border-color: #6366f1 !important; background: #eef2ff !important; box-shadow: 0 0 0 3px rgba(99,102,241,.15); }
+        .stage-storing { border-color: #ef4444 !important; background: #fef2f2 !important; box-shadow: 0 0 0 3px rgba(239,68,68,.15); }
+        .stage-done    { border-color: #22c55e !important; background: #f0fdf4 !important; }
+
+        .mem-progress-bar { transition: width .35s ease; }
+
+        canvas { display: block; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+
+<!-- ── Header ─────────────────────────────────────────────────────── -->
+<div class="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 text-white shadow-xl">
+    <div class="max-w-6xl mx-auto px-4 py-8">
+        <a href="../../index.html"
+           class="inline-flex items-center gap-1.5 text-indigo-300 hover:text-white text-sm font-medium mb-4 transition-colors">
+            ← Back to All Visualizations
+        </a>
+        <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight">
+            Transformer Memory &amp; Compute Bottlenecks
+        </h1>
+        <p class="mt-2 text-indigo-200 max-w-3xl text-base leading-relaxed">
+            During training, every forward pass must store Q, K, V, and the full <strong>n×n attention matrix</strong>
+            so that backpropagation can compute gradients.
+            Self-attention memory grows <strong>O(n²)</strong> — quadratically with sequence length —
+            while feedforward memory grows O(n). This is why long-sequence training is expensive and why
+            Flash Attention was invented.
+        </p>
+    </div>
+</div>
+
+<main class="max-w-6xl mx-auto px-4 py-8 space-y-8">
+
+<!-- ── 1. Parameter Sliders ────────────────────────────────────────── -->
+<section class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+    <h2 class="text-base font-bold text-slate-900 mb-4">Model Parameters</h2>
+    <div class="grid grid-cols-2 lg:grid-cols-4 gap-6">
+
+        <!-- n -->
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">
+                Sequence Length <span class="text-indigo-500">(n)</span>
+            </label>
+            <input type="range" id="slider-n" min="64" max="4096" step="64" value="512" class="w-full">
+            <div class="flex justify-between text-xs text-slate-400 mt-1.5">
+                <span>64</span>
+                <span id="val-n" class="font-bold text-indigo-600 text-sm">512</span>
+                <span>4096</span>
+            </div>
+        </div>
+
+        <!-- d_model -->
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">
+                Model Dim <span class="text-indigo-500">(d_model)</span>
+            </label>
+            <select id="sel-d"
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium
+                           focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white">
+                <option value="128">128</option>
+                <option value="256">256</option>
+                <option value="512" selected>512</option>
+                <option value="1024">1024</option>
+            </select>
+            <div id="val-dk" class="text-xs text-slate-400 mt-1.5">d_k = 64 per head</div>
+        </div>
+
+        <!-- h -->
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">
+                Num Heads <span class="text-indigo-500">(h)</span>
+            </label>
+            <select id="sel-h"
+                    class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium
+                           focus:outline-none focus:ring-2 focus:ring-indigo-300 bg-white">
+                <option value="4">4</option>
+                <option value="8" selected>8</option>
+                <option value="16">16</option>
+            </select>
+            <div class="text-xs text-slate-400 mt-1.5">Q/K/V dim = d_model / h</div>
+        </div>
+
+        <!-- L -->
+        <div>
+            <label class="block text-sm font-semibold text-slate-700 mb-1.5">
+                Num Layers <span class="text-indigo-500">(L)</span>
+            </label>
+            <input type="range" id="slider-L" min="1" max="24" step="1" value="6" class="w-full">
+            <div class="flex justify-between text-xs text-slate-400 mt-1.5">
+                <span>1</span>
+                <span id="val-L" class="font-bold text-indigo-600 text-sm">6</span>
+                <span>24</span>
+            </div>
+        </div>
+
+    </div>
+</section>
+
+<!-- ── 2. Memory Breakdown Bars ────────────────────────────────────── -->
+<section class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+    <h2 class="text-base font-bold text-slate-900 mb-1">Activation Memory Breakdown <span class="font-normal text-slate-400 text-sm">(per layer, float32)</span></h2>
+    <p class="text-sm text-slate-500 mb-5">
+        Each segment is a tensor stored during the forward pass.
+        <span class="inline-flex items-center gap-1 text-red-500 font-semibold">⚠ red = n² bottleneck</span> —
+        these grow quadratically. When n &gt; 1024 they flash to signal the bottleneck.
+    </p>
+    <div id="memory-bars" class="space-y-7"><!-- filled by JS --></div>
+</section>
+
+<!-- ── 3. Scaling Curves ───────────────────────────────────────────── -->
+<section class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+    <h2 class="text-base font-bold text-slate-900 mb-1">Scaling Curves</h2>
+    <p class="text-sm text-slate-500 mb-5">
+        How memory and compute grow as n increases. The <span class="text-indigo-500 font-semibold">purple dashed line</span>
+        marks the current n. Watch attention (red) overtake feedforward (blue) as n grows.
+    </p>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div>
+            <h3 class="text-sm font-bold text-slate-700 mb-2">Chart A — Memory vs Sequence Length (MB / layer)</h3>
+            <div class="relative w-full" style="padding-bottom:62%">
+                <canvas id="chart-mem" class="absolute inset-0 w-full h-full rounded-xl border border-slate-100"></canvas>
+            </div>
+        </div>
+        <div>
+            <h3 class="text-sm font-bold text-slate-700 mb-2">Chart B — Compute vs Sequence Length (GFLOPs / layer)</h3>
+            <div class="relative w-full" style="padding-bottom:62%">
+                <canvas id="chart-flops" class="absolute inset-0 w-full h-full rounded-xl border border-slate-100"></canvas>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ── 4. Step-Through Walkthrough ─────────────────────────────────── -->
+<section class="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+    <div class="flex flex-wrap items-start justify-between gap-3 mb-4">
+        <div>
+            <h2 class="text-base font-bold text-slate-900">What Gets Stored for Backprop?</h2>
+            <p class="text-sm text-slate-500 mt-1">Step through the forward pass to see each activation saved to memory.</p>
+        </div>
+        <div class="flex gap-2 shrink-0">
+            <button id="btn-reset"
+                    class="px-3 py-1.5 text-sm font-semibold bg-slate-100 hover:bg-slate-200 rounded-lg
+                           text-slate-700 transition-colors">
+                Reset
+            </button>
+            <button id="btn-step"
+                    class="px-4 py-1.5 text-sm font-semibold bg-indigo-600 hover:bg-indigo-700 rounded-lg
+                           text-white transition-colors">
+                Step Through →
+            </button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+
+        <!-- Flow diagram: 3 cols -->
+        <div class="lg:col-span-3">
+            <div id="flow-diagram" class="space-y-0.5"><!-- filled by JS --></div>
+        </div>
+
+        <!-- Memory tank: 2 cols -->
+        <div class="lg:col-span-2 space-y-4">
+
+            <div class="bg-slate-50 rounded-xl border border-slate-200 p-4">
+                <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Memory accumulated (single layer)</div>
+                <div class="text-3xl font-extrabold text-indigo-600" id="running-total">0.00 MB</div>
+                <div class="w-full bg-slate-200 rounded-full h-3 overflow-hidden mt-3">
+                    <div id="mem-bar" class="mem-progress-bar h-3 rounded-full bg-gradient-to-r from-indigo-500 to-red-500"
+                         style="width:0%"></div>
+                </div>
+                <div class="text-xs text-slate-400 mt-1">of total activation memory for this layer</div>
+            </div>
+
+            <div id="step-callout"
+                 class="hidden rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 leading-relaxed">
+            </div>
+
+            <!-- Legend -->
+            <div class="rounded-xl border border-slate-200 p-4 text-xs space-y-1.5">
+                <div class="font-bold text-slate-700 mb-2">Stage colours</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-indigo-200 border border-indigo-400 inline-block"></span> Active (processing)</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-red-200 border border-red-400 inline-block"></span> Storing activations</div>
+                <div class="flex items-center gap-2"><span class="w-3 h-3 rounded-sm bg-green-200 border border-green-400 inline-block"></span> Done</div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ── 5. Key Insight ──────────────────────────────────────────────── -->
+<section class="bg-amber-50 rounded-2xl border-2 border-amber-300 p-6">
+    <h2 class="text-base font-bold text-amber-900 mb-3">Key Insight: The n² Bottleneck</h2>
+    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+
+        <div class="bg-white rounded-xl p-4 border border-amber-200 shadow-sm">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Attention score matrix</div>
+            <div id="kv-score-mb" class="text-2xl font-extrabold text-red-600">— MB</div>
+            <div class="text-xs text-slate-500 mt-1">
+                per layer &nbsp;·&nbsp;
+                <span id="kv-score-total" class="text-red-500 font-semibold">—</span> MB across all layers
+            </div>
+        </div>
+
+        <div class="bg-white rounded-xl p-4 border border-amber-200 shadow-sm">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Double n →</div>
+            <div class="text-2xl font-extrabold text-orange-600">4× memory</div>
+            <div class="text-xs text-slate-500 mt-1">for attention scores (quadratic: n² × 4 bytes)</div>
+        </div>
+
+        <div class="bg-white rounded-xl p-4 border border-amber-200 shadow-sm">
+            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-1">Why Flash Attention?</div>
+            <div class="text-sm text-slate-700 leading-relaxed">
+                Recomputes the n×n scores in SRAM tiles instead of storing them — trades extra FLOPs for dramatically less HBM usage.
+            </div>
+        </div>
+
+    </div>
+    <p id="insight-summary" class="text-sm text-amber-900 leading-relaxed"></p>
+</section>
+
+</main>
+
+<footer class="bg-slate-900 text-slate-400 py-6 px-4 mt-12 text-center text-sm">
+    EE508 — Interactive ML Reference Library · All computations run in your browser
+</footer>
+
+<!-- ══════════════════════════════════════════════════════════════════ -->
+<script>
+// ────────────────────────────────────────────────────────────────────
+// PARAMS
+// ────────────────────────────────────────────────────────────────────
+let P = { n: 512, d: 512, h: 8, L: 6 };
+let stepIdx = -1;
+
+// ────────────────────────────────────────────────────────────────────
+// MATH
+// ────────────────────────────────────────────────────────────────────
+const MB = 1024 * 1024;
+
+function toMB(b) { return b / MB; }
+
+function tensorSizes(n, d, h) {
+    const dk = d / h;
+    return {
+        Q:        n * dk * 4,
+        K:        n * dk * 4,
+        V:        n * dk * 4,
+        scores:   n * n * 4,
+        softmax:  n * n * 4,
+        attnOut:  n * d * 4,
+        ffInput:  n * d * 4,
+        ffHidden: n * 4 * d * 4,
+        ffOutput: n * d * 4,
+    };
+}
+
+function saMemMB(n, d, h) {
+    const t = tensorSizes(n, d, h);
+    return toMB(t.Q + t.K + t.V + t.scores + t.softmax + t.attnOut);
+}
+
+function ffMemMB(n, d) {
+    const t = tensorSizes(n, d, 1); // h irrelevant for FF
+    return toMB(t.ffInput + t.ffHidden + t.ffOutput);
+}
+
+// Approximate FLOPs per layer
+function saFLOPs(n, d) {
+    // QKV projections (3 matmuls): 3 * 2 * n * d * d
+    // Scores QK^T per head: h * 2 * n^2 * dk = 2 * n^2 * d  (since h*dk=d)
+    // Attention*V: same = 2 * n^2 * d
+    // Output projection: 2 * n * d * d
+    return 8 * n * d * d + 4 * n * n * d;
+}
+
+function ffFLOPs(n, d) {
+    // Two linear layers: W1(d→4d) + W2(4d→d), each is 2*n*d*4d
+    return 2 * 2 * n * d * 4 * d; // = 16 * n * d^2
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SEGMENT DEFINITIONS
+// ────────────────────────────────────────────────────────────────────
+const SA_SEGS = [
+    { key:'Q',        label:'Q matrix',              color:'#3b82f6', n2:false },
+    { key:'K',        label:'K matrix',              color:'#60a5fa', n2:false },
+    { key:'V',        label:'V matrix',              color:'#93c5fd', n2:false },
+    { key:'scores',   label:'QKᵀ scores  ⚠ n²',     color:'#ef4444', n2:true  },
+    { key:'softmax',  label:'Softmax weights  ⚠ n²', color:'#f97316', n2:true  },
+    { key:'attnOut',  label:'Attention output',       color:'#22c55e', n2:false },
+];
+
+const FF_SEGS = [
+    { key:'ffInput',  label:'FF input',              color:'#a855f7', n2:false },
+    { key:'ffHidden', label:'FF hidden  (4×d_model)', color:'#14b8a6', n2:false },
+    { key:'ffOutput', label:'FF output',              color:'#22c55e', n2:false },
+];
+
+// ────────────────────────────────────────────────────────────────────
+// SECTION 2: MEMORY BARS
+// ────────────────────────────────────────────────────────────────────
+function renderBars() {
+    const T    = tensorSizes(P.n, P.d, P.h);
+    const large = P.n > 1024;
+
+    const saTotal = SA_SEGS.reduce((s, g) => s + toMB(T[g.key]), 0);
+    const ffTotal = FF_SEGS.reduce((s, g) => s + toMB(T[g.key]), 0);
+    const maxVal  = Math.max(saTotal, ffTotal) || 1;
+
+    function segRows(segs, title, total) {
+        const rows = segs.map(g => {
+            const val = toMB(T[g.key]);
+            const pct = (val / maxVal * 100).toFixed(2);
+            const lbl = val >= 1 ? val.toFixed(2) + ' MB' : (val * 1024).toFixed(1) + ' KB';
+            const pulse = (g.n2 && large) ? ' pulse-warn' : '';
+            return `
+            <div class="flex items-center gap-2.5">
+                <div class="w-36 text-xs text-right text-slate-500 shrink-0 leading-tight">${g.label}</div>
+                <div class="flex-1 bg-slate-100 rounded-full h-5 overflow-hidden">
+                    <div class="seg-bar${pulse} h-5 rounded-full flex items-center justify-end pr-2"
+                         data-w="${pct}%"
+                         style="width:0%;background:${g.color};min-width:0">
+                        <span class="text-white text-xs font-semibold leading-none" style="text-shadow:0 1px 2px rgba(0,0,0,.5)">
+                            ${lbl}
+                        </span>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        return `
+        <div>
+            <div class="flex items-center gap-2 mb-2.5">
+                <span class="text-sm font-bold text-slate-800">${title}</span>
+                <span class="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">
+                    ${total.toFixed(2)} MB total
+                </span>
+            </div>
+            <div class="space-y-1.5">${rows}</div>
+        </div>`;
+    }
+
+    // Reset widths to 0, then re-trigger transition in next frame
+    const el = document.getElementById('memory-bars');
+    el.innerHTML =
+        segRows(SA_SEGS, 'Self-Attention', saTotal) +
+        '<hr class="border-slate-200 my-4">' +
+        segRows(FF_SEGS, 'Feedforward', ffTotal);
+
+    // Elements start at width:0% — one rAF later set the target so the CSS transition plays
+    requestAnimationFrame(() => {
+        el.querySelectorAll('.seg-bar').forEach(b => { b.style.width = b.dataset.w; });
+    });
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SECTION 3: CANVAS CHARTS
+// ────────────────────────────────────────────────────────────────────
+function sizeCanvas(id) {
+    const canvas = document.getElementById(id);
+    const dpr    = window.devicePixelRatio || 1;
+    const rect   = canvas.getBoundingClientRect();
+    canvas.width  = rect.width  * dpr;
+    canvas.height = rect.height * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { canvas, ctx, W: rect.width, H: rect.height };
+}
+
+function drawLineChart(canvasId, lines, curN, yAxisLabel) {
+    const { canvas, ctx, W, H } = sizeCanvas(canvasId);
+    if (W === 0 || H === 0) return;
+
+    const pad = { top:28, right:20, bottom:46, left:60 };
+    const pw  = W - pad.left - pad.right;
+    const ph  = H - pad.top  - pad.bottom;
+
+    // Background
+    ctx.fillStyle = '#f8fafc';
+    ctx.fillRect(0, 0, W, H);
+
+    // Build x values
+    const ns = [];
+    for (let n = 64; n <= 4096; n += 64) ns.push(n);
+
+    // Y max
+    let yMax = 0;
+    lines.forEach(l => ns.forEach(n => { const v = l.fn(n); if (v > yMax) yMax = v; }));
+    yMax = yMax * 1.1 || 1;
+
+    const xPx = n => pad.left + (n - 64) / (4096 - 64) * pw;
+    const yPx = v => pad.top  + ph - (v / yMax) * ph;
+
+    // Grid + Y labels
+    ctx.font = '10px ui-sans-serif, system-ui, sans-serif';
+    ctx.fillStyle = '#94a3b8';
+    ctx.textAlign = 'right';
+    ctx.strokeStyle = '#e2e8f0';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 5; i++) {
+        const v = yMax * i / 5;
+        const y = yPx(v);
+        ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(pad.left + pw, y); ctx.stroke();
+        const lbl = v >= 1000 ? (v/1000).toFixed(1)+'k' : v >= 1 ? v.toFixed(1) : v.toFixed(3);
+        ctx.fillText(lbl, pad.left - 5, y + 4);
+    }
+
+    // X ticks
+    ctx.textAlign = 'center';
+    [64,512,1024,2048,3072,4096].forEach(n => {
+        const x = xPx(n);
+        ctx.beginPath(); ctx.strokeStyle = '#e2e8f0'; ctx.moveTo(x, pad.top); ctx.lineTo(x, pad.top + ph); ctx.stroke();
+        ctx.fillStyle = '#94a3b8';
+        ctx.fillText(n >= 1000 ? (n/1000).toFixed(n===1000?0:1)+'k' : n, x, pad.top + ph + 14);
+    });
+
+    // Lines
+    lines.forEach(l => {
+        ctx.beginPath();
+        ctx.strokeStyle = l.color;
+        ctx.lineWidth   = 2.5;
+        ctx.setLineDash([]);
+        ns.forEach((n, i) => {
+            const x = xPx(n), y = yPx(l.fn(n));
+            i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+    });
+
+    // Current n line
+    const cx = xPx(curN);
+    ctx.beginPath();
+    ctx.strokeStyle = '#6366f1';
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([5, 4]);
+    ctx.moveTo(cx, pad.top);
+    ctx.lineTo(cx, pad.top + ph);
+    ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle   = '#6366f1';
+    ctx.font        = '10px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign   = 'center';
+    ctx.fillText('n='+curN, cx, pad.top - 7);
+
+    // Legend
+    lines.forEach((l, i) => {
+        const lx = pad.left + 8;
+        const ly = pad.top  + 12 + i * 16;
+        ctx.fillStyle = l.color;
+        ctx.fillRect(lx, ly - 7, 18, 8);
+        ctx.fillStyle   = '#334155';
+        ctx.textAlign   = 'left';
+        ctx.font        = '10px ui-sans-serif, system-ui, sans-serif';
+        ctx.fillText(l.label, lx + 22, ly);
+    });
+
+    // Axes
+    ctx.strokeStyle = '#cbd5e1';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(pad.left, pad.top);
+    ctx.lineTo(pad.left, pad.top + ph);
+    ctx.lineTo(pad.left + pw, pad.top + ph);
+    ctx.stroke();
+
+    // Axis labels
+    ctx.fillStyle   = '#64748b';
+    ctx.font        = '11px ui-sans-serif, system-ui, sans-serif';
+    ctx.textAlign   = 'center';
+    ctx.fillText('Sequence Length (n)', pad.left + pw / 2, H - 4);
+    ctx.save();
+    ctx.translate(12, pad.top + ph / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillText(yAxisLabel, 0, 0);
+    ctx.restore();
+}
+
+function renderCharts() {
+    const { d, h, L } = P;
+
+    drawLineChart('chart-mem',
+        [
+            { label: 'Self-Attention (MB)', color: '#ef4444', fn: n => saMemMB(n, d, h) },
+            { label: 'Feedforward (MB)',    color: '#3b82f6', fn: n => ffMemMB(n, d)    },
+        ],
+        P.n, 'Memory (MB)'
+    );
+
+    drawLineChart('chart-flops',
+        [
+            { label: 'Self-Attention (GFLOPs)', color: '#ef4444', fn: n => saFLOPs(n, d) / 1e9 },
+            { label: 'Feedforward (GFLOPs)',    color: '#3b82f6', fn: n => ffFLOPs(n, d) / 1e9  },
+        ],
+        P.n, 'GFLOPs'
+    );
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SECTION 4: STEP-THROUGH FLOW DIAGRAM
+// ────────────────────────────────────────────────────────────────────
+const STAGES = [
+    {
+        id: 'input', label: 'Input Tokens', hasArrowAbove: false, storeKeys: [],
+        desc: null
+    },
+    {
+        id: 'pe', label: 'Positional Encoding', hasArrowAbove: true, storeKeys: [],
+        desc: 'Adds positional signal to token embeddings. No activations need to be stored for backprop here.'
+    },
+    {
+        id: 'attn', label: 'Multi-Head Attention', hasArrowAbove: true,
+        storeKeys: ['Q','K','V','scores','softmax','attnOut'],
+        desc: 'Stores <strong>Q, K, V</strong> (each n×d_k), the full <strong>n×n attention score matrix</strong>, <strong>softmax weights</strong> (also n×n), and attention output.'
+    },
+    {
+        id: 'add1', label: 'Add & Norm', hasArrowAbove: true, storeKeys: [],
+        desc: 'Residual addition + LayerNorm. Stores normalized output for backprop through the norm.'
+    },
+    {
+        id: 'ff', label: 'Feed Forward', hasArrowAbove: true,
+        storeKeys: ['ffInput','ffHidden','ffOutput'],
+        desc: 'Stores <strong>input</strong> (n×d_model), <strong>hidden activations</strong> (n×4d_model), and <strong>output</strong>. The hidden layer is 4× wider — feedforward memory grows linearly with n.'
+    },
+    {
+        id: 'add2', label: 'Add & Norm', hasArrowAbove: true, storeKeys: [],
+        desc: 'Second residual + LayerNorm. Output fed to the next layer or the loss.'
+    },
+    {
+        id: 'out', label: 'Layer Output', hasArrowAbove: true, storeKeys: [],
+        desc: 'Final output of this transformer layer. All stored activations above will be needed during the backward pass.'
+    },
+];
+
+const SEG_INFO = {
+    Q:        { label:'Q matrix',              color:'#3b82f6' },
+    K:        { label:'K matrix',              color:'#60a5fa' },
+    V:        { label:'V matrix',              color:'#93c5fd' },
+    scores:   { label:'QKᵀ scores (⚠ n²)',     color:'#ef4444' },
+    softmax:  { label:'Softmax weights (⚠ n²)', color:'#f97316' },
+    attnOut:  { label:'Attention output',       color:'#22c55e' },
+    ffInput:  { label:'FF input',               color:'#a855f7' },
+    ffHidden: { label:'FF hidden (4×d)',         color:'#14b8a6' },
+    ffOutput: { label:'FF output',              color:'#22c55e' },
+};
+
+function initFlow() {
+    const el = document.getElementById('flow-diagram');
+    el.innerHTML = STAGES.map(s => `
+        ${s.hasArrowAbove ? '<div class="flex justify-center h-4"><div class="w-0.5 bg-slate-300 h-full"></div></div>' : ''}
+        <div id="stage-${s.id}" class="stage-box rounded-xl px-3 py-2.5">
+            <div class="flex items-center justify-between gap-2">
+                <span class="text-sm font-semibold text-slate-700">${s.label}</span>
+                ${s.storeKeys.length
+                    ? `<span class="text-xs text-slate-400 shrink-0">stores ${s.storeKeys.length} tensors</span>`
+                    : ''}
+            </div>
+            <div id="chips-${s.id}" class="flex flex-wrap gap-1 mt-1.5"></div>
+        </div>
+    `).join('');
+}
+
+function totalFlowMB() {
+    const T = tensorSizes(P.n, P.d, P.h);
+    let tot = 0;
+    STAGES.forEach(s => s.storeKeys.forEach(k => { tot += toMB(T[k]); }));
+    return tot;
+}
+
+function updateFlow() {
+    const T    = tensorSizes(P.n, P.d, P.h);
+    const totMB = totalFlowMB();
+    let runMB   = 0;
+
+    STAGES.forEach(s => {
+        const box   = document.getElementById(`stage-${s.id}`);
+        const chips = document.getElementById(`chips-${s.id}`);
+        if (!box || !chips) return;
+        box.classList.remove('stage-active','stage-storing','stage-done');
+        chips.innerHTML = '';
+    });
+
+    if (stepIdx < 0) {
+        document.getElementById('running-total').textContent = '0.00 MB';
+        document.getElementById('mem-bar').style.width = '0%';
+        document.getElementById('step-callout').classList.add('hidden');
+        return;
+    }
+
+    for (let i = 0; i <= stepIdx && i < STAGES.length; i++) {
+        const s     = STAGES[i];
+        const box   = document.getElementById(`stage-${s.id}`);
+        const chips = document.getElementById(`chips-${s.id}`);
+        if (!box || !chips) continue;
+
+        if (i === stepIdx) {
+            box.classList.add(s.storeKeys.length ? 'stage-storing' : 'stage-active');
+            s.storeKeys.forEach(k => {
+                const v   = toMB(T[k]);
+                runMB    += v;
+                const lbl = v >= 1 ? v.toFixed(2)+' MB' : (v*1024).toFixed(0)+' KB';
+                const chip = document.createElement('span');
+                chip.className = 'inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-semibold text-white';
+                chip.style.backgroundColor = SEG_INFO[k].color;
+                chip.textContent = SEG_INFO[k].label.replace(' (⚠ n²)','') + ': ' + lbl;
+                chips.appendChild(chip);
+            });
+        } else {
+            box.classList.add('stage-done');
+            s.storeKeys.forEach(k => { runMB += toMB(T[k]); });
+        }
+    }
+
+    document.getElementById('running-total').textContent = runMB.toFixed(2) + ' MB';
+    document.getElementById('mem-bar').style.width = (totMB > 0 ? runMB / totMB * 100 : 0).toFixed(1) + '%';
+
+    const cur     = STAGES[stepIdx];
+    const callout = document.getElementById('step-callout');
+    if (cur && cur.desc) {
+        let extra = '';
+        if (cur.id === 'attn') {
+            const scoresMB = toMB(T.scores);
+            extra = `<br><br><strong>⚠ The n×n score matrix alone = ${scoresMB.toFixed(2)} MB</strong> — and it's O(n²). Doubling n quadruples this.`;
+        }
+        callout.innerHTML = cur.desc + extra;
+        callout.classList.remove('hidden');
+    } else {
+        callout.classList.add('hidden');
+    }
+}
+
+// ────────────────────────────────────────────────────────────────────
+// SECTION 5: KEY INSIGHT
+// ────────────────────────────────────────────────────────────────────
+function renderInsight() {
+    const { n, d, h, L } = P;
+    const scoresMB = toMB(n * n * 4);
+    document.getElementById('kv-score-mb').textContent   = scoresMB.toFixed(2) + ' MB';
+    document.getElementById('kv-score-total').textContent = (scoresMB * L).toFixed(2);
+    document.getElementById('insight-summary').innerHTML =
+        `At your current settings (n=${n}, d_model=${d}, L=${L}): `+
+        `The attention score matrix is <strong>${n}×${n}×4 bytes = ${scoresMB.toFixed(2)} MB per layer</strong>, `+
+        `<strong class="text-red-600">${(scoresMB*L).toFixed(2)} MB total across all ${L} layers</strong>. `+
+        `If you doubled n to ${n*2}, scores alone would be <strong>${(scoresMB*4).toFixed(2)} MB per layer</strong> — 4× more.`;
+}
+
+// ────────────────────────────────────────────────────────────────────
+// MASTER UPDATE
+// ────────────────────────────────────────────────────────────────────
+function update() {
+    document.getElementById('val-dk').textContent = `d_k = ${P.d / P.h} per head`;
+    renderBars();
+    renderCharts();
+    updateFlow();
+    renderInsight();
+}
+
+// ────────────────────────────────────────────────────────────────────
+// WIRING
+// ────────────────────────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+    initFlow();
+
+    const sliderN = document.getElementById('slider-n');
+    const sliderL = document.getElementById('slider-L');
+    const selD    = document.getElementById('sel-d');
+    const selH    = document.getElementById('sel-h');
+
+    sliderN.addEventListener('input', () => {
+        P.n = +sliderN.value;
+        document.getElementById('val-n').textContent = P.n;
+        stepIdx = -1;
+        update();
+    });
+    sliderL.addEventListener('input', () => {
+        P.L = +sliderL.value;
+        document.getElementById('val-L').textContent = P.L;
+        update();
+    });
+    selD.addEventListener('change', () => {
+        P.d = +selD.value;
+        stepIdx = -1;
+        update();
+    });
+    selH.addEventListener('change', () => {
+        P.h = +selH.value;
+        stepIdx = -1;
+        update();
+    });
+
+    document.getElementById('btn-step').addEventListener('click', () => {
+        stepIdx = Math.min(stepIdx + 1, STAGES.length - 1);
+        updateFlow();
+    });
+    document.getElementById('btn-reset').addEventListener('click', () => {
+        stepIdx = -1;
+        updateFlow();
+    });
+
+    // Redraw charts on resize
+    let rafId;
+    window.addEventListener('resize', () => {
+        cancelAnimationFrame(rafId);
+        rafId = requestAnimationFrame(renderCharts);
+    });
+
+    update();
+});
+</script>
+</body>
+</html>

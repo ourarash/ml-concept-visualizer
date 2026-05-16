@@ -1,0 +1,375 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #8 by Sriram Subramanian Sivasailam (@sriram1999s): feat: add distributed ML visualizer and register in catalog index. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Distributed ML: Parameter Server vs Ring-AllReduce</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @keyframes dash {
+            to { stroke-dashoffset: -50; }
+        }
+        .animate-dash {
+            stroke-dasharray: 10 5;
+            animation: dash 2s linear infinite;
+        }
+        input[type=range] {
+            cursor: pointer;
+        }
+        .transition-all {
+            transition: all 0.5s ease-in-out;
+        }
+        .glow-node {
+            filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.6));
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 font-sans h-screen overflow-hidden">
+    <div class="flex flex-col h-full p-4 md:p-6">
+        <!-- Header -->
+        <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-6 gap-4">
+            <div>
+                <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+                    <i data-lucide="zap" class="text-yellow-400 fill-yellow-400 w-6 h-6"></i>
+                    Distributed ML Communication
+                </h1>
+                <p class="text-slate-400 text-sm">EE508: Hardware Foundations of ML — Scaling & Interconnects</p>
+            </div>
+            <div class="flex gap-2 p-1 bg-slate-900 rounded-lg border border-slate-700">
+                <button id="btn-ps" onclick="setMode('parameter-server')" class="px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-lg">
+                    Parameter Server
+                </button>
+                <button id="btn-ring" onclick="setMode('ring-allreduce')" class="px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white">
+                    Ring-AllReduce
+                </button>
+            </div>
+        </div>
+
+        <div class="flex flex-col lg:flex-row gap-6 flex-grow overflow-hidden">
+            <!-- Main Canvas -->
+            <div class="relative flex-grow bg-slate-900 rounded-2xl border border-slate-800 shadow-2xl overflow-hidden min-h-[400px]">
+                <svg id="viz-canvas" viewBox="0 0 800 500" class="w-full h-full">
+                    <defs>
+                        <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="25" refY="3.5" orient="auto">
+                            <polygon points="0 0, 10 3.5, 0 7" fill="#3B82F6" />
+                        </marker>
+                    </defs>
+                    <g id="connections"></g>
+                    <g id="ps-node"></g>
+                    <g id="gpu-nodes"></g>
+                </svg>
+
+                <!-- HUD Overlay -->
+                <div class="absolute top-4 left-4 flex flex-col gap-2">
+                    <div id="phase-badge" class="px-3 py-1 bg-blue-500/20 border border-blue-500/30 rounded-full text-blue-400 text-xs font-bold uppercase tracking-wider">
+                        Phase: IDLE
+                    </div>
+                    <div id="step-badge" class="px-3 py-1 bg-slate-800/80 border border-slate-700 rounded-full text-slate-300 text-xs font-mono">
+                        Step: 0 / 2
+                    </div>
+                </div>
+
+                <div id="bottleneck-alert" class="hidden absolute bottom-4 left-4 right-4 bg-red-500/10 border border-red-500/50 p-3 rounded-lg flex items-start gap-3">
+                    <i data-lucide="alert-circle" class="text-red-500 shrink-0 w-5 h-5"></i>
+                    <div class="text-xs text-red-200">
+                        <span class="font-bold">Bottleneck Detected:</span> In Parameter Server mode, all workers saturate the central node's bandwidth. Network cost scales as O(N).
+                    </div>
+                </div>
+            </div>
+
+            <!-- Sidebar -->
+            <div class="w-full lg:w-80 flex flex-col gap-4 overflow-y-auto pr-1">
+                <div class="bg-slate-900 rounded-xl p-5 border border-slate-800 flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                        <h2 class="font-bold flex items-center gap-2">
+                            <i data-lucide="settings" class="w-4 h-4"></i> Simulation
+                        </h2>
+                        <button onclick="resetSimulation()" class="p-1.5 hover:bg-slate-800 rounded-md text-slate-400 transition-colors">
+                            <i data-lucide="rotate-ccw" class="w-4 h-4"></i>
+                        </button>
+                    </div>
+
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs text-slate-400 uppercase font-bold tracking-tighter">GPU Clusters</label>
+                        <input type="range" id="node-slider" min="3" max="6" value="4" class="w-full accent-blue-500">
+                        <div class="flex justify-between text-xs font-mono text-slate-500">
+                            <span>3 Nodes</span>
+                            <span id="node-count-display" class="text-blue-400 font-bold">4</span>
+                            <span>6 Nodes</span>
+                        </div>
+                    </div>
+
+                    <div class="flex flex-col gap-2">
+                        <label class="text-xs text-slate-400 uppercase font-bold tracking-tighter">Speed</label>
+                        <div class="flex gap-2">
+                            <button onclick="setSpeed(0.5)" class="speed-btn flex-grow py-1 text-xs rounded border border-slate-700 hover:border-slate-500">0.5x</button>
+                            <button onclick="setSpeed(1)" class="speed-btn flex-grow py-1 text-xs rounded border border-blue-500 bg-blue-600">1x</button>
+                            <button onclick="setSpeed(2)" class="speed-btn flex-grow py-1 text-xs rounded border border-slate-700 hover:border-slate-500">2x</button>
+                        </div>
+                    </div>
+
+                    <button id="play-btn" onclick="togglePlay()" class="mt-2 w-full py-3 rounded-lg font-bold flex items-center justify-center gap-2 transition-all bg-white text-slate-950 hover:bg-blue-50 shadow-lg shadow-blue-500/10">
+                        <i data-lucide="play" class="w-4 h-4"></i> Run Synchronization
+                    </button>
+                </div>
+
+                <div class="bg-slate-900 rounded-xl p-5 border border-slate-800 flex flex-col gap-3">
+                    <h2 class="font-bold flex items-center gap-2 text-blue-400">
+                        <i data-lucide="info" class="w-4 h-4"></i> Algorithm Insights
+                    </h2>
+                    <div id="insight-box" class="text-xs text-slate-400 leading-relaxed space-y-2">
+                        <!-- Content dynamic -->
+                    </div>
+                    <div class="mt-4 pt-4 border-t border-slate-800">
+                        <p class="text-[10px] text-slate-500 font-mono text-center">EE508 Hardware Interconnect Lab</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- State Management ---
+        let mode = 'parameter-server';
+        let isPlaying = false;
+        let step = 0;
+        let numNodes = 4;
+        let speed = 1;
+        let phase = 'idle';
+        let nodesData = [];
+        let serverData = [];
+        let timer = null;
+
+        const chunkColors = ['#3B82F6', '#EF4444', '#10B981', '#F59E0B', '#8B5CF6', '#EC4899'];
+        const centerX = 400, centerY = 250, radius = 160;
+
+        // --- Initialization ---
+        function init() {
+            lucide.createIcons();
+            resetSimulation();
+            updateUI();
+            
+            document.getElementById('node-slider').addEventListener('input', (e) => {
+                numNodes = parseInt(e.target.value);
+                document.getElementById('node-count-display').innerText = numNodes;
+                resetSimulation();
+            });
+        }
+
+        function resetSimulation() {
+            isPlaying = false;
+            step = 0;
+            phase = 'idle';
+            serverData = Array(numNodes).fill(0);
+            nodesData = Array.from({ length: numNodes }, (_, i) => ({
+                id: i,
+                chunks: Array.from({ length: numNodes }, (_, j) => ({
+                    val: i === j ? 1 : 0,
+                    isSummed: i === j,
+                    opacity: i === j ? 1 : 0.1
+                }))
+            }));
+            if (timer) clearTimeout(timer);
+            updateUI();
+            renderCanvas();
+        }
+
+        function setMode(m) {
+            mode = m;
+            document.getElementById('btn-ps').className = mode === 'parameter-server' ? 'px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-lg' : 'px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white';
+            document.getElementById('btn-ring').className = mode === 'ring-allreduce' ? 'px-4 py-2 rounded-md text-sm font-medium transition-all bg-blue-600 text-white shadow-lg' : 'px-4 py-2 rounded-md text-sm font-medium transition-all text-slate-400 hover:text-white';
+            resetSimulation();
+        }
+
+        function setSpeed(s) {
+            speed = s;
+            document.querySelectorAll('.speed-btn').forEach(btn => {
+                btn.className = btn.innerText === s + 'x' ? 'speed-btn flex-grow py-1 text-xs rounded border border-blue-500 bg-blue-600' : 'speed-btn flex-grow py-1 text-xs rounded border border-slate-700 hover:border-slate-500';
+            });
+        }
+
+        function togglePlay() {
+            isPlaying = !isPlaying;
+            updateUI();
+            if (isPlaying) runLoop();
+        }
+
+        function runLoop() {
+            if (!isPlaying) return;
+            nextStep();
+            const totalSteps = mode === 'parameter-server' ? 2 : (numNodes - 1) * 2;
+            if (step < totalSteps) {
+                timer = setTimeout(runLoop, 1500 / speed);
+            } else {
+                isPlaying = false;
+                updateUI();
+            }
+        }
+
+        function nextStep() {
+            if (mode === 'parameter-server') {
+                if (step === 0) {
+                    phase = 'upload';
+                    step = 1;
+                    setTimeout(() => { serverData = Array(numNodes).fill(1); renderCanvas(); }, 500 / speed);
+                } else if (step === 1) {
+                    phase = 'download';
+                    step = 2;
+                    setTimeout(() => {
+                        nodesData.forEach(n => n.chunks.forEach(c => { c.val = 1; c.isSummed = true; c.opacity = 1; }));
+                        renderCanvas();
+                    }, 500 / speed);
+                }
+            } else {
+                const subSteps = numNodes - 1;
+                if (step < subSteps) {
+                    phase = 'scatter';
+                    for (let i = 0; i < numNodes; i++) {
+                        const receiver = (i + 1) % numNodes;
+                        const chunkIdx = (i - step + numNodes) % numNodes;
+                        nodesData[receiver].chunks[chunkIdx].val = 1;
+                        nodesData[receiver].chunks[chunkIdx].isSummed = true;
+                        nodesData[receiver].chunks[chunkIdx].opacity = 1;
+                    }
+                    step++;
+                } else if (step < subSteps * 2) {
+                    phase = 'gather';
+                    for (let i = 0; i < numNodes; i++) {
+                        const receiver = (i + 1) % numNodes;
+                        const chunkIdx = (i - (step - subSteps) + 1 + numNodes) % numNodes;
+                        nodesData[receiver].chunks[chunkIdx].val = 1;
+                        nodesData[receiver].chunks[chunkIdx].isSummed = true;
+                        nodesData[receiver].chunks[chunkIdx].opacity = 1;
+                    }
+                    step++;
+                }
+            }
+            updateUI();
+            renderCanvas();
+        }
+
+        // --- Rendering Logic ---
+        function updateUI() {
+            document.getElementById('phase-badge').innerText = `Phase: ${phase.toUpperCase()}`;
+            const totalSteps = mode === 'parameter-server' ? 2 : (numNodes - 1) * 2;
+            document.getElementById('step-badge').innerText = `Step: ${step} / ${totalSteps}`;
+            
+            const playBtn = document.getElementById('play-btn');
+            playBtn.innerHTML = isPlaying ? `<i data-lucide="pause" class="w-4 h-4"></i> Pause` : `<i data-lucide="play" class="w-4 h-4"></i> Run Synchronization`;
+            lucide.createIcons();
+
+            document.getElementById('bottleneck-alert').classList.toggle('hidden', !(mode === 'parameter-server' && phase === 'upload'));
+
+            const insight = document.getElementById('insight-box');
+            if (mode === 'parameter-server') {
+                insight.innerHTML = `
+                    <ul class="space-y-2 list-disc pl-4">
+                        <li><span class="text-slate-200 font-semibold">Star Topology:</span> All gradients travel to a central point.</li>
+                        <li><span class="text-red-400 font-semibold">Bottleneck:</span> PS node must handle N uploads and N downloads.</li>
+                        <li><span class="text-slate-200">Complexity:</span> O(N × Model Size)</li>
+                    </ul>`;
+            } else {
+                insight.innerHTML = `
+                    <ul class="space-y-2 list-disc pl-4">
+                        <li><span class="text-slate-200 font-semibold">Scatter-Reduce:</span> Nodes pass chunks, summing at each step.</li>
+                        <li><span class="text-slate-200 font-semibold">All-Gather:</span> Sums are shared around the ring.</li>
+                        <li><span class="text-green-400 font-semibold">Optimal:</span> Complexity is O(1) relative to N for large models.</li>
+                    </ul>`;
+            }
+        }
+
+        function renderCanvas() {
+            const connG = document.getElementById('connections');
+            const psG = document.getElementById('ps-node');
+            const gpuG = document.getElementById('gpu-nodes');
+            
+            connG.innerHTML = '';
+            psG.innerHTML = '';
+            gpuG.innerHTML = '';
+
+            const nodePos = Array.from({ length: numNodes }, (_, i) => {
+                const angle = (i * 2 * Math.PI) / numNodes - Math.PI / 2;
+                return { x: centerX + radius * Math.cos(angle), y: centerY + radius * Math.sin(angle) };
+            });
+
+            // Draw Connections
+            nodePos.forEach((pos, i) => {
+                if (mode === 'parameter-server') {
+                    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+                    line.setAttribute("x1", centerX); line.setAttribute("y1", centerY);
+                    line.setAttribute("x2", pos.x); line.setAttribute("y2", pos.y);
+                    line.setAttribute("stroke", phase === 'upload' ? '#3B82F6' : phase === 'download' ? '#10B981' : '#334155');
+                    line.setAttribute("stroke-width", phase !== 'idle' ? "4" : "2");
+                    if (phase !== 'idle') line.classList.add('animate-dash');
+                    connG.appendChild(line);
+                } else {
+                    const next = nodePos[(i + 1) % numNodes];
+                    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+                    path.setAttribute("d", `M ${pos.x} ${pos.y} Q ${(pos.x + next.x)/2 + 20} ${(pos.y + next.y)/2 + 20} ${next.x} ${next.y}`);
+                    path.setAttribute("fill", "none");
+                    path.setAttribute("stroke", (phase === 'scatter' || phase === 'gather') ? '#3B82F6' : '#334155');
+                    path.setAttribute("stroke-width", (phase === 'scatter' || phase === 'gather') ? "4" : "2");
+                    path.setAttribute("marker-end", "url(#arrowhead)");
+                    connG.appendChild(path);
+                }
+            });
+
+            // Draw PS Node
+            if (mode === 'parameter-server') {
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("cx", centerX); circle.setAttribute("cy", centerY); circle.setAttribute("r", "45");
+                circle.setAttribute("class", "fill-slate-800 stroke-blue-500 stroke-2");
+                psG.appendChild(circle);
+
+                const text = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                text.setAttribute("x", centerX); text.setAttribute("y", centerY - 5);
+                text.setAttribute("text-anchor", "middle"); text.setAttribute("class", "fill-white font-bold text-[10px]");
+                text.textContent = "PS NODE";
+                psG.appendChild(text);
+
+                serverData.forEach((val, i) => {
+                    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    rect.setAttribute("x", centerX - 25 + (i * 12)); rect.setAttribute("y", centerY + 5);
+                    rect.setAttribute("width", "10"); rect.setAttribute("height", "15"); rect.setAttribute("rx", "2");
+                    rect.setAttribute("fill", val > 0 ? chunkColors[i % chunkColors.length] : 'transparent');
+                    rect.setAttribute("stroke", "#475569"); rect.setAttribute("class", "transition-all");
+                    psG.appendChild(rect);
+                });
+            }
+
+            // Draw GPUs
+            nodePos.forEach((pos, i) => {
+                const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+                const circle = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+                circle.setAttribute("cx", pos.x); circle.setAttribute("cy", pos.y); circle.setAttribute("r", "35");
+                circle.setAttribute("class", "fill-slate-800 stroke-slate-600 stroke-2 transition-all");
+                if (nodesData[i].chunks.every(c => c.val > 0)) circle.classList.add('glow-node');
+                g.appendChild(circle);
+
+                const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+                label.setAttribute("x", pos.x); label.setAttribute("y", pos.y - 45);
+                label.setAttribute("text-anchor", "middle"); label.setAttribute("class", "fill-slate-400 font-mono text-[10px]");
+                label.textContent = `GPU_${i}`;
+                g.appendChild(label);
+
+                nodesData[i].chunks.forEach((chunk, j) => {
+                    const rect = document.createElementNS("http://www.w3.org/2000/svg", "rect");
+                    rect.setAttribute("x", pos.x - 25 + (j * 9)); rect.setAttribute("y", pos.y - 10);
+                    rect.setAttribute("width", "7"); rect.setAttribute("height", "20"); rect.setAttribute("rx", "1");
+                    rect.setAttribute("fill", chunkColors[j % chunkColors.length]);
+                    rect.setAttribute("fill-opacity", chunk.opacity);
+                    rect.setAttribute("stroke", chunk.isSummed ? "white" : "#475569");
+                    rect.setAttribute("stroke-width", chunk.isSummed ? "1" : "0.5");
+                    rect.setAttribute("class", "transition-all");
+                    g.appendChild(rect);
+                });
+                gpuG.appendChild(g);
+            });
+        }
+
+        window.onload = init;
+    </script>
+</body>
+</html>

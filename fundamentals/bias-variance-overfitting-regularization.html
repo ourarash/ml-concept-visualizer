@@ -1,0 +1,2162 @@
+<!doctype html>
+<!-- Source: Integrated from PR #35 by Mohith Suresh (@mohith-suresh): feat: add Bias-Variance & Regularization Explorer. -->
+<!-- Brief: Bias-variance, overfitting, L1/L2 regularization, and dropout intuition explorer. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Bias-Variance &amp; Regularization Explorer</title>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext x='0' y='13' font-size='13'%3E%F0%9F%93%88%3C/text%3E%3C/svg%3E" />
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        window.MathJax = {
+            tex: {
+                inlineMath: [["$", "$"], ["\\(", "\\)"]],
+                displayMath: [["$$", "$$"], ["\\[", "\\]"]],
+            },
+            svg: { fontCache: "global" },
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        :root {
+            color-scheme: light;
+            --page-bg: #eef4f8;
+            --surface: #ffffff;
+            --surface-soft: rgba(255, 255, 255, 0.92);
+            --border: #d7e2eb;
+            --border-strong: #bfdbfe;
+            --text: #0f172a;
+            --muted: #475569;
+            --muted-soft: #64748b;
+            --shadow: 0 20px 48px rgba(15, 23, 42, 0.1);
+            --shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.08);
+            --accent-1: #0ea5e9;
+            --accent-2: #8b5cf6;
+            --accent-3: #10b981;
+            --accent-4: #f59e0b;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 24%),
+                radial-gradient(circle at top right, rgba(139, 92, 246, 0.14), transparent 22%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--page-bg) 100%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .hero-wrap {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(135deg, #0f172a 0%, #123a6b 48%, #0f766e 100%);
+            color: white;
+        }
+
+        .hero-wrap::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.16), transparent 24%),
+                radial-gradient(circle at 82% 12%, rgba(125, 211, 252, 0.14), transparent 20%);
+            pointer-events: none;
+        }
+
+        .hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.45rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background: rgba(255, 255, 255, 0.08);
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #dbeafe;
+        }
+
+        .toc {
+            position: sticky;
+            top: 0.75rem;
+            z-index: 30;
+            display: flex;
+            gap: 0.5rem;
+            overflow-x: auto;
+            padding: 0.7rem 0.9rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(14px);
+            scrollbar-width: none;
+        }
+
+        .toc::-webkit-scrollbar { display: none; }
+
+        .toc a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            white-space: nowrap;
+            padding: 0.4rem 0.85rem;
+            border-radius: 999px;
+            color: #334155;
+            font-size: 0.85rem;
+            font-weight: 700;
+            line-height: 1;
+            transition: background 0.18s, color 0.18s;
+        }
+
+        .toc a:hover {
+            background: #e0f2fe;
+            color: var(--text);
+        }
+
+        .toc a .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.07);
+            color: #0f172a;
+            font-size: 0.7rem;
+            font-weight: 800;
+        }
+
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            background: var(--surface);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .card.section {
+            padding: 1.75rem;
+        }
+
+        .section-kicker {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 1.1rem;
+            background: #f8fbfd;
+            padding: 1rem;
+        }
+
+        .panel-title {
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 0.55rem;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-bottom: 0.25rem;
+        }
+
+        .control-row .v {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: #cbd5e1;
+            border-radius: 999px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #0ea5e9;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #0ea5e9;
+            cursor: pointer;
+            border: 2px solid white;
+        }
+
+        select, .btn {
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 0.6rem;
+            padding: 0.4rem 0.7rem;
+            font-size: 0.85rem;
+            font-weight: 600;
+            color: #0f172a;
+            cursor: pointer;
+            transition: background 0.15s, border-color 0.15s, transform 0.1s;
+        }
+
+        .btn {
+            background: #0f172a;
+            color: white;
+            border-color: #0f172a;
+        }
+
+        .btn:hover { background: #1e293b; }
+        .btn.subtle { background: white; color: #0f172a; }
+        .btn.subtle:hover { background: #f1f5f9; }
+        .btn:active { transform: translateY(1px); }
+
+        .seg {
+            display: inline-flex;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            overflow: hidden;
+            background: white;
+        }
+
+        .seg button {
+            padding: 0.35rem 0.85rem;
+            font-size: 0.8rem;
+            font-weight: 700;
+            color: #475569;
+            background: transparent;
+            border: none;
+            cursor: pointer;
+        }
+
+        .seg button.active {
+            background: #0f172a;
+            color: white;
+        }
+
+        .toggle {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            font-size: 0.78rem;
+            color: var(--muted);
+            font-weight: 600;
+            cursor: pointer;
+            user-select: none;
+        }
+
+        .toggle input { accent-color: #0ea5e9; }
+
+        .metric-tile {
+            border: 1px solid var(--border);
+            background: white;
+            border-radius: 0.85rem;
+            padding: 0.6rem 0.75rem;
+        }
+
+        .metric-tile .lbl {
+            font-size: 0.65rem;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted-soft);
+        }
+
+        .metric-tile .val {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: #0f172a;
+            margin-top: 0.15rem;
+        }
+
+        .diag-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.5rem 0.85rem;
+            border-radius: 999px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            border: 1px solid transparent;
+        }
+
+        .diag-good { background: #ecfdf5; color: #047857; border-color: #a7f3d0; }
+        .diag-warn { background: #fffbeb; color: #b45309; border-color: #fde68a; }
+        .diag-bad  { background: #fef2f2; color: #b91c1c; border-color: #fecaca; }
+
+        .plot-wrap {
+            position: relative;
+            width: 100%;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            padding: 0.5rem;
+        }
+
+        .plot-svg {
+            display: block;
+            width: 100%;
+            height: auto;
+            font-family: inherit;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-top: 0.4rem;
+        }
+
+        .legend .swatch {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border-radius: 3px;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+
+        .legend-line {
+            display: inline-block;
+            width: 18px;
+            height: 3px;
+            border-radius: 2px;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+
+        code, .mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+
+        .formula {
+            background: #f1f5f9;
+            border: 1px solid var(--border);
+            border-radius: 0.7rem;
+            padding: 0.6rem 0.85rem;
+            font-size: 0.95rem;
+            color: #0f172a;
+        }
+
+        .net-node {
+            transition: opacity 0.25s ease, fill 0.25s ease;
+        }
+
+        .net-edge {
+            transition: opacity 0.25s ease, stroke 0.25s ease;
+        }
+
+        .card.section {
+            scroll-margin-top: 5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .card.section { padding: 1.25rem; }
+        }
+
+        .footer-note {
+            font-size: 0.78rem;
+            color: var(--muted-soft);
+            line-height: 1.55;
+        }
+
+        details > summary {
+            cursor: pointer;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .ghost {
+            color: var(--muted-soft);
+            font-size: 0.75rem;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+            html { scroll-behavior: auto; }
+            .net-node, .net-edge { transition: none; }
+        }
+    </style>
+</head>
+
+<body>
+    <header class="hero-wrap py-12 px-4 shadow-lg">
+        <div class="max-w-6xl mx-auto">
+            <p class="hero-kicker">EE508 · ML Fundamentals</p>
+            <h1 class="text-3xl md:text-5xl font-extrabold tracking-tight mt-5">
+                Bias-Variance &amp; Regularization Explorer
+            </h1>
+            <p class="text-base md:text-lg text-sky-100 max-w-3xl mt-4">
+                A model can fit the training data extremely well and still generalize poorly. This page shows how
+                model complexity, bias, variance, L1/L2 regularization, and dropout interact to shape training
+                behavior and test performance.
+            </p>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 py-6 sm:p-6 lg:px-8 lg:py-10 space-y-8">
+        <nav class="toc" aria-label="Section navigation">
+            <a href="#sec-generalization"><span class="num">1</span>Generalization</a>
+            <a href="#sec-bias-variance"><span class="num">2</span>Bias-Variance</a>
+            <a href="#sec-regularization"><span class="num">3</span>L1 vs L2</a>
+            <a href="#sec-dropout"><span class="num">4</span>Dropout</a>
+            <a href="#sec-sources"><span class="num">★</span>Sources</a>
+        </nav>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 1: GENERALIZATION EXPLORER                                -->
+        <!-- ============================================================== -->
+        <section id="sec-generalization" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#e0f2fe; color:#0369a1;">1</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#0369a1;">Section 1</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Generalization Explorer</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        As model complexity rises, training error often falls monotonically, but validation error may
+                        eventually rise. That turning point is the practical signature of <em>overfitting</em>.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <!-- Plot -->
+                <div class="lg:col-span-2 panel">
+                    <div class="panel-title">Fit vs. Truth</div>
+                    <div class="plot-wrap">
+                        <svg id="gen-plot" class="plot-svg" viewBox="0 0 600 360" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Fit vs ground truth"></svg>
+                    </div>
+                    <div class="legend">
+                        <span><span class="legend-line" style="background:#0f766e;"></span>True function</span>
+                        <span><span class="legend-line" style="background:#0ea5e9;"></span>Fitted model</span>
+                        <span><span class="swatch" style="background:#0f172a;"></span>Train sample</span>
+                        <span><span class="swatch" style="background:#f97316;"></span>Validation sample</span>
+                    </div>
+                </div>
+
+                <!-- Controls -->
+                <div class="space-y-3">
+                    <div class="panel">
+                        <div class="panel-title">Controls</div>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Dataset</span></div>
+                            <select id="gen-noise" class="w-full">
+                                <option value="low">Low noise</option>
+                                <option value="med" selected>Medium noise</option>
+                                <option value="high">High noise</option>
+                            </select>
+                        </label>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Polynomial degree</span><span class="v" id="gen-deg-v">3</span></div>
+                            <input id="gen-deg" type="range" min="1" max="12" step="1" value="3" />
+                        </label>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Training samples</span><span class="v" id="gen-n-v">25</span></div>
+                            <input id="gen-n" type="range" min="10" max="80" step="1" value="25" />
+                        </label>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Validation samples</span><span class="v" id="gen-vn-v">40</span></div>
+                            <input id="gen-vn" type="range" min="10" max="100" step="1" value="40" />
+                        </label>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            <label class="toggle"><input type="checkbox" id="gen-show-true" checked />Show true function</label>
+                            <label class="toggle"><input type="checkbox" id="gen-show-train" checked />Show training points</label>
+                            <label class="toggle"><input type="checkbox" id="gen-show-val" checked />Show validation points</label>
+                        </div>
+                        <div class="mt-3 flex gap-2">
+                            <button id="gen-resample" class="btn">Resample data</button>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-title">Metrics</div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="metric-tile"><div class="lbl">Train MSE</div><div class="val" id="gen-train-mse">—</div></div>
+                            <div class="metric-tile"><div class="lbl">Val MSE</div><div class="val" id="gen-val-mse">—</div></div>
+                            <div class="metric-tile"><div class="lbl">Gen gap</div><div class="val" id="gen-gap">—</div></div>
+                        </div>
+                        <div class="mt-3" id="gen-diag-wrap">
+                            <span id="gen-diag" class="diag-pill diag-good">Good fit</span>
+                        </div>
+                        <p class="ghost mt-2">Generalization gap = Val MSE − Train MSE.</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3 text-sm text-slate-600">
+                <div>
+                    <strong class="text-slate-900">Underfitting:</strong> at low degree the curve is too rigid. Both train
+                    and validation errors stay high.
+                </div>
+                <div>
+                    <strong class="text-slate-900">Overfitting:</strong> at high degree the curve threads through training
+                    noise. Train error keeps falling but validation error rises.
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 2: BIAS-VARIANCE EXPLORER                                  -->
+        <!-- ============================================================== -->
+        <section id="sec-bias-variance" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#ede9fe; color:#6d28d9;">2</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#6d28d9;">Section 2</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Bias-Variance Tradeoff Explorer</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        Bias comes from a model family being too rigid. Variance comes from the fitted model
+                        changing too much when the dataset changes. A single fit cannot teach this — variance only
+                        becomes visible across <em>repeated</em> resampled datasets.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="panel">
+                    <div class="panel-title">A. Many Fits</div>
+                    <div class="plot-wrap">
+                        <svg id="bv-plot-fits" class="plot-svg" viewBox="0 0 380 280" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                    <p class="ghost mt-2">Each faint curve is a polynomial fit on a fresh resample of training data.</p>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">B. Average Predictor vs. Truth</div>
+                    <div class="plot-wrap">
+                        <svg id="bv-plot-avg" class="plot-svg" viewBox="0 0 380 280" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                    <p class="ghost mt-2">If the average across resamples sits away from the truth, bias is high.</p>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">C. Estimated Decomposition</div>
+                    <div class="plot-wrap">
+                        <svg id="bv-plot-bars" class="plot-svg" viewBox="0 0 380 280" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                    <p class="ghost mt-2">
+                        Empirical estimates over the prediction grid. Total proxy = bias² + variance + noise floor.
+                    </p>
+                </div>
+            </div>
+
+            <div class="mt-4 panel">
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                    <div>
+                        <div class="panel-title">Controls</div>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Polynomial degree</span><span class="v" id="bv-deg-v">5</span></div>
+                            <input id="bv-deg" type="range" min="1" max="12" step="1" value="5" />
+                        </label>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Noise level (σ)</span><span class="v" id="bv-sigma-v">0.6</span></div>
+                            <input id="bv-sigma" type="range" min="0.05" max="1.5" step="0.05" value="0.6" />
+                        </label>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Resamples</span><span class="v" id="bv-rs-v">25</span></div>
+                            <input id="bv-rs" type="range" min="5" max="60" step="1" value="25" />
+                        </label>
+                        <label class="block mb-3">
+                            <div class="control-row"><span>Samples per dataset</span><span class="v" id="bv-n-v">25</span></div>
+                            <input id="bv-n" type="range" min="10" max="80" step="1" value="25" />
+                        </label>
+                        <div class="flex flex-wrap gap-2 mt-2">
+                            <button id="bv-regen" class="btn">Generate ensemble</button>
+                            <button id="bv-anim" class="btn subtle">Animate resamples</button>
+                            <label class="toggle"><input type="checkbox" id="bv-show-avg" checked />Show average predictor</label>
+                            <label class="toggle"><input type="checkbox" id="bv-show-one" />Highlight one fit</label>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="panel-title">Empirical estimates</div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="metric-tile"><div class="lbl">Bias²</div><div class="val" id="bv-bias">—</div></div>
+                            <div class="metric-tile"><div class="lbl">Variance</div><div class="val" id="bv-var">—</div></div>
+                            <div class="metric-tile"><div class="lbl">Bias² + Var</div><div class="val" id="bv-sum">—</div></div>
+                        </div>
+                        <p class="ghost mt-3">
+                            This section uses repeated synthetic resampling to build empirical intuition for bias
+                            and variance — it is not a closed-form theorem result.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 3: L1 vs L2 LAB                                             -->
+        <!-- ============================================================== -->
+        <section id="sec-regularization" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#d1fae5; color:#047857;">3</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#047857;">Section 3</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">L1 vs L2 Regularization Lab</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        Regularization adds a penalty that discourages overly complex solutions. L1 tends to prefer
+                        <em>sparse</em> solutions; L2 tends to <em>shrink</em> all weights more smoothly.
+                    </p>
+                </div>
+            </div>
+
+            <div class="panel mb-4">
+                <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-start">
+                    <div>
+                        <div class="panel-title">Mode</div>
+                        <div class="seg" id="reg-mode-seg" role="tablist">
+                            <button data-mode="none" class="active">None</button>
+                            <button data-mode="l1">L1</button>
+                            <button data-mode="l2">L2</button>
+                        </div>
+                        <label class="toggle mt-3"><input type="checkbox" id="reg-compare" />Side-by-side compare</label>
+                    </div>
+                    <div>
+                        <div class="panel-title">Strength λ</div>
+                        <label class="block">
+                            <div class="control-row"><span>λ</span><span class="v" id="reg-lam-v">0.10</span></div>
+                            <input id="reg-lam" type="range" min="0" max="1" step="0.005" value="0.1" />
+                        </label>
+                        <p class="ghost mt-1">L1 reaches sparsity at smaller λ than L2 — that asymmetry is part of the lesson.</p>
+                    </div>
+                    <div>
+                        <div class="panel-title">Dataset</div>
+                        <select id="reg-data" class="w-full">
+                            <option value="sparse" selected>Sparse signal — only few terms active</option>
+                            <option value="corr">Correlated features</option>
+                            <option value="noisy">Noisy polynomial</option>
+                        </select>
+                        <div class="flex gap-2 mt-3">
+                            <button id="reg-resample" class="btn">Resample data</button>
+                            <button id="reg-reset" class="btn subtle">Reset λ</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="panel">
+                    <div class="panel-title">A. Fitted Curve</div>
+                    <div class="plot-wrap">
+                        <svg id="reg-plot-fit" class="plot-svg" viewBox="0 0 380 280" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                    <div class="legend" id="reg-fit-legend">
+                        <span><span class="legend-line" style="background:#0f766e;"></span>True function</span>
+                        <span><span class="legend-line" style="background:#9ca3af; border-top:2px dashed;"></span>Unregularized</span>
+                        <span><span class="legend-line" style="background:#0ea5e9;"></span>Current</span>
+                        <span><span class="swatch" style="background:#0f172a;"></span>Data</span>
+                    </div>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">B. Coefficients</div>
+                    <div class="plot-wrap">
+                        <svg id="reg-plot-coef" class="plot-svg" viewBox="0 0 380 280" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                    <p class="ghost mt-2" id="reg-coef-note">L1 drives many coefficients toward zero. L2 shrinks them smoothly.</p>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">C. Objective Breakdown</div>
+                    <div class="space-y-2">
+                        <div class="formula" id="reg-formula">Loss = MSE</div>
+                        <div class="grid grid-cols-3 gap-2">
+                            <div class="metric-tile"><div class="lbl">Data MSE</div><div class="val" id="reg-mse">—</div></div>
+                            <div class="metric-tile"><div class="lbl">Penalty</div><div class="val" id="reg-pen">—</div></div>
+                            <div class="metric-tile"><div class="lbl">Total</div><div class="val" id="reg-total">—</div></div>
+                        </div>
+                        <div class="plot-wrap">
+                            <svg id="reg-plot-obj" class="plot-svg" viewBox="0 0 380 160" preserveAspectRatio="xMidYMid meet"></svg>
+                        </div>
+                        <p class="ghost">Stacked: data loss (blue) + penalty (purple/green). Watch how moving λ trades them off.</p>
+                    </div>
+                </div>
+            </div>
+
+            <details class="mt-4 panel">
+                <summary>Geometry mini-card: why L1 is sparse and L2 is round</summary>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                    <div class="plot-wrap">
+                        <svg id="reg-geom-l2" class="plot-svg" viewBox="0 0 280 220" preserveAspectRatio="xMidYMid meet"></svg>
+                        <p class="ghost text-center mt-1">L2: circular constraint region. The MSE contour usually meets it on a smooth interior point.</p>
+                    </div>
+                    <div class="plot-wrap">
+                        <svg id="reg-geom-l1" class="plot-svg" viewBox="0 0 280 220" preserveAspectRatio="xMidYMid meet"></svg>
+                        <p class="ghost text-center mt-1">L1: diamond constraint region with sharp axes — solutions often land on a corner where one weight is zero.</p>
+                    </div>
+                </div>
+            </details>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SECTION 4: DROPOUT EXPLORER                                          -->
+        <!-- ============================================================== -->
+        <section id="sec-dropout" class="card section">
+            <div class="flex items-start gap-4 mb-4">
+                <div class="w-12 h-12 rounded-xl flex items-center justify-center text-2xl"
+                     style="background:#fef3c7; color:#b45309;">4</div>
+                <div class="flex-1">
+                    <p class="section-kicker" style="color:#b45309;">Section 4</p>
+                    <h2 class="text-2xl md:text-3xl font-bold mt-1">Dropout Intuition Explorer</h2>
+                    <p class="text-slate-600 mt-2 max-w-3xl">
+                        Dropout reduces overfitting by forcing a neural network to succeed under many random
+                        subnetworks during training instead of relying on a single brittle path.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+                <div class="lg:col-span-2 panel">
+                    <div class="panel-title">A. Subnetwork Diagram</div>
+                    <div class="plot-wrap">
+                        <svg id="drop-net" class="plot-svg" viewBox="0 0 600 320" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                    <p class="ghost mt-2" id="drop-mode-note">Training mode: a fresh random mask drops some hidden units on every forward pass.</p>
+                </div>
+
+                <div class="panel">
+                    <div class="panel-title">Controls</div>
+                    <label class="block mb-3">
+                        <div class="control-row"><span>Dropout rate p</span><span class="v" id="drop-p-v">0.40</span></div>
+                        <input id="drop-p" type="range" min="0" max="0.8" step="0.01" value="0.4" />
+                    </label>
+                    <label class="block mb-3">
+                        <div class="control-row"><span>Hidden width</span><span class="v" id="drop-w-v">10</span></div>
+                        <input id="drop-w" type="range" min="4" max="14" step="1" value="10" />
+                    </label>
+                    <label class="block mb-3">
+                        <div class="control-row"><span>Hidden layers</span></div>
+                        <select id="drop-layers" class="w-full">
+                            <option value="1" selected>1 hidden layer</option>
+                            <option value="2">2 hidden layers</option>
+                        </select>
+                    </label>
+                    <div class="seg mb-3" id="drop-mode-seg" role="tablist">
+                        <button data-mode="train" class="active">Training</button>
+                        <button data-mode="infer">Inference</button>
+                    </div>
+                    <div class="flex flex-wrap gap-2">
+                        <button id="drop-sample" class="btn">Sample new mask</button>
+                        <button id="drop-anim" class="btn subtle">Animate masks</button>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 mt-3">
+                        <div class="metric-tile"><div class="lbl">Active units</div><div class="val" id="drop-active">—</div></div>
+                        <div class="metric-tile"><div class="lbl">Subnetworks seen</div><div class="val" id="drop-seen">0</div></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel mt-4">
+                <div class="panel-title">B. Mask History</div>
+                <div class="plot-wrap">
+                    <svg id="drop-history" class="plot-svg" viewBox="0 0 600 130" preserveAspectRatio="xMidYMid meet"></svg>
+                </div>
+                <p class="ghost mt-2">
+                    Each row is one forward pass during training. Filled cells show <em>active</em> hidden units in
+                    that pass — dropout samples a fresh subnetwork every time.
+                </p>
+            </div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mt-4 text-sm text-slate-700">
+                <div class="panel">
+                    <strong class="text-slate-900">Training:</strong> each forward pass uses a fresh binary mask. Active
+                    activations are typically scaled by $1/(1-p)$ (inverted dropout) so the expected value is preserved.
+                </div>
+                <div class="panel">
+                    <strong class="text-slate-900">Inference:</strong> dropout is <em>off</em>. The full network is used.
+                    With inverted dropout, no extra rescaling is needed at test time.
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================================== -->
+        <!-- SOURCES                                                                -->
+        <!-- ============================================================== -->
+        <section id="sec-sources" class="card section">
+            <p class="section-kicker" style="color:#0f172a;">References</p>
+            <h2 class="text-2xl font-bold mt-1">Slide anchors and further reading</h2>
+            <ul class="list-disc pl-5 mt-3 text-sm text-slate-700 space-y-1">
+                <li><code>Slides/ML_Lecture3Sp26_ML_Review.pdf</code> page 2 — definition and causes of overfitting.</li>
+                <li><code>Slides/ML_Lecture3Sp26_ML_Review.pdf</code> pages 3-5 — bias and variance definitions.</li>
+                <li><code>Slides/ML_Lecture3Sp26_ML_Review.pdf</code> page 6 — preventing overfitting (data, simpler models, regularization, dropout).</li>
+                <li><code>Slides/ML_Lecture3Sp26_ML_Review.pdf</code> page 7 — regularization definition, L1 / L2 effect summary.</li>
+                <li><code>Slides/ML_Lecture3Sp26_ML_Review.pdf</code> page 9 — L1 vs L2 comparison.</li>
+                <li><code>Slides/ML_Lecture3Sp26_ML_Review.pdf</code> pages 10-11 — L2 and L1 geometric intuition.</li>
+                <li><code>Slides/ML_LectureSp26_CNN.pdf</code> pages 69-76 — variance stability and batch normalization.</li>
+            </ul>
+            <p class="footer-note mt-4">
+                Built for EE508. Polynomial regression uses ridge-stabilized normal equations; L1 fits use
+                proximal-gradient soft-thresholding (ISTA). Bias and variance estimates come from repeated
+                synthetic resampling on a fixed prediction grid — they are intuition aids, not theorem-grade.
+            </p>
+        </section>
+    </main>
+
+    <footer class="max-w-6xl mx-auto px-4 pb-12 text-center">
+        <p class="footer-note">ML Concept Visualizer · Bias-Variance &amp; Regularization Explorer</p>
+    </footer>
+
+    <script>
+    "use strict";
+    // ===================================================================
+    // Math helpers
+    // ===================================================================
+    const X_MIN = -3, X_MAX = 3;
+    const X_SCALE = 3; // normalize x to [-1, 1] before computing powers
+
+    // Mulberry32 PRNG so we can reproduce specific datasets.
+    function mulberry32(seed) {
+        let s = seed >>> 0;
+        return function () {
+            s = (s + 0x6D2B79F5) >>> 0;
+            let t = s;
+            t = Math.imul(t ^ (t >>> 15), t | 1);
+            t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+            return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+        };
+    }
+
+    function gaussian(rand) {
+        // Box-Muller. Two calls to rand() but we only need one normal.
+        const u = Math.max(rand(), 1e-12);
+        const v = rand();
+        return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
+    }
+
+    function trueFn(x) {
+        return Math.sin(1.2 * x) + 0.3 * x;
+    }
+
+    function sampleData(n, sigma, rand) {
+        const xs = new Array(n), ys = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const x = X_MIN + (X_MAX - X_MIN) * rand();
+            xs[i] = x;
+            ys[i] = trueFn(x) + sigma * gaussian(rand);
+        }
+        return { xs, ys };
+    }
+
+    function polyRow(x, degree) {
+        const xn = x / X_SCALE;
+        const r = new Array(degree + 1);
+        let p = 1;
+        for (let k = 0; k <= degree; k++) {
+            r[k] = p;
+            p *= xn;
+        }
+        return r;
+    }
+
+    function predictPoly(w, x) {
+        if (!w) return 0;
+        const xn = x / X_SCALE;
+        let p = 1, s = 0;
+        for (let k = 0; k < w.length; k++) {
+            s += w[k] * p;
+            p *= xn;
+        }
+        return s;
+    }
+
+    // Solve A x = b via Gaussian elimination with partial pivoting.
+    function solveLinear(A, b) {
+        const n = b.length;
+        const M = new Array(n);
+        for (let i = 0; i < n; i++) {
+            M[i] = A[i].slice();
+            M[i].push(b[i]);
+        }
+        for (let i = 0; i < n; i++) {
+            let maxRow = i;
+            for (let k = i + 1; k < n; k++) {
+                if (Math.abs(M[k][i]) > Math.abs(M[maxRow][i])) maxRow = k;
+            }
+            if (maxRow !== i) { const t = M[i]; M[i] = M[maxRow]; M[maxRow] = t; }
+            if (Math.abs(M[i][i]) < 1e-14) return null;
+            for (let k = i + 1; k < n; k++) {
+                const f = M[k][i] / M[i][i];
+                if (f === 0) continue;
+                for (let j = i; j <= n; j++) M[k][j] -= f * M[i][j];
+            }
+        }
+        const x = new Array(n);
+        for (let i = n - 1; i >= 0; i--) {
+            let s = M[i][n];
+            for (let j = i + 1; j < n; j++) s -= M[i][j] * x[j];
+            x[i] = s / M[i][i];
+        }
+        return x;
+    }
+
+    // Least squares with Tikhonov ridge for stability. lambdaPenalty is added
+    // to non-intercept diagonals; lambdaStab is a tiny stabilizer everywhere.
+    function fitRidge(X, y, lambdaPenalty = 0, lambdaStab = 1e-7) {
+        const n = X.length;
+        if (!n) return null;
+        const d = X[0].length;
+        const XtX = new Array(d);
+        for (let i = 0; i < d; i++) XtX[i] = new Array(d).fill(0);
+        const Xty = new Array(d).fill(0);
+        for (let i = 0; i < d; i++) {
+            for (let j = i; j < d; j++) {
+                let s = 0;
+                for (let k = 0; k < n; k++) s += X[k][i] * X[k][j];
+                XtX[i][j] = s;
+                XtX[j][i] = s;
+            }
+            let s = 0;
+            for (let k = 0; k < n; k++) s += X[k][i] * y[k];
+            Xty[i] = s;
+        }
+        for (let i = 0; i < d; i++) {
+            // Skip intercept column (i=0) from the L2 penalty; everyone gets stabilizer.
+            const extra = (i === 0 ? 0 : n * lambdaPenalty) + lambdaStab;
+            XtX[i][i] += extra;
+        }
+        return solveLinear(XtX, Xty);
+    }
+
+    function fitPoly(xs, ys, degree, lambdaPenalty = 0) {
+        const X = xs.map((x) => polyRow(x, degree));
+        return fitRidge(X, ys, lambdaPenalty);
+    }
+
+    // ISTA for L1: minimize (1/n) ||y - Xw||^2 + lambda * sum_{j>0} |w_j|
+    function fitL1(X, y, lambdaPenalty, iters = 400) {
+        const n = X.length;
+        const d = X[0].length;
+        const w = new Array(d).fill(0);
+        // Estimate Lipschitz constant of gradient = (2/n) lambda_max(X^T X)
+        // Power iteration on X^T X.
+        let v = new Array(d).fill(0).map(() => Math.random() + 0.1);
+        let norm = 0; for (let i = 0; i < d; i++) norm += v[i] * v[i];
+        norm = Math.sqrt(norm) || 1;
+        for (let i = 0; i < d; i++) v[i] /= norm;
+        let lambdaMax = 1;
+        for (let it = 0; it < 30; it++) {
+            const Xv = new Array(n).fill(0);
+            for (let i = 0; i < n; i++) {
+                let s = 0;
+                for (let j = 0; j < d; j++) s += X[i][j] * v[j];
+                Xv[i] = s;
+            }
+            const u = new Array(d).fill(0);
+            for (let j = 0; j < d; j++) {
+                let s = 0;
+                for (let i = 0; i < n; i++) s += X[i][j] * Xv[i];
+                u[j] = s;
+            }
+            let nm = 0; for (let j = 0; j < d; j++) nm += u[j] * u[j];
+            nm = Math.sqrt(nm);
+            if (nm < 1e-12) break;
+            for (let j = 0; j < d; j++) v[j] = u[j] / nm;
+            lambdaMax = nm;
+        }
+        const L = Math.max(1e-6, (2 / n) * lambdaMax);
+        const step = 1 / L;
+        for (let it = 0; it < iters; it++) {
+            // grad = (2/n) X^T (Xw - y)
+            const Xw = new Array(n).fill(0);
+            for (let i = 0; i < n; i++) {
+                let s = 0;
+                for (let j = 0; j < d; j++) s += X[i][j] * w[j];
+                Xw[i] = s;
+            }
+            const grad = new Array(d).fill(0);
+            for (let j = 0; j < d; j++) {
+                let s = 0;
+                for (let i = 0; i < n; i++) s += X[i][j] * (Xw[i] - y[i]);
+                grad[j] = (2 / n) * s;
+            }
+            for (let j = 0; j < d; j++) {
+                const u = w[j] - step * grad[j];
+                if (j === 0) {
+                    w[j] = u;
+                } else {
+                    const t = step * lambdaPenalty;
+                    if (u > t) w[j] = u - t;
+                    else if (u < -t) w[j] = u + t;
+                    else w[j] = 0;
+                }
+            }
+        }
+        return w;
+    }
+
+    function mse(yhat, y) {
+        let s = 0;
+        const n = y.length;
+        for (let i = 0; i < n; i++) {
+            const d = yhat[i] - y[i];
+            s += d * d;
+        }
+        return s / Math.max(1, n);
+    }
+
+    // ===================================================================
+    // Generic SVG plotting helpers
+    // ===================================================================
+    function clearSvg(svg) { while (svg.firstChild) svg.removeChild(svg.firstChild); }
+    function svgEl(name, attrs) {
+        const el = document.createElementNS("http://www.w3.org/2000/svg", name);
+        if (attrs) {
+            for (const k in attrs) {
+                el.setAttribute(k, attrs[k]);
+            }
+        }
+        return el;
+    }
+
+    // Cartesian axes drawing for a simple x-y line plot.
+    function drawAxes(svg, opts) {
+        const { x0, y0, x1, y1, xMin, xMax, yMin, yMax, xLabel, yLabel } = opts;
+        const w = x1 - x0, h = y1 - y0;
+        const sx = (x) => x0 + (x - xMin) / (xMax - xMin) * w;
+        const sy = (y) => y1 - (y - yMin) / (yMax - yMin) * h;
+
+        // grid
+        const gridG = svgEl("g", { stroke: "#e2e8f0", "stroke-width": "1" });
+        const xTicks = 6, yTicks = 5;
+        for (let i = 0; i <= xTicks; i++) {
+            const xv = xMin + (xMax - xMin) * i / xTicks;
+            const xp = sx(xv);
+            gridG.appendChild(svgEl("line", { x1: xp, y1: y0, x2: xp, y2: y1 }));
+        }
+        for (let i = 0; i <= yTicks; i++) {
+            const yv = yMin + (yMax - yMin) * i / yTicks;
+            const yp = sy(yv);
+            gridG.appendChild(svgEl("line", { x1: x0, y1: yp, x2: x1, y2: yp }));
+        }
+        svg.appendChild(gridG);
+
+        // axes (x=0, y=0 if visible)
+        const axisG = svgEl("g", { stroke: "#94a3b8", "stroke-width": "1" });
+        if (yMin <= 0 && yMax >= 0) {
+            axisG.appendChild(svgEl("line", { x1: x0, y1: sy(0), x2: x1, y2: sy(0) }));
+        }
+        if (xMin <= 0 && xMax >= 0) {
+            axisG.appendChild(svgEl("line", { x1: sx(0), y1: y0, x2: sx(0), y2: y1 }));
+        }
+        // outer frame
+        axisG.appendChild(svgEl("rect", {
+            x: x0, y: y0, width: w, height: h,
+            fill: "none", stroke: "#cbd5e1", "stroke-width": "1"
+        }));
+        svg.appendChild(axisG);
+
+        // tick labels
+        const labelG = svgEl("g", { fill: "#64748b", "font-size": "10", "font-family": "ui-sans-serif, system-ui, sans-serif" });
+        for (let i = 0; i <= xTicks; i++) {
+            const xv = xMin + (xMax - xMin) * i / xTicks;
+            const xp = sx(xv);
+            const t = svgEl("text", { x: xp, y: y1 + 12, "text-anchor": "middle" });
+            t.textContent = formatTick(xv);
+            labelG.appendChild(t);
+        }
+        for (let i = 0; i <= yTicks; i++) {
+            const yv = yMin + (yMax - yMin) * i / yTicks;
+            const yp = sy(yv);
+            const t = svgEl("text", { x: x0 - 6, y: yp + 3, "text-anchor": "end" });
+            t.textContent = formatTick(yv);
+            labelG.appendChild(t);
+        }
+        if (xLabel) {
+            const t = svgEl("text", { x: (x0 + x1) / 2, y: y1 + 28, "text-anchor": "middle", fill: "#475569", "font-weight": "600" });
+            t.textContent = xLabel;
+            labelG.appendChild(t);
+        }
+        if (yLabel) {
+            const t = svgEl("text", {
+                x: x0 - 30, y: (y0 + y1) / 2,
+                "text-anchor": "middle", fill: "#475569", "font-weight": "600",
+                transform: `rotate(-90 ${x0 - 30} ${(y0 + y1) / 2})`,
+            });
+            t.textContent = yLabel;
+            labelG.appendChild(t);
+        }
+        svg.appendChild(labelG);
+
+        return { sx, sy };
+    }
+
+    function formatTick(v) {
+        if (Math.abs(v) < 1e-9) return "0";
+        const a = Math.abs(v);
+        if (a >= 100) return v.toFixed(0);
+        if (a >= 10) return v.toFixed(1);
+        if (a >= 1) return v.toFixed(2);
+        return v.toFixed(2);
+    }
+
+    function fmt(v, d = 3) {
+        if (!isFinite(v)) return "—";
+        if (Math.abs(v) >= 1000) return v.toExponential(2);
+        return v.toFixed(d);
+    }
+
+    function pathFromPts(pts, sx, sy) {
+        let s = "";
+        for (let i = 0; i < pts.length; i++) {
+            const [x, y] = pts[i];
+            s += (i === 0 ? "M" : "L") + sx(x).toFixed(2) + "," + sy(y).toFixed(2);
+        }
+        return s;
+    }
+
+    function drawCurve(svg, w, sx, sy, xMin, xMax, color, strokeWidth = 2, dash = null, opacity = 1) {
+        const N = 200;
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+            const x = xMin + (xMax - xMin) * i / N;
+            pts.push([x, predictPoly(w, x)]);
+        }
+        const p = svgEl("path", {
+            d: pathFromPts(pts, sx, sy),
+            fill: "none",
+            stroke: color,
+            "stroke-width": strokeWidth,
+            "stroke-linejoin": "round",
+            "stroke-linecap": "round",
+            opacity: opacity,
+        });
+        if (dash) p.setAttribute("stroke-dasharray", dash);
+        svg.appendChild(p);
+    }
+
+    function drawTrueFn(svg, sx, sy, xMin, xMax, color = "#0f766e") {
+        const N = 200;
+        const pts = [];
+        for (let i = 0; i <= N; i++) {
+            const x = xMin + (xMax - xMin) * i / N;
+            pts.push([x, trueFn(x)]);
+        }
+        svg.appendChild(svgEl("path", {
+            d: pathFromPts(pts, sx, sy),
+            fill: "none",
+            stroke: color,
+            "stroke-width": 2.2,
+            "stroke-dasharray": "5,4",
+            opacity: 0.85,
+        }));
+    }
+
+    function drawPoints(svg, xs, ys, sx, sy, color, r = 3, opacity = 0.9) {
+        const g = svgEl("g", { fill: color, opacity: opacity });
+        for (let i = 0; i < xs.length; i++) {
+            g.appendChild(svgEl("circle", {
+                cx: sx(xs[i]).toFixed(2),
+                cy: sy(ys[i]).toFixed(2),
+                r: r,
+                stroke: "white",
+                "stroke-width": "0.8",
+            }));
+        }
+        svg.appendChild(g);
+    }
+
+    // ===================================================================
+    // SECTION 1: Generalization Explorer
+    // ===================================================================
+    const gen = {
+        seed: 12345,
+        train: null,
+        val: null,
+        sigma: 0.45,
+    };
+
+    function genSigma(level) {
+        if (level === "low") return 0.15;
+        if (level === "med") return 0.45;
+        return 0.9;
+    }
+
+    function genResample() {
+        const noise = document.getElementById("gen-noise").value;
+        const n = parseInt(document.getElementById("gen-n").value, 10);
+        const vn = parseInt(document.getElementById("gen-vn").value, 10);
+        gen.sigma = genSigma(noise);
+        gen.seed = (gen.seed * 1664525 + 1013904223) >>> 0;
+        const rand = mulberry32(gen.seed);
+        gen.train = sampleData(n, gen.sigma, rand);
+        gen.val = sampleData(vn, gen.sigma, rand);
+    }
+
+    function genRender() {
+        const svg = document.getElementById("gen-plot");
+        clearSvg(svg);
+        const xMin = X_MIN, xMax = X_MAX;
+        let yMin = -3, yMax = 3;
+        // Adapt y range to data
+        const allY = [...gen.train.ys, ...gen.val.ys];
+        const dataMin = Math.min(...allY), dataMax = Math.max(...allY);
+        yMin = Math.min(yMin, dataMin - 0.3);
+        yMax = Math.max(yMax, dataMax + 0.3);
+
+        const margin = { l: 44, r: 16, t: 14, b: 28 };
+        const W = 600, H = 360;
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const { sx, sy } = drawAxes(svg, {
+            x0, y0, x1, y1, xMin, xMax, yMin, yMax,
+            xLabel: "x", yLabel: "y",
+        });
+
+        const showTrue = document.getElementById("gen-show-true").checked;
+        const showTrain = document.getElementById("gen-show-train").checked;
+        const showVal = document.getElementById("gen-show-val").checked;
+        const degree = parseInt(document.getElementById("gen-deg").value, 10);
+
+        if (showTrue) drawTrueFn(svg, sx, sy, xMin, xMax);
+
+        const w = fitPoly(gen.train.xs, gen.train.ys, degree);
+        if (w) drawCurve(svg, w, sx, sy, xMin, xMax, "#0ea5e9", 2.8);
+
+        if (showVal) drawPoints(svg, gen.val.xs, gen.val.ys, sx, sy, "#f97316", 3);
+        if (showTrain) drawPoints(svg, gen.train.xs, gen.train.ys, sx, sy, "#0f172a", 3.5);
+
+        // Metrics
+        const trainPred = gen.train.xs.map((x) => predictPoly(w, x));
+        const valPred = gen.val.xs.map((x) => predictPoly(w, x));
+        const tMSE = mse(trainPred, gen.train.ys);
+        const vMSE = mse(valPred, gen.val.ys);
+        const gap = vMSE - tMSE;
+        document.getElementById("gen-train-mse").textContent = fmt(tMSE);
+        document.getElementById("gen-val-mse").textContent = fmt(vMSE);
+        document.getElementById("gen-gap").textContent = fmt(gap);
+
+        const diag = document.getElementById("gen-diag");
+        const noiseFloor = gen.sigma * gen.sigma;
+        if (tMSE > 1.6 * noiseFloor && vMSE > 1.6 * noiseFloor && Math.abs(gap) < 0.5 * vMSE) {
+            diag.textContent = "Underfitting — both errors high";
+            diag.className = "diag-pill diag-warn";
+        } else if (gap > 0.6 * Math.max(tMSE, 0.05) && gap > 0.5 * noiseFloor) {
+            diag.textContent = "Overfitting — train low, val rising";
+            diag.className = "diag-pill diag-bad";
+        } else {
+            diag.textContent = "Good fit — errors near the noise floor";
+            diag.className = "diag-pill diag-good";
+        }
+    }
+
+    function genWire() {
+        const ids = ["gen-deg", "gen-n", "gen-vn"];
+        const labels = { "gen-deg": "gen-deg-v", "gen-n": "gen-n-v", "gen-vn": "gen-vn-v" };
+        ids.forEach((id) => {
+            const el = document.getElementById(id);
+            el.addEventListener("input", () => {
+                document.getElementById(labels[id]).textContent = el.value;
+                if (id === "gen-n" || id === "gen-vn") genResample();
+                genRender();
+            });
+        });
+        document.getElementById("gen-noise").addEventListener("change", () => { genResample(); genRender(); });
+        document.getElementById("gen-resample").addEventListener("click", () => { genResample(); genRender(); });
+        ["gen-show-true", "gen-show-train", "gen-show-val"].forEach((id) => {
+            document.getElementById(id).addEventListener("change", genRender);
+        });
+        // Initialize labels
+        document.getElementById("gen-deg-v").textContent = document.getElementById("gen-deg").value;
+        document.getElementById("gen-n-v").textContent = document.getElementById("gen-n").value;
+        document.getElementById("gen-vn-v").textContent = document.getElementById("gen-vn").value;
+        genResample();
+        genRender();
+    }
+
+    // ===================================================================
+    // SECTION 2: Bias-Variance Explorer
+    // ===================================================================
+    const bv = {
+        ensemble: [], // array of weight vectors
+        seed: 7777,
+        animTimer: null,
+    };
+
+    function bvRegenerate(reseed = false) {
+        const degree = parseInt(document.getElementById("bv-deg").value, 10);
+        const sigma = parseFloat(document.getElementById("bv-sigma").value);
+        const rs = parseInt(document.getElementById("bv-rs").value, 10);
+        const n = parseInt(document.getElementById("bv-n").value, 10);
+        bv.ensemble = [];
+        if (reseed) bv.seed = (bv.seed * 1664525 + 1013904223) >>> 0;
+        for (let r = 0; r < rs; r++) {
+            const rand = mulberry32((bv.seed + r * 9973) >>> 0);
+            const { xs, ys } = sampleData(n, sigma, rand);
+            const w = fitPoly(xs, ys, degree);
+            if (w) bv.ensemble.push(w);
+        }
+        bv.sigma = sigma;
+    }
+
+    function bvGrid() {
+        const N = 80;
+        const xs = new Array(N + 1);
+        for (let i = 0; i <= N; i++) xs[i] = X_MIN + (X_MAX - X_MIN) * i / N;
+        return xs;
+    }
+
+    function bvStats() {
+        const xs = bvGrid();
+        const E = bv.ensemble;
+        if (!E.length) return { xs, avg: xs.map(() => 0), perEns: [], biasSq: 0, varEst: 0 };
+        const perEns = E.map((w) => xs.map((x) => predictPoly(w, x)));
+        const M = E.length;
+        const avg = xs.map((x, i) => {
+            let s = 0;
+            for (let m = 0; m < M; m++) s += perEns[m][i];
+            return s / M;
+        });
+        // Bias^2 and variance averaged across the grid
+        let bsq = 0, vsum = 0;
+        for (let i = 0; i < xs.length; i++) {
+            const t = trueFn(xs[i]);
+            const a = avg[i];
+            bsq += (a - t) * (a - t);
+            let v = 0;
+            for (let m = 0; m < M; m++) {
+                const d = perEns[m][i] - a;
+                v += d * d;
+            }
+            vsum += v / M;
+        }
+        return { xs, avg, perEns, biasSq: bsq / xs.length, varEst: vsum / xs.length };
+    }
+
+    function bvRenderFitsPanel(svg, stats) {
+        clearSvg(svg);
+        const margin = { l: 36, r: 8, t: 8, b: 22 };
+        const W = 380, H = 280;
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const yMin = -3.5, yMax = 3.5;
+        const { sx, sy } = drawAxes(svg, { x0, y0, x1, y1, xMin: X_MIN, xMax: X_MAX, yMin, yMax });
+        // True
+        drawTrueFn(svg, sx, sy, X_MIN, X_MAX);
+        // Many fits with low alpha
+        const E = bv.ensemble;
+        for (let m = 0; m < E.length; m++) {
+            drawCurve(svg, E[m], sx, sy, X_MIN, X_MAX, "#8b5cf6", 1, null, 0.22);
+        }
+        if (document.getElementById("bv-show-one").checked && E.length) {
+            drawCurve(svg, E[0], sx, sy, X_MIN, X_MAX, "#0ea5e9", 2.4);
+        }
+    }
+
+    function bvRenderAvgPanel(svg, stats) {
+        clearSvg(svg);
+        const margin = { l: 36, r: 8, t: 8, b: 22 };
+        const W = 380, H = 280;
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const yMin = -3.5, yMax = 3.5;
+        const { sx, sy } = drawAxes(svg, { x0, y0, x1, y1, xMin: X_MIN, xMax: X_MAX, yMin, yMax });
+        drawTrueFn(svg, sx, sy, X_MIN, X_MAX);
+        if (document.getElementById("bv-show-avg").checked) {
+            const pts = stats.xs.map((x, i) => [x, stats.avg[i]]);
+            svg.appendChild(svgEl("path", {
+                d: pathFromPts(pts, sx, sy),
+                fill: "none",
+                stroke: "#ef4444",
+                "stroke-width": 2.8,
+                "stroke-linejoin": "round",
+            }));
+        }
+        // Variance band (mean +/- std)
+        if (bv.ensemble.length) {
+            const stds = stats.xs.map((x, i) => {
+                let v = 0;
+                for (let m = 0; m < stats.perEns.length; m++) {
+                    const d = stats.perEns[m][i] - stats.avg[i];
+                    v += d * d;
+                }
+                return Math.sqrt(v / Math.max(1, stats.perEns.length));
+            });
+            const top = stats.xs.map((x, i) => [x, stats.avg[i] + stds[i]]);
+            const bot = stats.xs.map((x, i) => [x, stats.avg[i] - stds[i]]).reverse();
+            const all = top.concat(bot);
+            svg.appendChild(svgEl("path", {
+                d: pathFromPts(all, sx, sy) + "Z",
+                fill: "#ef4444", opacity: 0.12, stroke: "none",
+            }));
+        }
+    }
+
+    function bvRenderBars(svg, stats) {
+        clearSvg(svg);
+        const W = 380, H = 280;
+        const margin = { l: 50, r: 14, t: 14, b: 36 };
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const sigma = parseFloat(document.getElementById("bv-sigma").value);
+        const noise = sigma * sigma;
+        const total = stats.biasSq + stats.varEst + noise;
+        const yMax = Math.max(0.01, total * 1.15);
+        const items = [
+            { lbl: "Bias²", v: stats.biasSq, color: "#0ea5e9" },
+            { lbl: "Variance", v: stats.varEst, color: "#8b5cf6" },
+            { lbl: "Noise", v: noise, color: "#94a3b8" },
+            { lbl: "B²+V+N", v: total, color: "#0f172a" },
+        ];
+        // axes box
+        svg.appendChild(svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: "none", stroke: "#cbd5e1" }));
+        // y grid
+        const ticks = 4;
+        for (let i = 0; i <= ticks; i++) {
+            const yv = yMax * i / ticks;
+            const yp = y1 - (yv / yMax) * (y1 - y0);
+            svg.appendChild(svgEl("line", { x1: x0, y1: yp, x2: x1, y2: yp, stroke: "#e2e8f0" }));
+            const t = svgEl("text", {
+                x: x0 - 6, y: yp + 3, "text-anchor": "end",
+                fill: "#64748b", "font-size": "10",
+            });
+            t.textContent = yv.toFixed(2);
+            svg.appendChild(t);
+        }
+        // bars
+        const slot = (x1 - x0) / items.length;
+        const barW = slot * 0.55;
+        items.forEach((it, i) => {
+            const cx = x0 + slot * (i + 0.5);
+            const h = (it.v / yMax) * (y1 - y0);
+            svg.appendChild(svgEl("rect", {
+                x: cx - barW / 2, y: y1 - h, width: barW, height: h,
+                fill: it.color, rx: 4, opacity: 0.92,
+            }));
+            const t = svgEl("text", {
+                x: cx, y: y1 + 14, "text-anchor": "middle",
+                fill: "#334155", "font-size": "10", "font-weight": "600",
+            });
+            t.textContent = it.lbl;
+            svg.appendChild(t);
+            const v = svgEl("text", {
+                x: cx, y: y1 - h - 4, "text-anchor": "middle",
+                fill: it.color, "font-size": "10", "font-weight": "700",
+            });
+            v.textContent = it.v.toFixed(3);
+            svg.appendChild(v);
+        });
+    }
+
+    function bvRenderAll() {
+        const stats = bvStats();
+        bvRenderFitsPanel(document.getElementById("bv-plot-fits"), stats);
+        bvRenderAvgPanel(document.getElementById("bv-plot-avg"), stats);
+        bvRenderBars(document.getElementById("bv-plot-bars"), stats);
+        document.getElementById("bv-bias").textContent = fmt(stats.biasSq);
+        document.getElementById("bv-var").textContent = fmt(stats.varEst);
+        document.getElementById("bv-sum").textContent = fmt(stats.biasSq + stats.varEst);
+    }
+
+    function bvWire() {
+        const sliders = [
+            ["bv-deg", "bv-deg-v", true],
+            ["bv-sigma", "bv-sigma-v", true],
+            ["bv-rs", "bv-rs-v", true],
+            ["bv-n", "bv-n-v", true],
+        ];
+        sliders.forEach(([id, lbl]) => {
+            const el = document.getElementById(id);
+            el.addEventListener("input", () => {
+                document.getElementById(lbl).textContent = (id === "bv-sigma") ? Number(el.value).toFixed(2) : el.value;
+                bvRegenerate();
+                bvRenderAll();
+            });
+        });
+        document.getElementById("bv-regen").addEventListener("click", () => { bvRegenerate(true); bvRenderAll(); });
+        document.getElementById("bv-show-avg").addEventListener("change", bvRenderAll);
+        document.getElementById("bv-show-one").addEventListener("change", bvRenderAll);
+        document.getElementById("bv-anim").addEventListener("click", () => {
+            if (bv.animTimer) {
+                clearInterval(bv.animTimer);
+                bv.animTimer = null;
+                document.getElementById("bv-anim").textContent = "Animate resamples";
+                return;
+            }
+            document.getElementById("bv-anim").textContent = "Stop animation";
+            bv.animTimer = setInterval(() => {
+                bvRegenerate(true);
+                bvRenderAll();
+            }, 700);
+        });
+        // initial labels
+        document.getElementById("bv-deg-v").textContent = document.getElementById("bv-deg").value;
+        document.getElementById("bv-sigma-v").textContent = Number(document.getElementById("bv-sigma").value).toFixed(2);
+        document.getElementById("bv-rs-v").textContent = document.getElementById("bv-rs").value;
+        document.getElementById("bv-n-v").textContent = document.getElementById("bv-n").value;
+        bvRegenerate();
+        bvRenderAll();
+    }
+
+    // ===================================================================
+    // SECTION 3: L1 vs L2 Lab
+    // ===================================================================
+    const reg = {
+        seed: 4242,
+        data: null,
+        degree: 8,
+        mode: "none", // "none" | "l1" | "l2"
+        compare: false,
+    };
+
+    function regSampleData() {
+        const kind = document.getElementById("reg-data").value;
+        reg.seed = (reg.seed * 1664525 + 1013904223) >>> 0;
+        const rand = mulberry32(reg.seed);
+        let trueCoefs;
+        let sigma;
+        const n = 35;
+        if (kind === "sparse") {
+            // y = 1.2 - 0.8 x + 0.5 x^3, polynomial basis up to degree 8
+            trueCoefs = [1.2, -0.8, 0, 0.5, 0, 0, 0, 0, 0];
+            sigma = 0.35;
+        } else if (kind === "corr") {
+            // Smooth nonlinear true: y = 0.6 sin(x) + 0.15 x^2 - 0.3 x; harder for sparsity to help
+            trueCoefs = null; // we sample directly from true function
+            sigma = 0.3;
+        } else {
+            // Noisy polynomial
+            trueCoefs = [0.5, 0.4, -0.2, 0.6, 0, 0, -0.15, 0, 0];
+            sigma = 0.7;
+        }
+        const xs = new Array(n), ys = new Array(n);
+        for (let i = 0; i < n; i++) {
+            const x = X_MIN + (X_MAX - X_MIN) * rand();
+            xs[i] = x;
+            let yt;
+            if (trueCoefs) {
+                yt = 0;
+                let p = 1;
+                const xn = x / X_SCALE;
+                for (let k = 0; k < trueCoefs.length; k++) {
+                    yt += trueCoefs[k] * p;
+                    p *= xn;
+                }
+            } else {
+                yt = 0.6 * Math.sin(x) + 0.15 * x * x - 0.3 * x;
+            }
+            ys[i] = yt + sigma * gaussian(rand);
+        }
+        reg.data = { xs, ys, kind, trueCoefs, sigma };
+    }
+
+    function regBuildX() {
+        const { xs } = reg.data;
+        return xs.map((x) => polyRow(x, reg.degree));
+    }
+
+    function regFit(mode, lambda) {
+        const X = regBuildX();
+        const y = reg.data.ys;
+        if (mode === "none") return fitRidge(X, y, 0);
+        if (mode === "l2") return fitRidge(X, y, lambda);
+        if (mode === "l1") return fitL1(X, y, lambda);
+        return null;
+    }
+
+    function regComputeObjective(w, mode, lambda) {
+        if (!w) return { mse: 0, pen: 0, total: 0 };
+        const X = regBuildX();
+        const y = reg.data.ys;
+        const n = X.length, d = w.length;
+        let s = 0;
+        for (let i = 0; i < n; i++) {
+            let yh = 0;
+            for (let j = 0; j < d; j++) yh += X[i][j] * w[j];
+            s += (yh - y[i]) ** 2;
+        }
+        const m = s / n;
+        let pen = 0;
+        for (let j = 1; j < d; j++) {
+            if (mode === "l1") pen += Math.abs(w[j]);
+            else if (mode === "l2") pen += w[j] * w[j];
+        }
+        pen *= lambda;
+        return { mse: m, pen, total: m + pen };
+    }
+
+    function regTrueFn(x) {
+        if (!reg.data) return 0;
+        if (reg.data.trueCoefs) {
+            let yt = 0, p = 1;
+            const xn = x / X_SCALE;
+            for (let k = 0; k < reg.data.trueCoefs.length; k++) {
+                yt += reg.data.trueCoefs[k] * p;
+                p *= xn;
+            }
+            return yt;
+        }
+        return 0.6 * Math.sin(x) + 0.15 * x * x - 0.3 * x;
+    }
+
+    function regRenderFitPanel(wCurrent, wNone) {
+        const svg = document.getElementById("reg-plot-fit");
+        clearSvg(svg);
+        const W = 380, H = 280;
+        const margin = { l: 36, r: 8, t: 8, b: 22 };
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const allY = reg.data.ys.slice();
+        const yMin = Math.min(-3, Math.min(...allY) - 0.3);
+        const yMax = Math.max(3, Math.max(...allY) + 0.3);
+        const { sx, sy } = drawAxes(svg, { x0, y0, x1, y1, xMin: X_MIN, xMax: X_MAX, yMin, yMax });
+
+        // True function
+        const N = 200;
+        const truePts = [];
+        for (let i = 0; i <= N; i++) {
+            const x = X_MIN + (X_MAX - X_MIN) * i / N;
+            truePts.push([x, regTrueFn(x)]);
+        }
+        svg.appendChild(svgEl("path", {
+            d: pathFromPts(truePts, sx, sy),
+            fill: "none",
+            stroke: "#0f766e",
+            "stroke-width": 2,
+            "stroke-dasharray": "5,4",
+            opacity: 0.9,
+        }));
+
+        if (reg.compare) {
+            // Show none/l1/l2 simultaneously
+            const lambda = parseFloat(document.getElementById("reg-lam").value);
+            const wN = regFit("none", 0);
+            const wL2 = regFit("l2", lambda);
+            const wL1 = regFit("l1", lambda);
+            drawCurve(svg, wN, sx, sy, X_MIN, X_MAX, "#9ca3af", 2, "5,4", 0.9);
+            drawCurve(svg, wL2, sx, sy, X_MIN, X_MAX, "#10b981", 2.5);
+            drawCurve(svg, wL1, sx, sy, X_MIN, X_MAX, "#8b5cf6", 2.5);
+        } else {
+            if (wNone) drawCurve(svg, wNone, sx, sy, X_MIN, X_MAX, "#9ca3af", 1.8, "5,4", 0.9);
+            if (wCurrent) drawCurve(svg, wCurrent, sx, sy, X_MIN, X_MAX, "#0ea5e9", 2.6);
+        }
+        drawPoints(svg, reg.data.xs, reg.data.ys, sx, sy, "#0f172a", 3);
+    }
+
+    function regRenderCoefPanel(wCurrent) {
+        const svg = document.getElementById("reg-plot-coef");
+        clearSvg(svg);
+        const W = 380, H = 280;
+        const margin = { l: 30, r: 10, t: 14, b: 32 };
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const lambda = parseFloat(document.getElementById("reg-lam").value);
+        // when comparing, show 3 grouped bar sets
+        const seriesList = reg.compare
+            ? [
+                { lbl: "None", color: "#9ca3af", w: regFit("none", 0) },
+                { lbl: "L1", color: "#8b5cf6", w: regFit("l1", lambda) },
+                { lbl: "L2", color: "#10b981", w: regFit("l2", lambda) },
+            ]
+            : [{ lbl: reg.mode === "none" ? "None" : reg.mode.toUpperCase(),
+                color: reg.mode === "l1" ? "#8b5cf6" : reg.mode === "l2" ? "#10b981" : "#0ea5e9",
+                w: wCurrent }];
+        const d = (seriesList[0].w || []).length;
+        if (!d) return;
+        // axis box
+        svg.appendChild(svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: "none", stroke: "#cbd5e1" }));
+        // figure y range
+        let amax = 0;
+        seriesList.forEach((s) => {
+            if (!s.w) return;
+            for (let j = 0; j < s.w.length; j++) amax = Math.max(amax, Math.abs(s.w[j]));
+        });
+        amax = Math.max(0.5, amax * 1.15);
+        const yMid = (y0 + y1) / 2;
+        const sy = (v) => yMid - (v / amax) * ((y1 - y0) / 2);
+        // zero line
+        svg.appendChild(svgEl("line", { x1: x0, y1: yMid, x2: x1, y2: yMid, stroke: "#94a3b8" }));
+        // y ticks
+        for (let k = -1; k <= 1; k += 0.5) {
+            if (k === 0) continue;
+            const yp = sy(k * amax);
+            svg.appendChild(svgEl("line", { x1: x0, y1: yp, x2: x1, y2: yp, stroke: "#e2e8f0" }));
+            const t = svgEl("text", { x: x0 - 4, y: yp + 3, "text-anchor": "end", fill: "#94a3b8", "font-size": "9" });
+            t.textContent = (k * amax).toFixed(2);
+            svg.appendChild(t);
+        }
+        // bars
+        const slot = (x1 - x0) / d;
+        const groupCount = seriesList.length;
+        const barW = (slot * 0.78) / groupCount;
+        for (let j = 0; j < d; j++) {
+            const cx = x0 + slot * (j + 0.5);
+            seriesList.forEach((s, gi) => {
+                if (!s.w) return;
+                const v = s.w[j];
+                const y = sy(v);
+                const h = Math.abs(y - yMid);
+                const top = v >= 0 ? y : yMid;
+                const offset = (gi - (groupCount - 1) / 2) * (barW + 1);
+                svg.appendChild(svgEl("rect", {
+                    x: cx + offset - barW / 2, y: top, width: barW, height: Math.max(0.5, h),
+                    fill: s.color, rx: 2, opacity: 0.9,
+                }));
+            });
+            const lbl = svgEl("text", {
+                x: cx, y: y1 + 12, "text-anchor": "middle",
+                fill: "#475569", "font-size": "10",
+            });
+            lbl.textContent = "w" + j;
+            svg.appendChild(lbl);
+        }
+        // legend
+        seriesList.forEach((s, gi) => {
+            const lx = x0 + 6 + gi * 64;
+            const ly = y0 + 12;
+            svg.appendChild(svgEl("rect", { x: lx, y: ly - 8, width: 10, height: 10, rx: 2, fill: s.color }));
+            const t = svgEl("text", { x: lx + 14, y: ly + 1, fill: "#475569", "font-size": "10", "font-weight": "700" });
+            t.textContent = s.lbl;
+            svg.appendChild(t);
+        });
+    }
+
+    function regRenderObjPanel(wCurrent) {
+        const svg = document.getElementById("reg-plot-obj");
+        clearSvg(svg);
+        const lambda = parseFloat(document.getElementById("reg-lam").value);
+        const W = 380, H = 160;
+        const margin = { l: 38, r: 12, t: 8, b: 24 };
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const obj = regComputeObjective(wCurrent, reg.mode, lambda);
+        const total = Math.max(0.001, obj.total * 1.25);
+        // y axis box
+        svg.appendChild(svgEl("rect", { x: x0, y: y0, width: x1 - x0, height: y1 - y0, fill: "none", stroke: "#cbd5e1" }));
+        // y ticks
+        const ticks = 3;
+        for (let i = 0; i <= ticks; i++) {
+            const yv = total * i / ticks;
+            const yp = y1 - (yv / total) * (y1 - y0);
+            svg.appendChild(svgEl("line", { x1: x0, y1: yp, x2: x1, y2: yp, stroke: "#e2e8f0" }));
+            const t = svgEl("text", { x: x0 - 4, y: yp + 3, "text-anchor": "end", fill: "#64748b", "font-size": "9" });
+            t.textContent = yv.toFixed(2);
+            svg.appendChild(t);
+        }
+        // single stacked bar in middle
+        const bx = (x0 + x1) / 2 - 30;
+        const bw = 60;
+        const mseH = (obj.mse / total) * (y1 - y0);
+        const penH = (obj.pen / total) * (y1 - y0);
+        svg.appendChild(svgEl("rect", { x: bx, y: y1 - mseH, width: bw, height: mseH, fill: "#0ea5e9", rx: 3 }));
+        svg.appendChild(svgEl("rect", { x: bx, y: y1 - mseH - penH, width: bw, height: penH,
+            fill: reg.mode === "l1" ? "#8b5cf6" : "#10b981", rx: 3 }));
+        // labels
+        const tMSE = svgEl("text", { x: bx + bw + 6, y: y1 - mseH / 2 + 3, fill: "#0369a1", "font-size": "10", "font-weight": "700" });
+        tMSE.textContent = "MSE = " + obj.mse.toFixed(3);
+        svg.appendChild(tMSE);
+        const tPen = svgEl("text", { x: bx + bw + 6, y: y1 - mseH - penH / 2 + 3,
+            fill: reg.mode === "l1" ? "#6d28d9" : "#047857", "font-size": "10", "font-weight": "700" });
+        tPen.textContent = "Penalty = " + obj.pen.toFixed(3);
+        svg.appendChild(tPen);
+        const tTot = svgEl("text", { x: bx + bw / 2, y: y1 - mseH - penH - 6, "text-anchor": "middle",
+            fill: "#0f172a", "font-size": "10", "font-weight": "800" });
+        tTot.textContent = "Total = " + obj.total.toFixed(3);
+        svg.appendChild(tTot);
+    }
+
+    function regRenderGeometry() {
+        // L2 (circle) and L1 (diamond) constraint regions with elliptical MSE contours.
+        const drawGeom = (svgId, isL1) => {
+            const svg = document.getElementById(svgId);
+            clearSvg(svg);
+            const W = 280, H = 220;
+            const x0 = 30, y0 = 14, x1 = W - 14, y1 = H - 28;
+            const cx = (x0 + x1) / 2, cy = (y0 + y1) / 2;
+            // axes
+            svg.appendChild(svgEl("line", { x1: x0, y1: cy, x2: x1, y2: cy, stroke: "#94a3b8" }));
+            svg.appendChild(svgEl("line", { x1: cx, y1: y0, x2: cx, y2: y1, stroke: "#94a3b8" }));
+            const xLabel = svgEl("text", { x: x1 - 4, y: cy - 4, "text-anchor": "end", fill: "#475569", "font-size": "11", "font-weight": "700" });
+            xLabel.textContent = "w₁";
+            svg.appendChild(xLabel);
+            const yLabel = svgEl("text", { x: cx + 4, y: y0 + 12, fill: "#475569", "font-size": "11", "font-weight": "700" });
+            yLabel.textContent = "w₂";
+            svg.appendChild(yLabel);
+            // unconstrained optimum at offset
+            const wxStar = cx + 60, wyStar = cy - 30;
+            // MSE contours
+            const contourColor = "#fb923c";
+            for (let r = 30; r <= 90; r += 30) {
+                svg.appendChild(svgEl("ellipse", {
+                    cx: wxStar, cy: wyStar, rx: r * 1.1, ry: r * 0.7,
+                    fill: "none", stroke: contourColor, "stroke-width": 1.4, opacity: 0.6,
+                    transform: `rotate(20 ${wxStar} ${wyStar})`,
+                }));
+            }
+            svg.appendChild(svgEl("circle", { cx: wxStar, cy: wyStar, r: 3.5, fill: contourColor }));
+            const wLabel = svgEl("text", { x: wxStar + 6, y: wyStar - 4, fill: "#c2410c", "font-size": "10", "font-weight": "700" });
+            wLabel.textContent = "OLS w*";
+            svg.appendChild(wLabel);
+            // constraint region
+            const radius = 50;
+            if (isL1) {
+                const pts = [
+                    [cx, cy - radius], [cx + radius, cy], [cx, cy + radius], [cx - radius, cy]
+                ];
+                const d = "M" + pts.map((p) => p.join(",")).join("L") + "Z";
+                svg.appendChild(svgEl("path", { d: d, fill: "#8b5cf6", "fill-opacity": 0.18, stroke: "#7c3aed", "stroke-width": 1.6 }));
+                // touch point on top corner (axis)
+                const touch = [cx, cy - radius];
+                svg.appendChild(svgEl("circle", { cx: touch[0], cy: touch[1], r: 4, fill: "#7c3aed", stroke: "white", "stroke-width": 1.5 }));
+                const tt = svgEl("text", { x: touch[0] + 8, y: touch[1] - 2, fill: "#6d28d9", "font-size": "10", "font-weight": "700" });
+                tt.textContent = "w₁ = 0";
+                svg.appendChild(tt);
+            } else {
+                svg.appendChild(svgEl("circle", { cx: cx, cy: cy, r: radius,
+                    fill: "#10b981", "fill-opacity": 0.18, stroke: "#059669", "stroke-width": 1.6 }));
+                // touch point on smooth boundary (off-axis)
+                const ang = Math.atan2(wyStar - cy, wxStar - cx);
+                const tx = cx + radius * Math.cos(ang);
+                const ty = cy + radius * Math.sin(ang);
+                svg.appendChild(svgEl("circle", { cx: tx, cy: ty, r: 4, fill: "#059669", stroke: "white", "stroke-width": 1.5 }));
+                const tt = svgEl("text", { x: tx + 8, y: ty + 4, fill: "#047857", "font-size": "10", "font-weight": "700" });
+                tt.textContent = "smooth interior";
+                svg.appendChild(tt);
+            }
+            // caption
+            const cap = svgEl("text", { x: x0, y: y1 + 18, fill: "#334155", "font-size": "11", "font-weight": "700" });
+            cap.textContent = isL1 ? "L1: |w₁| + |w₂| ≤ t" : "L2: w₁² + w₂² ≤ t";
+            svg.appendChild(cap);
+        };
+        drawGeom("reg-geom-l2", false);
+        drawGeom("reg-geom-l1", true);
+    }
+
+    function regRenderAll() {
+        const lambda = parseFloat(document.getElementById("reg-lam").value);
+        const wNone = regFit("none", 0);
+        const wCurrent = (reg.mode === "none") ? wNone : regFit(reg.mode, lambda);
+        regRenderFitPanel(wCurrent, wNone);
+        regRenderCoefPanel(wCurrent);
+        regRenderObjPanel(wCurrent);
+        // formula
+        const f = document.getElementById("reg-formula");
+        if (reg.mode === "l1") {
+            f.innerHTML = "Loss = MSE + &lambda; &middot; Σ |w<sub>j</sub>|";
+        } else if (reg.mode === "l2") {
+            f.innerHTML = "Loss = MSE + &lambda; &middot; Σ w<sub>j</sub><sup>2</sup>";
+        } else {
+            f.innerHTML = "Loss = MSE";
+        }
+        const obj = regComputeObjective(wCurrent, reg.mode, lambda);
+        document.getElementById("reg-mse").textContent = fmt(obj.mse);
+        document.getElementById("reg-pen").textContent = fmt(obj.pen);
+        document.getElementById("reg-total").textContent = fmt(obj.total);
+    }
+
+    function regWire() {
+        // mode segmented control
+        const modeBtns = document.querySelectorAll("#reg-mode-seg button");
+        modeBtns.forEach((b) => {
+            b.addEventListener("click", () => {
+                modeBtns.forEach((bb) => bb.classList.remove("active"));
+                b.classList.add("active");
+                reg.mode = b.dataset.mode;
+                regRenderAll();
+            });
+        });
+        document.getElementById("reg-lam").addEventListener("input", (e) => {
+            document.getElementById("reg-lam-v").textContent = Number(e.target.value).toFixed(2);
+            regRenderAll();
+        });
+        document.getElementById("reg-data").addEventListener("change", () => { regSampleData(); regRenderAll(); });
+        document.getElementById("reg-resample").addEventListener("click", () => { regSampleData(); regRenderAll(); });
+        document.getElementById("reg-reset").addEventListener("click", () => {
+            const el = document.getElementById("reg-lam");
+            el.value = "0.1";
+            document.getElementById("reg-lam-v").textContent = "0.10";
+            regRenderAll();
+        });
+        document.getElementById("reg-compare").addEventListener("change", (e) => {
+            reg.compare = e.target.checked;
+            regRenderAll();
+        });
+        document.getElementById("reg-lam-v").textContent = Number(document.getElementById("reg-lam").value).toFixed(2);
+        regSampleData();
+        regRenderGeometry();
+        regRenderAll();
+    }
+
+    // ===================================================================
+    // SECTION 4: Dropout Explorer
+    // ===================================================================
+    const drop = {
+        layers: 1,
+        width: 10,
+        p: 0.4,
+        mode: "train",
+        seed: 31337,
+        masks: [],     // current mask per layer
+        history: [],
+        seen: 0,
+        animTimer: null,
+    };
+
+    function dropResetMasks(refreshHistory = true) {
+        const rand = mulberry32(drop.seed);
+        drop.masks = [];
+        for (let l = 0; l < drop.layers; l++) {
+            const mk = new Array(drop.width);
+            for (let i = 0; i < drop.width; i++) mk[i] = (rand() < drop.p) ? 0 : 1;
+            drop.masks.push(mk);
+        }
+        if (refreshHistory) {
+            drop.history.unshift(drop.masks[0].slice());
+            if (drop.history.length > 12) drop.history.pop();
+            drop.seen += 1;
+        }
+    }
+
+    function dropSampleNew() {
+        drop.seed = (drop.seed * 1664525 + 1013904223) >>> 0;
+        dropResetMasks(true);
+        dropRender();
+    }
+
+    function dropDrawNetwork() {
+        const svg = document.getElementById("drop-net");
+        clearSvg(svg);
+        const W = 600, H = 320;
+        const inW = 4, outW = 3;
+        const layerCount = 2 + drop.layers;  // input + hidden(s) + output
+        const xs = [];
+        for (let l = 0; l < layerCount; l++) xs.push(70 + (W - 140) * l / (layerCount - 1));
+        const isInfer = drop.mode === "infer";
+
+        const layerSizes = [inW];
+        for (let h = 0; h < drop.layers; h++) layerSizes.push(drop.width);
+        layerSizes.push(outW);
+
+        const positions = layerSizes.map((sz, l) => {
+            const ys = [];
+            const totalH = H - 60;
+            for (let i = 0; i < sz; i++) {
+                ys.push(30 + totalH * (i + 0.5) / sz);
+            }
+            return ys.map((y) => [xs[l], y]);
+        });
+
+        // Edges
+        const edgeG = svgEl("g");
+        for (let l = 0; l < layerCount - 1; l++) {
+            const a = positions[l], b = positions[l + 1];
+            for (let i = 0; i < a.length; i++) {
+                for (let j = 0; j < b.length; j++) {
+                    let active = true;
+                    if (!isInfer && l > 0 && drop.masks[l - 1] && !drop.masks[l - 1][i]) active = false;
+                    if (!isInfer && l < layerCount - 2 && drop.masks[l] && !drop.masks[l][j]) active = false;
+                    edgeG.appendChild(svgEl("line", {
+                        x1: a[i][0], y1: a[i][1], x2: b[j][0], y2: b[j][1],
+                        stroke: active ? "#94a3b8" : "#e2e8f0",
+                        "stroke-width": active ? 1 : 0.6,
+                        opacity: active ? 0.55 : 0.4,
+                        class: "net-edge",
+                    }));
+                }
+            }
+        }
+        svg.appendChild(edgeG);
+
+        // Nodes
+        const nodeG = svgEl("g");
+        for (let l = 0; l < layerCount; l++) {
+            const isHidden = (l > 0 && l < layerCount - 1);
+            for (let i = 0; i < positions[l].length; i++) {
+                const [x, y] = positions[l][i];
+                let dropped = false;
+                if (isHidden && !isInfer) {
+                    dropped = drop.masks[l - 1] && drop.masks[l - 1][i] === 0;
+                }
+                const fill = (l === 0) ? "#0ea5e9" : (l === layerCount - 1 ? "#f59e0b" : (dropped ? "#fee2e2" : "#a78bfa"));
+                const stroke = (l === 0) ? "#0369a1" : (l === layerCount - 1 ? "#b45309" : (dropped ? "#fca5a5" : "#7c3aed"));
+                const op = dropped ? 0.55 : 1;
+                nodeG.appendChild(svgEl("circle", {
+                    cx: x, cy: y, r: 11,
+                    fill: fill, stroke: stroke, "stroke-width": 1.6,
+                    opacity: op, class: "net-node",
+                }));
+                if (dropped) {
+                    nodeG.appendChild(svgEl("line", {
+                        x1: x - 8, y1: y - 8, x2: x + 8, y2: y + 8,
+                        stroke: "#dc2626", "stroke-width": 2.4, "stroke-linecap": "round",
+                    }));
+                    nodeG.appendChild(svgEl("line", {
+                        x1: x + 8, y1: y - 8, x2: x - 8, y2: y + 8,
+                        stroke: "#dc2626", "stroke-width": 2.4, "stroke-linecap": "round",
+                    }));
+                }
+            }
+        }
+        svg.appendChild(nodeG);
+
+        // Layer labels
+        const labelG = svgEl("g", { fill: "#475569", "font-size": "11", "font-weight": "700", "text-anchor": "middle" });
+        const titles = ["Input"];
+        for (let h = 0; h < drop.layers; h++) titles.push(drop.layers === 1 ? "Hidden" : `Hidden ${h + 1}`);
+        titles.push("Output");
+        for (let l = 0; l < layerCount; l++) {
+            const t = svgEl("text", { x: xs[l], y: 18 });
+            t.textContent = titles[l];
+            labelG.appendChild(t);
+        }
+        svg.appendChild(labelG);
+
+        // Mode badge
+        const badgeText = isInfer ? "Inference (full network)" : `Training (mask p = ${drop.p.toFixed(2)})`;
+        const badgeFill = isInfer ? "#0ea5e9" : "#8b5cf6";
+        const tw = badgeText.length * 6.4 + 18;
+        const bg = svgEl("g");
+        bg.appendChild(svgEl("rect", { x: W - tw - 14, y: H - 30, width: tw, height: 22, rx: 11, fill: badgeFill, opacity: 0.12 }));
+        const tt = svgEl("text", {
+            x: W - tw - 14 + tw / 2, y: H - 14, "text-anchor": "middle",
+            fill: badgeFill, "font-size": "11", "font-weight": "800",
+        });
+        tt.textContent = badgeText;
+        bg.appendChild(tt);
+        svg.appendChild(bg);
+    }
+
+    function dropDrawHistory() {
+        const svg = document.getElementById("drop-history");
+        clearSvg(svg);
+        const W = 600, H = 130;
+        const margin = { l: 50, r: 14, t: 14, b: 22 };
+        const x0 = margin.l, y0 = margin.t, x1 = W - margin.r, y1 = H - margin.b;
+        const rows = drop.history.length;
+        if (!rows) return;
+        const cols = drop.width;
+        const cellW = (x1 - x0) / cols;
+        const cellH = Math.min(20, (y1 - y0) / Math.max(1, rows));
+        for (let r = 0; r < rows; r++) {
+            const yp = y0 + r * cellH;
+            const tt = svgEl("text", { x: x0 - 6, y: yp + cellH * 0.7, "text-anchor": "end", fill: "#94a3b8", "font-size": "9" });
+            tt.textContent = `t-${r}`;
+            svg.appendChild(tt);
+            for (let c = 0; c < cols; c++) {
+                const active = drop.history[r][c] === 1;
+                svg.appendChild(svgEl("rect", {
+                    x: x0 + c * cellW + 1, y: yp + 1,
+                    width: cellW - 2, height: cellH - 2,
+                    fill: active ? "#a78bfa" : "#fef2f2",
+                    stroke: active ? "#7c3aed" : "#fecaca",
+                    "stroke-width": 0.6, rx: 2,
+                    opacity: active ? 0.95 : 0.85,
+                }));
+            }
+        }
+        // Header label
+        const t = svgEl("text", { x: x0, y: y0 - 4, fill: "#475569", "font-size": "10", "font-weight": "700" });
+        t.textContent = "Hidden unit index →";
+        svg.appendChild(t);
+    }
+
+    function dropRender() {
+        document.getElementById("drop-p-v").textContent = drop.p.toFixed(2);
+        document.getElementById("drop-w-v").textContent = drop.width;
+        document.getElementById("drop-seen").textContent = drop.seen;
+        const active0 = (drop.masks[0] || []).reduce((a, b) => a + b, 0);
+        const isInfer = drop.mode === "infer";
+        document.getElementById("drop-active").textContent = isInfer
+            ? drop.width + " / " + drop.width
+            : active0 + " / " + drop.width;
+        document.getElementById("drop-mode-note").textContent = isInfer
+            ? "Inference: dropout is OFF. The full network is used; with inverted dropout, no rescaling is needed at test time."
+            : "Training mode: a fresh random binary mask drops some hidden units on every forward pass. Active activations are scaled by 1 / (1 − p).";
+        dropDrawNetwork();
+        dropDrawHistory();
+    }
+
+    function dropWire() {
+        document.getElementById("drop-p").addEventListener("input", (e) => {
+            drop.p = parseFloat(e.target.value);
+            dropResetMasks(true);
+            dropRender();
+        });
+        document.getElementById("drop-w").addEventListener("input", (e) => {
+            drop.width = parseInt(e.target.value, 10);
+            drop.history = [];
+            drop.seen = 0;
+            dropResetMasks(true);
+            dropRender();
+        });
+        document.getElementById("drop-layers").addEventListener("change", (e) => {
+            drop.layers = parseInt(e.target.value, 10);
+            dropResetMasks(true);
+            dropRender();
+        });
+        document.getElementById("drop-sample").addEventListener("click", dropSampleNew);
+        document.getElementById("drop-anim").addEventListener("click", () => {
+            const btn = document.getElementById("drop-anim");
+            if (drop.animTimer) {
+                clearInterval(drop.animTimer);
+                drop.animTimer = null;
+                btn.textContent = "Animate masks";
+                return;
+            }
+            btn.textContent = "Stop animation";
+            drop.animTimer = setInterval(() => { dropSampleNew(); }, 600);
+        });
+        const modeBtns = document.querySelectorAll("#drop-mode-seg button");
+        modeBtns.forEach((b) => {
+            b.addEventListener("click", () => {
+                modeBtns.forEach((bb) => bb.classList.remove("active"));
+                b.classList.add("active");
+                drop.mode = b.dataset.mode;
+                dropRender();
+            });
+        });
+        dropResetMasks(true);
+        dropRender();
+    }
+
+    // ===================================================================
+    // Resize handling: re-render plots when window dimensions change so
+    // that any responsive recalculations stay crisp.
+    // ===================================================================
+    let resizeTimer = null;
+    window.addEventListener("resize", () => {
+        if (resizeTimer) clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(() => {
+            try {
+                genRender();
+                bvRenderAll();
+                regRenderGeometry();
+                regRenderAll();
+                dropRender();
+            } catch (e) { /* no-op */ }
+        }, 120);
+    });
+
+    // ===================================================================
+    // Boot
+    // ===================================================================
+    window.addEventListener("DOMContentLoaded", () => {
+        genWire();
+        bvWire();
+        regWire();
+        dropWire();
+    });
+    </script>
+</body>
+
+</html>
