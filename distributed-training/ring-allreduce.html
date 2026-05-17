@@ -1,0 +1,1019 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ring-AllReduce – Collective Communication for Distributed Training</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            overflow: hidden;
+            margin: 0;
+            padding: 0;
+        }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .glass-panel {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .phase-btn.active {
+            background-color: #3b82f6;
+            color: white;
+            box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+        }
+        .katex { color: #60a5fa; font-size: 1.05em; }
+        #info-panel::-webkit-scrollbar { width: 6px; }
+        #info-panel::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        #info-panel::-webkit-scrollbar-track { background: transparent; }
+        .stat-card {
+            background: rgba(15, 23, 42, 0.5);
+            border: 1px solid #334155;
+            border-radius: 8px;
+            padding: 10px 12px;
+        }
+    </style>
+</head>
+<body class="flex h-screen w-screen text-slate-200">
+
+    <!-- Left Control Panel -->
+    <div class="glass-panel w-[420px] flex-shrink-0 flex flex-col h-full z-10 shadow-2xl relative">
+        <div class="p-6 border-b border-gray-700">
+            <h1 class="text-2xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-blue-400 to-emerald-400 mb-1">
+                Ring-AllReduce
+            </h1>
+            <p class="text-sm text-gray-400 mb-5">
+                Bandwidth-optimal collective communication for distributed GPU training (NCCL).
+            </p>
+
+            <div class="flex flex-col space-y-2">
+                <button id="btn-problem" class="phase-btn active px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-semibold text-left transition-all border border-slate-700">
+                    🔴 The Problem: Parameter Server
+                </button>
+                <button id="btn-scatter" class="phase-btn px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-semibold text-left transition-all border border-slate-700">
+                    🟡 Phase 1: Reduce-Scatter
+                </button>
+                <button id="btn-gather" class="phase-btn px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-semibold text-left transition-all border border-slate-700">
+                    🟢 Phase 2: AllGather
+                </button>
+                <button id="btn-analysis" class="phase-btn px-4 py-3 bg-slate-800 hover:bg-slate-700 rounded-lg text-sm font-semibold text-left transition-all border border-slate-700">
+                    📊 Bandwidth Analysis
+                </button>
+            </div>
+        </div>
+
+        <div class="p-6 flex-1 overflow-y-auto" id="info-panel">
+            <div id="phase-info" class="space-y-4"></div>
+        </div>
+
+        <div class="p-4 border-t border-gray-800">
+            <div class="flex items-center gap-2 mb-3">
+                <button id="btn-back" class="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-semibold transition-colors">⇠ Back</button>
+                <button id="btn-play" class="flex-[2] bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-2 rounded-lg transition-all flex items-center justify-center gap-2">
+                    <span id="play-icon">▶</span> <span id="play-label">Play</span>
+                </button>
+                <button id="btn-next" class="flex-1 bg-slate-700 hover:bg-slate-600 py-2 rounded-lg text-sm font-semibold transition-colors">Next ⇢</button>
+            </div>
+            <div class="flex items-center gap-2">
+                <button id="btn-reset" class="flex-1 px-3 py-1.5 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-bold transition-colors">↺ Reset</button>
+                <div class="flex-1 text-center">
+                    <span class="text-[10px] text-slate-500 uppercase tracking-widest font-bold">Step <span id="step-label">0</span> / <span id="step-total">0</span></span>
+                </div>
+                <div class="flex-1 text-right">
+                    <label class="text-[10px] text-slate-500 uppercase tracking-widest font-bold">GPUs:
+                        <select id="gpu-count" class="ml-1 bg-slate-800 border border-slate-600 rounded text-xs py-0.5 px-1 text-slate-300">
+                            <option value="3">3</option>
+                            <option value="4" selected>4</option>
+                            <option value="5">5</option>
+                            <option value="6">6</option>
+                        </select>
+                    </label>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Right Canvas Area -->
+    <div id="canvas-container" class="flex-1 bg-slate-900 relative">
+        <canvas id="mainCanvas"></canvas>
+        <!-- Step annotation overlay -->
+        <div id="step-annotation" class="absolute bottom-4 left-1/2 -translate-x-1/2 bg-slate-800/90 border border-slate-600 rounded-lg px-5 py-2 text-sm font-semibold text-slate-200 pointer-events-none z-20 backdrop-blur-sm max-w-[600px] text-center"></div>
+    </div>
+
+    <script>
+    (function() {
+        'use strict';
+
+        // ─── DOM refs ────────────────────────────────────────────
+        const canvas = document.getElementById('mainCanvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('canvas-container');
+        const annotation = document.getElementById('step-annotation');
+        const phaseBtns = document.querySelectorAll('.phase-btn');
+        const infoPanel = document.getElementById('phase-info');
+        const btnPlay = document.getElementById('btn-play');
+        const btnBack = document.getElementById('btn-back');
+        const btnNext = document.getElementById('btn-next');
+        const btnReset = document.getElementById('btn-reset');
+        const playIcon = document.getElementById('play-icon');
+        const playLabel = document.getElementById('play-label');
+        const stepLabel = document.getElementById('step-label');
+        const stepTotal = document.getElementById('step-total');
+        const gpuCountSel = document.getElementById('gpu-count');
+
+        // ─── Chunk colors ────────────────────────────────────────
+        const CHUNK_COLORS = [
+            '#f43f5e', // rose
+            '#3b82f6', // blue
+            '#10b981', // emerald
+            '#f59e0b', // amber
+            '#8b5cf6', // violet
+            '#06b6d4', // cyan
+        ];
+        const CHUNK_LABELS = ['A', 'B', 'C', 'D', 'E', 'F'];
+
+        // ─── State ───────────────────────────────────────────────
+        let N = 4;                   // GPU count
+        let currentPhase = 'problem'; // problem | scatter | gather | analysis
+        let step = 0;                // current step within the phase
+        let maxSteps = 0;
+        let isPlaying = false;
+        let playTimer = null;
+        let animProgress = 1;        // 0..1 animation within a step
+        let animRAF = null;
+        let W, H;                    // canvas CSS dims
+
+        // Each GPU's chunks: gpuData[gpu][chunk] = accumulation count (0=own, 1=summed once, …)
+        // For visualization, we track the "value" in each GPU's chunk slot.
+        // gpuChunks[gpuIdx] = array of N "chunk" objects {owner, sumCount, values:[]}
+        let gpuChunks = [];
+
+        // ─── Phase data / info ───────────────────────────────────
+        const PHASE_INFO = {
+            problem: {
+                title: 'The Problem: Parameter Server Bottleneck',
+                html: `
+                    <p class="text-sm text-gray-300 leading-relaxed">In data-parallel training, each GPU computes gradients on its own mini-batch. To keep models synchronized, every GPU must end up with the <strong>same averaged gradients</strong> before the optimizer step.</p>
+                    <h3 class="text-white font-bold mt-4 mb-1 text-sm">Naive Approach: Parameter Server</h3>
+                    <p class="text-sm text-gray-400 leading-relaxed">A central server collects all gradients, averages them, and broadcasts back. With <em>N</em> GPUs and gradient size <em>D</em>:</p>
+                    <ul class="mt-2 space-y-1 text-xs text-gray-400">
+                        <li class="flex items-start"><span class="text-rose-400 mr-2 mt-0.5">•</span><strong>Inbound:</strong> The server receives N×D data — bandwidth bottleneck at server NIC.</li>
+                        <li class="flex items-start"><span class="text-rose-400 mr-2 mt-0.5">•</span><strong>Outbound:</strong> Server sends N×D back — same bottleneck.</li>
+                        <li class="flex items-start"><span class="text-rose-400 mr-2 mt-0.5">•</span><strong>Total time grows with N</strong> — adding GPUs makes the server link the limiter.</li>
+                    </ul>
+                    <div id="math-problem" class="mt-4 p-3 bg-slate-900 rounded-lg border border-slate-800 text-center"></div>
+                    <h3 class="text-white font-bold mt-4 mb-1 text-sm">Ring-AllReduce: The Solution</h3>
+                    <p class="text-sm text-gray-400 leading-relaxed">Arrange GPUs in a <strong>logical ring</strong>. Each GPU only talks to its two neighbors. Data is split into N chunks and circulated in two phases. Total data sent per GPU is exactly <strong>2(N−1)/N × D</strong> — independent of N in practice.</p>
+                `
+            },
+            scatter: {
+                title: 'Phase 1: Reduce-Scatter',
+                html: `
+                    <p class="text-sm text-gray-300 leading-relaxed">Each GPU's gradient tensor is split into <strong>N equal chunks</strong> (one per GPU). Over <strong>N−1 steps</strong>, chunks rotate around the ring and are <strong>summed (reduced)</strong> at each hop.</p>
+                    <h3 class="text-white font-bold mt-3 mb-1 text-sm">How it works</h3>
+                    <ol class="mt-1 space-y-1.5 text-xs text-gray-400 list-decimal list-inside">
+                        <li>GPU <em>i</em> sends chunk <em>(i − step) mod N</em> to GPU <em>(i+1) mod N</em>.</li>
+                        <li>The receiver <strong>adds</strong> the incoming chunk to its own copy of that chunk.</li>
+                        <li>After N−1 steps, GPU <em>i</em> holds the <strong>fully reduced</strong> (summed) version of chunk <em>(i+1) mod N</em>.</li>
+                    </ol>
+                    <div id="math-scatter" class="mt-4 p-3 bg-slate-900 rounded-lg border border-slate-800 text-center"></div>
+                    <h3 class="text-white font-bold mt-4 mb-1 text-sm">Per-step data volume</h3>
+                    <p class="text-sm text-gray-400">Each GPU sends <strong>D/N</strong> bytes per step × (N−1) steps = <strong>(N−1)·D/N</strong> total.</p>
+                `
+            },
+            gather: {
+                title: 'Phase 2: AllGather',
+                html: `
+                    <p class="text-sm text-gray-300 leading-relaxed">After reduce-scatter, each GPU holds <strong>one fully-reduced chunk</strong>. The allgather phase distributes these completed chunks so every GPU ends with the <strong>complete reduced result</strong>.</p>
+                    <h3 class="text-white font-bold mt-3 mb-1 text-sm">How it works</h3>
+                    <ol class="mt-1 space-y-1.5 text-xs text-gray-400 list-decimal list-inside">
+                        <li>GPU <em>i</em> sends its completed chunk to GPU <em>(i+1) mod N</em>.</li>
+                        <li>The receiver <strong>replaces</strong> (overwrites) its local copy with the incoming completed chunk.</li>
+                        <li>After N−1 more steps, every GPU has all N fully-reduced chunks.</li>
+                    </ol>
+                    <div id="math-gather" class="mt-4 p-3 bg-slate-900 rounded-lg border border-slate-800 text-center"></div>
+                    <p class="text-sm text-gray-400 mt-3">Same data volume as reduce-scatter: <strong>(N−1)·D/N</strong> per GPU.</p>
+                `
+            },
+            analysis: {
+                title: 'Bandwidth Analysis & NCCL',
+                html: `
+                    <h3 class="text-white font-bold mb-2 text-sm">Why Ring-AllReduce is Bandwidth-Optimal</h3>
+                    <p class="text-sm text-gray-400 leading-relaxed">The <strong>total data each GPU transmits</strong> across both phases:</p>
+                    <div id="math-bw" class="mt-3 p-3 bg-slate-900 rounded-lg border border-slate-800 text-center"></div>
+                    <p class="text-sm text-gray-400 mt-3 leading-relaxed">This is <strong>the theoretical minimum</strong> for allreduce: every byte of the result must visit at least one link. The ring algorithm saturates every link equally — no single link becomes a bottleneck, unlike the parameter server.</p>
+
+                    <h3 class="text-white font-bold mt-5 mb-2 text-sm">Comparison</h3>
+                    <div class="grid grid-cols-2 gap-2 mt-2">
+                        <div class="stat-card">
+                            <div class="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Param Server</div>
+                            <div class="text-lg font-bold text-rose-400 mono mt-1">2(N−1)·D</div>
+                            <div class="text-[10px] text-slate-500 mt-0.5">At server NIC</div>
+                        </div>
+                        <div class="stat-card">
+                            <div class="text-[10px] text-slate-500 uppercase tracking-wider font-bold">Ring AllReduce</div>
+                            <div class="text-lg font-bold text-emerald-400 mono mt-1">2·(N−1)/N·D</div>
+                            <div class="text-[10px] text-slate-500 mt-0.5">Per GPU link</div>
+                        </div>
+                    </div>
+
+                    <h3 class="text-white font-bold mt-5 mb-2 text-sm">NCCL in Practice</h3>
+                    <ul class="space-y-1.5 text-xs text-gray-400">
+                        <li class="flex items-start"><span class="text-blue-400 mr-2 mt-0.5">•</span><strong>NVIDIA NCCL</strong> (pronounced "nickel") implements ring-allreduce over NVLink, PCIe, and InfiniBand.</li>
+                        <li class="flex items-start"><span class="text-blue-400 mr-2 mt-0.5">•</span>For multi-node, NCCL uses <strong>hierarchical rings</strong>: intra-node ring over NVLink, inter-node ring over RDMA.</li>
+                        <li class="flex items-start"><span class="text-blue-400 mr-2 mt-0.5">•</span>Modern NCCL also uses <strong>tree-allreduce</strong> and <strong>double binary tree</strong> topologies for latency-sensitive small messages.</li>
+                        <li class="flex items-start"><span class="text-blue-400 mr-2 mt-0.5">•</span>Frameworks like PyTorch DDP call <code class="mono text-blue-300 text-[11px]">torch.distributed.all_reduce()</code> which maps to NCCL under the hood.</li>
+                    </ul>
+                    <div class="mt-4 p-3 bg-slate-900 rounded-lg border border-slate-800">
+                        <div class="text-[10px] text-slate-500 uppercase tracking-wider font-bold mb-2">PyTorch Example</div>
+                        <pre class="mono text-[11px] text-blue-300 leading-relaxed">model = DDP(model, device_ids=[rank])
+# Under the hood per backward pass:
+# 1. Bucket gradients
+# 2. ncclAllReduce per bucket (ring)
+# 3. Average: grad /= world_size</pre>
+                    </div>
+                `
+            }
+        };
+
+        // ─── Init ────────────────────────────────────────────────
+        function init() {
+            N = parseInt(gpuCountSel.value);
+            resetChunks();
+            switchPhase(currentPhase);
+            resize();
+        }
+
+        function resetChunks() {
+            gpuChunks = [];
+            for (let g = 0; g < N; g++) {
+                gpuChunks[g] = [];
+                for (let c = 0; c < N; c++) {
+                    gpuChunks[g][c] = {
+                        owner: g,        // which GPU originally owned this chunk
+                        values: [g],     // list of GPU indices whose data has been summed in
+                        complete: false  // true when fully reduced (has all N values)
+                    };
+                }
+            }
+        }
+
+        // ─── Chunk state management ─────────────────────────────
+        function resetToPhaseStart() {
+            if (currentPhase === 'problem' || currentPhase === 'scatter') {
+                resetChunks();
+            } else if (currentPhase === 'gather') {
+                // Start of gather = end of scatter
+                resetChunks();
+                for (let s = 0; s < N - 1; s++) {
+                    applyScatterStep(s);
+                }
+            } else if (currentPhase === 'analysis') {
+                // Fully completed state
+                resetChunks();
+                for (let s = 0; s < N - 1; s++) applyScatterStep(s);
+                for (let s = 0; s < N - 1; s++) applyGatherStep(s);
+            }
+        }
+
+        function applyScatterStep(s) {
+            // Each GPU i sends chunk index = (i - s) mod N to (i+1) mod N
+            // The receiver sums incoming into its own copy
+            let sends = [];
+            for (let i = 0; i < N; i++) {
+                const chunkIdx = ((i - s) % N + N) % N;
+                const dest = (i + 1) % N;
+                sends.push({ from: i, to: dest, chunkIdx, data: JSON.parse(JSON.stringify(gpuChunks[i][chunkIdx])) });
+            }
+            for (const s of sends) {
+                const destChunk = gpuChunks[s.to][s.chunkIdx];
+                // Merge values (union)
+                const merged = new Set([...destChunk.values, ...s.data.values]);
+                destChunk.values = [...merged].sort((a, b) => a - b);
+                if (destChunk.values.length === N) destChunk.complete = true;
+            }
+        }
+
+        function applyGatherStep(s) {
+            // Each GPU i sends chunk index = (i - s + 1) mod N to (i+1) mod N
+            // The receiver REPLACES its copy
+            let sends = [];
+            for (let i = 0; i < N; i++) {
+                const chunkIdx = ((i - s + 1) % N + N) % N;
+                const dest = (i + 1) % N;
+                sends.push({ from: i, to: dest, chunkIdx, data: JSON.parse(JSON.stringify(gpuChunks[i][chunkIdx])) });
+            }
+            for (const s of sends) {
+                gpuChunks[s.to][s.chunkIdx] = JSON.parse(JSON.stringify(s.data));
+                gpuChunks[s.to][s.chunkIdx].complete = true;
+            }
+        }
+
+        function getTransfersForStep(phase, s) {
+            // Returns [{from, to, chunkIdx}]
+            const transfers = [];
+            if (phase === 'scatter') {
+                for (let i = 0; i < N; i++) {
+                    const chunkIdx = ((i - s) % N + N) % N;
+                    const dest = (i + 1) % N;
+                    transfers.push({ from: i, to: dest, chunkIdx });
+                }
+            } else if (phase === 'gather') {
+                for (let i = 0; i < N; i++) {
+                    const chunkIdx = ((i - s + 1) % N + N) % N;
+                    const dest = (i + 1) % N;
+                    transfers.push({ from: i, to: dest, chunkIdx });
+                }
+            }
+            return transfers;
+        }
+
+        // ─── Phase switching ─────────────────────────────────────
+        function switchPhase(phase) {
+            currentPhase = phase;
+            step = 0;
+            animProgress = 1;
+            stopPlaying();
+
+            if (phase === 'problem' || phase === 'analysis') {
+                maxSteps = 0;
+            } else {
+                maxSteps = N - 1;
+            }
+
+            resetToPhaseStart();
+
+            // Update buttons
+            phaseBtns.forEach(b => b.classList.remove('active'));
+            const btnMap = { problem: 'btn-problem', scatter: 'btn-scatter', gather: 'btn-gather', analysis: 'btn-analysis' };
+            document.getElementById(btnMap[phase]).classList.add('active');
+
+            // Update info
+            const info = PHASE_INFO[phase];
+            infoPanel.innerHTML = `<h2 class="text-lg font-bold text-white mb-3">${info.title}</h2>${info.html}`;
+
+            // Render math
+            setTimeout(() => {
+                if (phase === 'problem') {
+                    const el = document.getElementById('math-problem');
+                    if (el) katex.render(String.raw`T_{\text{PS}} = \frac{2(N-1) \cdot D}{B_{\text{server}}}`, el, { displayMode: true });
+                } else if (phase === 'scatter') {
+                    const el = document.getElementById('math-scatter');
+                    if (el) katex.render(String.raw`\text{GPU}_i \xrightarrow{\text{chunk}_{(i-s)\bmod N}} \text{GPU}_{(i+1)\bmod N}`, el, { displayMode: true });
+                } else if (phase === 'gather') {
+                    const el = document.getElementById('math-gather');
+                    if (el) katex.render(String.raw`\text{GPU}_i \xrightarrow{\text{reduced chunk}} \text{GPU}_{(i+1)\bmod N}`, el, { displayMode: true });
+                } else if (phase === 'analysis') {
+                    const el = document.getElementById('math-bw');
+                    if (el) katex.render(String.raw`T_{\text{ring}} = \frac{2(N-1)}{N} \cdot \frac{D}{B_{\text{link}}}`, el, { displayMode: true });
+                }
+            }, 10);
+
+            updateStepLabel();
+            draw();
+        }
+
+        // ─── Step navigation ─────────────────────────────────────
+        function goToStep(s) {
+            if (currentPhase === 'problem' || currentPhase === 'analysis') return;
+            step = Math.max(0, Math.min(maxSteps, s));
+
+            // Rebuild state up to this step
+            resetToPhaseStart();
+            const phase = currentPhase;
+            for (let i = 0; i < step; i++) {
+                if (phase === 'scatter') applyScatterStep(i);
+                else if (phase === 'gather') applyGatherStep(i);
+            }
+
+            animProgress = 0;
+            startStepAnimation();
+            updateStepLabel();
+        }
+
+        function advanceStep() {
+            if (currentPhase === 'problem' || currentPhase === 'analysis') return;
+            if (step < maxSteps) {
+                goToStep(step + 1);
+            } else {
+                stopPlaying();
+            }
+        }
+
+        function retreatStep() {
+            if (currentPhase === 'problem' || currentPhase === 'analysis') return;
+            if (animRAF) { cancelAnimationFrame(animRAF); animRAF = null; }
+            if (step > 1) {
+                // Show the completed state of the previous step
+                const target = step - 1;
+                resetToPhaseStart();
+                for (let i = 0; i < target; i++) {
+                    if (currentPhase === 'scatter') applyScatterStep(i);
+                    else if (currentPhase === 'gather') applyGatherStep(i);
+                }
+                step = target;
+                animProgress = 1;
+                updateStepLabel();
+                draw();
+            } else {
+                // Go back to initial state (step 0)
+                step = 0;
+                resetToPhaseStart();
+                animProgress = 1;
+                updateStepLabel();
+                draw();
+            }
+        }
+
+        function startStepAnimation() {
+            animProgress = 0;
+            if (animRAF) cancelAnimationFrame(animRAF);
+            const startTime = performance.now();
+            const duration = 800; // ms
+            function tick(now) {
+                animProgress = Math.min(1, (now - startTime) / duration);
+                draw();
+                if (animProgress < 1) {
+                    animRAF = requestAnimationFrame(tick);
+                } else {
+                    // Apply the step
+                    if (currentPhase === 'scatter') applyScatterStep(step - 1);
+                    else if (currentPhase === 'gather') applyGatherStep(step - 1);
+                    animProgress = 1;
+                    draw();
+                    // If playing, advance after a pause
+                    if (isPlaying) {
+                        playTimer = setTimeout(advanceStep, 400);
+                    }
+                }
+            }
+            animRAF = requestAnimationFrame(tick);
+        }
+
+        function updateStepLabel() {
+            stepLabel.textContent = step;
+            stepTotal.textContent = maxSteps;
+        }
+
+        // ─── Play / Pause ────────────────────────────────────────
+        function startPlaying() {
+            if (currentPhase === 'problem' || currentPhase === 'analysis') return;
+            isPlaying = true;
+            playIcon.textContent = '⏸';
+            playLabel.textContent = 'Pause';
+            btnPlay.classList.replace('bg-emerald-600', 'bg-amber-600');
+            btnPlay.classList.replace('hover:bg-emerald-500', 'hover:bg-amber-500');
+            if (step >= maxSteps) {
+                // restart from beginning
+                goToStep(1);
+            } else {
+                advanceStep();
+            }
+        }
+
+        function stopPlaying() {
+            isPlaying = false;
+            if (playTimer) { clearTimeout(playTimer); playTimer = null; }
+            playIcon.textContent = '▶';
+            playLabel.textContent = 'Play';
+            btnPlay.classList.replace('bg-amber-600', 'bg-emerald-600');
+            btnPlay.classList.replace('hover:bg-amber-500', 'hover:bg-emerald-500');
+        }
+
+        function togglePlay() {
+            if (isPlaying) stopPlaying(); else startPlaying();
+        }
+
+        // ─── Canvas resize ───────────────────────────────────────
+        function resize() {
+            const rect = container.getBoundingClientRect();
+            const dpr = window.devicePixelRatio || 1;
+            W = rect.width;
+            H = rect.height;
+            canvas.width = W * dpr;
+            canvas.height = H * dpr;
+            canvas.style.width = W + 'px';
+            canvas.style.height = H + 'px';
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            draw();
+        }
+
+        // ─── GPU positions (ring layout) ─────────────────────────
+        function getGpuPositions() {
+            const cx = W / 2;
+            const cy = H / 2;
+            const radius = Math.min(W, H) * 0.30;
+            const positions = [];
+            for (let i = 0; i < N; i++) {
+                // Start from top, go clockwise
+                const angle = -Math.PI / 2 + (2 * Math.PI * i) / N;
+                positions.push({
+                    x: cx + radius * Math.cos(angle),
+                    y: cy + radius * Math.sin(angle),
+                    angle
+                });
+            }
+            return positions;
+        }
+
+        // ─── Drawing ─────────────────────────────────────────────
+        function draw() {
+            ctx.clearRect(0, 0, W, H);
+
+            if (currentPhase === 'problem') {
+                drawProblemView();
+            } else if (currentPhase === 'analysis') {
+                drawAnalysisView();
+            } else {
+                drawRingView();
+            }
+        }
+
+        // --- Problem View: Parameter Server vs Ring ---
+        function drawProblemView() {
+            const cx = W / 2;
+            const cy = H / 2;
+            const halfW = cx;
+            const pad = 40;
+
+            // Section titles
+            ctx.fillStyle = '#94a3b8';
+            ctx.font = 'bold 11px Inter';
+            ctx.letterSpacing = '0.08em';
+            ctx.textAlign = 'center';
+            ctx.fillText('PARAMETER SERVER (BOTTLENECK)', halfW / 2, 36);
+            ctx.fillText('RING-ALLREDUCE (OPTIMAL)', cx + halfW / 2, 36);
+
+            // Divider
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 1;
+            ctx.setLineDash([4, 4]);
+            ctx.beginPath();
+            ctx.moveTo(cx, 52);
+            ctx.lineTo(cx, H - 20);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // ── Left: Parameter Server ──
+            const psX = halfW / 2;
+            const serverY = cy - 60;
+            const gpuY = cy + 100;
+
+            // Server box
+            const serverW = 120;
+            const serverH = 52;
+            drawBox(psX - serverW / 2, serverY - serverH / 2, serverW, serverH, '#ef4444', '#1e293b');
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 14px Inter';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('Server', psX, serverY);
+
+            // Bottleneck warning below server
+            ctx.fillStyle = '#fca5a5';
+            ctx.font = 'bold 10px Inter';
+            ctx.textBaseline = 'top';
+            ctx.fillText('⚠ N×D bandwidth bottleneck', psX, serverY + serverH / 2 + 10);
+
+            // GPUs evenly spaced
+            const availW = halfW - pad * 2;
+            const gpuSize = 36;
+            const gpuSpacing = Math.min(80, availW / N);
+            const totalGpuW = (N - 1) * gpuSpacing;
+            const gpuStartX = psX - totalGpuW / 2;
+
+            ctx.textBaseline = 'middle';
+
+            for (let i = 0; i < N; i++) {
+                const gx = gpuStartX + i * gpuSpacing;
+                drawGpuBox(gx, gpuY, i, gpuSize);
+
+                // Arrows: GPU → Server (upload)
+                const arrowTopY = serverY + serverH / 2 + 2;
+                const arrowBotY = gpuY - gpuSize / 2 - 2;
+                const serverEdgeX = psX + (gx - psX) * 0.25;
+
+                // Upload arrow (left side of pair)
+                ctx.strokeStyle = '#ef4444';
+                ctx.lineWidth = 1.5;
+                ctx.globalAlpha = 0.5;
+                ctx.beginPath();
+                ctx.moveTo(gx - 4, arrowBotY);
+                ctx.lineTo(serverEdgeX - 4, arrowTopY);
+                ctx.stroke();
+                drawArrowHead(gx - 4, arrowBotY, serverEdgeX - 4, arrowTopY, '#ef4444', 5);
+
+                // Download arrow (right side of pair)
+                ctx.strokeStyle = '#60a5fa';
+                ctx.beginPath();
+                ctx.moveTo(serverEdgeX + 4, arrowTopY);
+                ctx.lineTo(gx + 4, arrowBotY);
+                ctx.stroke();
+                drawArrowHead(serverEdgeX + 4, arrowTopY, gx + 4, arrowBotY, '#60a5fa', 5);
+                ctx.globalAlpha = 1;
+            }
+
+            // Legend for arrows
+            const legY = gpuY + gpuSize / 2 + 20;
+            ctx.font = '10px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillStyle = '#ef4444';
+            ctx.fillText('↑ Send gradients', psX - 55, legY);
+            ctx.fillStyle = '#60a5fa';
+            ctx.fillText('↓ Receive average', psX + 55, legY);
+
+            // ── Right: Ring ──
+            const ringCx = cx + halfW / 2;
+            const ringCy = cy + 20;
+            const ringR = Math.min(halfW / 2 - pad - 20, H / 2 - 90) * 0.72;
+
+            // Draw ring arcs first
+            for (let i = 0; i < N; i++) {
+                const angle = -Math.PI / 2 + (2 * Math.PI * i) / N;
+                const nextAngle = -Math.PI / 2 + (2 * Math.PI * ((i + 1) % N)) / N;
+                const gx = ringCx + ringR * Math.cos(angle);
+                const gy = ringCy + ringR * Math.sin(angle);
+                const nx = ringCx + ringR * Math.cos(nextAngle);
+                const ny = ringCy + ringR * Math.sin(nextAngle);
+
+                // Control point for curve (slightly inward)
+                let mAngle = (i === N - 1) ? angle + (2 * Math.PI / N) / 2 : (angle + nextAngle) / 2;
+                const arcR = ringR * 0.68;
+                const mx = ringCx + arcR * Math.cos(mAngle);
+                const my = ringCy + arcR * Math.sin(mAngle);
+
+                ctx.strokeStyle = '#10b981';
+                ctx.lineWidth = 2;
+                ctx.globalAlpha = 0.6;
+                ctx.beginPath();
+                ctx.moveTo(gx, gy);
+                ctx.quadraticCurveTo(mx, my, nx, ny);
+                ctx.stroke();
+                drawArrowHead(mx, my, nx, ny, '#10b981', 7);
+                ctx.globalAlpha = 1;
+            }
+
+            // Draw GPU boxes on top of arcs
+            for (let i = 0; i < N; i++) {
+                const angle = -Math.PI / 2 + (2 * Math.PI * i) / N;
+                const gx = ringCx + ringR * Math.cos(angle);
+                const gy = ringCy + ringR * Math.sin(angle);
+                drawGpuBox(gx, gy, i, gpuSize);
+            }
+
+            // Ring label
+            ctx.fillStyle = '#6ee7b7';
+            ctx.font = 'bold 10px Inter';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText('Each link sends only D/N per step', ringCx, ringCy + ringR + 35);
+            ctx.textBaseline = 'middle';
+
+            annotation.textContent = 'Parameter Server creates a bandwidth bottleneck at the central node. Ring-AllReduce distributes communication evenly across all links.';
+        }
+
+        // --- Analysis View ---
+        function drawAnalysisView() {
+            const cx = W / 2;
+            const cy = H / 2;
+
+            // Draw a completed ring with all chunks shown
+            const ringR = Math.min(W, H) * 0.25;
+            const positions = [];
+            for (let i = 0; i < N; i++) {
+                const angle = -Math.PI / 2 + (2 * Math.PI * i) / N;
+                positions.push({
+                    x: cx + ringR * Math.cos(angle),
+                    y: cy + ringR * Math.sin(angle)
+                });
+            }
+
+            // Ring arrows
+            for (let i = 0; i < N; i++) {
+                const p = positions[i];
+                const np = positions[(i + 1) % N];
+                ctx.strokeStyle = '#334155';
+                ctx.lineWidth = 3;
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(np.x, np.y);
+                ctx.stroke();
+            }
+
+            // GPUs with all chunks completed
+            for (let i = 0; i < N; i++) {
+                drawGpuWithChunks(positions[i].x, positions[i].y, i, gpuChunks[i], 50);
+            }
+
+            // Bar chart comparison at bottom
+            const barY = cy + ringR + 80;
+            const barW = 180;
+            const barH = 18;
+            const barStartX = cx - barW - 20;
+
+            // PS bar
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.roundRect(barStartX, barY, barW, barH, 4);
+            ctx.fill();
+            ctx.fillStyle = '#ef4444';
+            ctx.beginPath();
+            ctx.roundRect(barStartX, barY, barW, barH, 4);
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 10px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(`PS: 2(N-1)D = ${2 * (N - 1)}D at server`, barStartX + barW / 2, barY + 13);
+
+            // Ring bar (shorter)
+            const ringBarW = barW * ((N - 1) / N) / (N - 1) * ((N - 1) / 1);
+            // Normalize: ring sends 2(N-1)/N * D per link vs PS sends 2(N-1)*D at server
+            // Ratio = 1/N
+            const ringW = barW / N;
+            const ringStartX = cx + 20;
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.roundRect(ringStartX, barY, barW, barH, 4);
+            ctx.fill();
+            ctx.fillStyle = '#10b981';
+            ctx.beginPath();
+            ctx.roundRect(ringStartX, barY, ringW, barH, 4);
+            ctx.fill();
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 10px Inter';
+            ctx.textAlign = 'center';
+            ctx.fillText(`Ring: 2(N-1)/N·D = ${(2 * (N - 1) / N).toFixed(1)}D per link`, ringStartX + barW / 2, barY + 13);
+
+            annotation.textContent = `With ${N} GPUs: Ring-AllReduce reduces per-link bandwidth by ${N}× compared to Parameter Server bottleneck.`;
+        }
+
+        // --- Ring View (scatter / gather phases) ---
+        function drawRingView() {
+            const positions = getGpuPositions();
+            const cx = W / 2;
+            const cy = H / 2;
+
+            // Draw ring connections (faint)
+            ctx.strokeStyle = '#1e3a5f';
+            ctx.lineWidth = 2;
+            for (let i = 0; i < N; i++) {
+                const p = positions[i];
+                const np = positions[(i + 1) % N];
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(np.x, np.y);
+                ctx.stroke();
+            }
+
+            // Direction arrows on ring
+            for (let i = 0; i < N; i++) {
+                const p = positions[i];
+                const np = positions[(i + 1) % N];
+                const mx = (p.x + np.x) / 2;
+                const my = (p.y + np.y) / 2;
+                drawArrowHead(p.x, p.y, np.x, np.y, '#1e3a5f', 8);
+            }
+
+            // If animating a step, draw transfer arrows
+            if (step > 0 && animProgress < 1) {
+                const transfers = getTransfersForStep(currentPhase, step - 1);
+                for (const t of transfers) {
+                    const from = positions[t.from];
+                    const to = positions[t.to];
+
+                    // Animated chunk packet
+                    const px = from.x + (to.x - from.x) * easeInOut(animProgress);
+                    const py = from.y + (to.y - from.y) * easeInOut(animProgress);
+
+                    // Glowing trail
+                    const color = CHUNK_COLORS[t.chunkIdx % CHUNK_COLORS.length];
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 3;
+                    ctx.globalAlpha = 0.5;
+                    ctx.beginPath();
+                    ctx.moveTo(from.x, from.y);
+                    ctx.lineTo(px, py);
+                    ctx.stroke();
+                    ctx.globalAlpha = 1;
+
+                    // Chunk packet
+                    ctx.shadowBlur = 12;
+                    ctx.shadowColor = color;
+                    ctx.fillStyle = color;
+                    ctx.beginPath();
+                    ctx.arc(px, py, 10, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    // Label
+                    ctx.fillStyle = '#fff';
+                    ctx.font = 'bold 10px Inter';
+                    ctx.textAlign = 'center';
+                    ctx.textBaseline = 'middle';
+                    ctx.fillText(CHUNK_LABELS[t.chunkIdx % CHUNK_LABELS.length], px, py);
+                }
+            }
+
+            // Draw GPUs with their chunk states
+            const gpuSize = Math.min(60, Math.min(W, H) * 0.08);
+            for (let i = 0; i < N; i++) {
+                drawGpuWithChunks(positions[i].x, positions[i].y, i, gpuChunks[i], gpuSize);
+            }
+
+            // Annotation
+            if (currentPhase === 'scatter') {
+                if (step === 0) {
+                    annotation.textContent = `Each GPU has its own ${N} gradient chunks (labeled ${CHUNK_LABELS.slice(0, N).join(', ')}). Press Play or Next to begin reduce-scatter.`;
+                } else if (animProgress >= 1) {
+                    const completedChunks = gpuChunks.map((g, idx) => {
+                        const chunkIdx = ((idx + 1) % N + N) % N;
+                        return g[chunkIdx].complete;
+                    });
+                    if (step >= maxSteps) {
+                        annotation.textContent = `Reduce-Scatter complete! Each GPU now holds one fully-reduced chunk (sum of all ${N} GPUs' contributions). Proceed to AllGather →`;
+                    } else {
+                        annotation.textContent = `Step ${step}/${maxSteps}: Each GPU sent one chunk to its neighbor and summed the received chunk. Partial sums accumulate.`;
+                    }
+                } else {
+                    annotation.textContent = `Step ${step}/${maxSteps}: Sending chunks around the ring and reducing (summing) at each receiver...`;
+                }
+            } else if (currentPhase === 'gather') {
+                if (step === 0) {
+                    annotation.textContent = `Each GPU holds one fully-reduced chunk. AllGather will distribute completed chunks to all GPUs.`;
+                } else if (animProgress >= 1) {
+                    if (step >= maxSteps) {
+                        annotation.textContent = `AllGather complete! Every GPU now has all ${N} fully-reduced chunks — identical synchronized gradients! ✓`;
+                    } else {
+                        annotation.textContent = `Step ${step}/${maxSteps}: Completed chunks are being forwarded. GPUs replace their local copy with the incoming reduced chunk.`;
+                    }
+                } else {
+                    annotation.textContent = `Step ${step}/${maxSteps}: Forwarding completed chunks to neighbor...`;
+                }
+            }
+        }
+
+        // ─── Drawing Helpers ─────────────────────────────────────
+        function drawBox(x, y, w, h, borderColor, fillColor) {
+            ctx.fillStyle = fillColor;
+            ctx.beginPath();
+            ctx.roundRect(x, y, w, h, 8);
+            ctx.fill();
+            ctx.strokeStyle = borderColor;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawGpuBox(x, y, index, size) {
+            const half = size / 2;
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.roundRect(x - half, y - half, size, size, 8);
+            ctx.fill();
+            ctx.strokeStyle = '#475569';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = `bold ${Math.max(10, size * 0.35)}px Inter`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(`GPU${index}`, x, y);
+        }
+
+        function drawGpuWithChunks(x, y, gpuIdx, chunks, size) {
+            const half = size;
+            const boxW = half * 2.2;
+            const boxH = half * 2.4;
+
+            // GPU outer box
+            ctx.shadowBlur = 15;
+            ctx.shadowColor = 'rgba(0,0,0,0.5)';
+            ctx.fillStyle = '#1e293b';
+            ctx.beginPath();
+            ctx.roundRect(x - boxW / 2, y - boxH / 2, boxW, boxH, 10);
+            ctx.fill();
+            ctx.strokeStyle = '#334155';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.shadowBlur = 0;
+
+            // GPU label
+            ctx.fillStyle = '#f8fafc';
+            ctx.font = 'bold 13px Inter';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(`GPU ${gpuIdx}`, x, y - boxH / 2 + 6);
+
+            // Draw chunks inside
+            const chunkH = 16;
+            const chunkW = boxW - 20;
+            const startY = y - boxH / 2 + 28;
+
+            for (let c = 0; c < N; c++) {
+                const chunk = chunks[c];
+                const cy = startY + c * (chunkH + 3);
+                const color = CHUNK_COLORS[c % CHUNK_COLORS.length];
+
+                // Background
+                ctx.fillStyle = 'rgba(0,0,0,0.3)';
+                ctx.beginPath();
+                ctx.roundRect(x - chunkW / 2, cy, chunkW, chunkH, 3);
+                ctx.fill();
+
+                // Fill proportional to how many values summed
+                const fillFrac = chunk.values.length / N;
+                ctx.fillStyle = color;
+                ctx.globalAlpha = chunk.complete ? 0.9 : 0.45 + 0.35 * fillFrac;
+                ctx.beginPath();
+                ctx.roundRect(x - chunkW / 2, cy, chunkW * fillFrac, chunkH, 3);
+                ctx.fill();
+                ctx.globalAlpha = 1;
+
+                // Border if complete
+                if (chunk.complete) {
+                    ctx.strokeStyle = color;
+                    ctx.lineWidth = 1.5;
+                    ctx.beginPath();
+                    ctx.roundRect(x - chunkW / 2, cy, chunkW, chunkH, 3);
+                    ctx.stroke();
+                }
+
+                // Label
+                ctx.fillStyle = '#f8fafc';
+                ctx.font = 'bold 9px JetBrains Mono';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                const label = CHUNK_LABELS[c % CHUNK_LABELS.length];
+                const sumText = chunk.values.length === 1
+                    ? `${label}${chunk.values[0]}`
+                    : chunk.values.map(v => `${label}${v}`).join('+');
+                // Truncate if too long
+                const displayText = sumText.length > 12 ? `Σ${label}(${chunk.values.length}/${N})` : sumText;
+                ctx.fillText(chunk.complete ? `✓ Σ${label}` : displayText, x, cy + chunkH / 2);
+            }
+        }
+
+        function drawArrowLine(x1, y1, x2, y2, bidir) {
+            ctx.beginPath();
+            ctx.moveTo(x1, y1);
+            ctx.lineTo(x2, y2);
+            ctx.stroke();
+            drawArrowHead(x1, y1, x2, y2, ctx.strokeStyle, 6);
+            if (bidir) drawArrowHead(x2, y2, x1, y1, ctx.strokeStyle, 6);
+        }
+
+        function drawArrowHead(x1, y1, x2, y2, color, size) {
+            size = size || 8;
+            const angle = Math.atan2(y2 - y1, x2 - x1);
+            const mx = (x1 + x2) / 2;
+            const my = (y1 + y2) / 2;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.moveTo(mx + size * Math.cos(angle), my + size * Math.sin(angle));
+            ctx.lineTo(mx - size * Math.cos(angle - Math.PI / 5), my - size * Math.sin(angle - Math.PI / 5));
+            ctx.lineTo(mx - size * Math.cos(angle + Math.PI / 5), my - size * Math.sin(angle + Math.PI / 5));
+            ctx.closePath();
+            ctx.fill();
+        }
+
+        function easeInOut(t) {
+            return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+        }
+
+        // ─── Event Listeners ─────────────────────────────────────
+        document.getElementById('btn-problem').addEventListener('click', () => switchPhase('problem'));
+        document.getElementById('btn-scatter').addEventListener('click', () => switchPhase('scatter'));
+        document.getElementById('btn-gather').addEventListener('click', () => switchPhase('gather'));
+        document.getElementById('btn-analysis').addEventListener('click', () => switchPhase('analysis'));
+
+        btnPlay.addEventListener('click', togglePlay);
+        btnNext.addEventListener('click', advanceStep);
+        btnBack.addEventListener('click', retreatStep);
+        btnReset.addEventListener('click', () => {
+            stopPlaying();
+            step = 0;
+            resetToPhaseStart();
+            animProgress = 1;
+            updateStepLabel();
+            draw();
+        });
+
+        gpuCountSel.addEventListener('change', () => {
+            N = parseInt(gpuCountSel.value);
+            switchPhase(currentPhase);
+        });
+
+        window.addEventListener('resize', resize);
+
+        // ─── Boot ────────────────────────────────────────────────
+        init();
+    })();
+    </script>
+</body>
+</html>
