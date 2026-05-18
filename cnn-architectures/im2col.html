@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>im2col Visualization: How Convolution Becomes GEMM</title>
+    <style>
+        :root {
+            --bg: #0f172a;
+            --panel: #1e293b;
+            --text: #f8fafc;
+            --accent: #38bdf8;
+            --hl-1: #f472b6; /* Pink */
+            --hl-2: #4ade80; /* Green */
+            --hl-3: #fbbf24; /* Yellow */
+            --hl-4: #c084fc; /* Purple */
+            --border: #475569;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg);
+            color: var(--text);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        h2 { color: var(--accent); margin-bottom: 5px; }
+        p { color: #94a3b8; margin-bottom: 30px; }
+
+        .dashboard {
+            display: flex;
+            gap: 40px;
+            background: var(--panel);
+            padding: 30px;
+            border-radius: 12px;
+            border: 1px solid var(--border);
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+        }
+
+        .section {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .section-title {
+            font-size: 1.1rem;
+            font-weight: bold;
+            margin-bottom: 15px;
+            color: #cbd5e1;
+            text-align: center;
+        }
+
+        /* 4x4 Image Grid */
+        .grid-img {
+            display: grid;
+            grid-template-columns: repeat(4, 50px);
+            grid-template-rows: repeat(4, 50px);
+            gap: 4px;
+        }
+
+        /* 2x2 Filter Grid */
+        .grid-filter {
+            display: grid;
+            grid-template-columns: repeat(2, 50px);
+            grid-template-rows: repeat(2, 50px);
+            gap: 4px;
+            margin-top: 20px;
+        }
+
+        .cell {
+            background: #334155;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            border-radius: 4px;
+            transition: all 0.3s ease;
+            color: rgba(255,255,255,0.3);
+            border: 2px solid transparent;
+        }
+
+        .cell.active { color: white; transform: scale(1.05); }
+        
+        /* Expanded GEMM Matrix */
+        .gemm-matrix {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+            min-width: 220px;
+            min-height: 300px;
+            background: #0f172a;
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px dashed var(--border);
+        }
+
+        .gemm-row {
+            display: grid;
+            grid-template-columns: repeat(4, 50px);
+            gap: 4px;
+            opacity: 0;
+            transform: translateX(-20px);
+            animation: slideIn 0.4s forwards;
+        }
+
+        @keyframes slideIn {
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .controls {
+            margin-top: 30px;
+            display: flex;
+            gap: 20px;
+        }
+
+        button {
+            padding: 12px 24px;
+            font-size: 1.1rem;
+            font-weight: bold;
+            background: var(--accent);
+            color: var(--bg);
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: transform 0.1s;
+        }
+
+        button:active { transform: scale(0.95); }
+        button:disabled { background: #475569; color: #94a3b8; cursor: not-allowed; }
+        .btn-reset { background: #ef4444; }
+
+        .explanation {
+            margin-top: 20px;
+            max-width: 700px;
+            line-height: 1.6;
+            background: rgba(56, 189, 248, 0.1);
+            border-left: 4px solid var(--accent);
+            padding: 15px;
+            border-radius: 4px;
+            font-size: 1.05rem;
+            min-height: 60px;
+        }
+
+    </style>
+</head>
+<body>
+
+    <h2>im2col Visualization: Convolution Flattening Magic</h2>
+    <p>Observe how a 2x2 sliding window converts a 4x4 image into a GEMM input matrix X.</p>
+
+    <div class="dashboard">
+        <div class="section">
+            <div class="section-title">Original Input Image (4x4)</div>
+            <div class="grid-img" id="img-grid">
+                </div>
+            
+            <div class="section-title" style="margin-top: 30px;">Convolution Filter (2x2)</div>
+            <div class="grid-filter" id="filter-grid">
+                <div class="cell" style="background: var(--hl-1); color: #000;">W1</div>
+                <div class="cell" style="background: var(--hl-2); color: #000;">W2</div>
+                <div class="cell" style="background: var(--hl-3); color: #000;">W3</div>
+                <div class="cell" style="background: var(--hl-4); color: #000;">W4</div>
+            </div>
+        </div>
+
+        <div style="display: flex; align-items: center; color: var(--border); font-size: 2rem;">&rarr;</div>
+
+        <div class="section">
+            <div class="section-title">Flattened GEMM Matrix X<br><span style="font-size: 0.8rem; color: #94a3b8;">(Each row is one flattened sliding window)</span></div>
+            <div class="gemm-matrix" id="gemm-matrix">
+                </div>
+        </div>
+    </div>
+
+    <div class="explanation" id="desc">
+        <strong>Ready:</strong> Click "Next Step" to highlight the first 2x2 block and "flatten" it into the first row of the matrix.
+    </div>
+
+    <div class="controls">
+        <button id="btn-next" onclick="nextStep()">Next Step: Slide Window</button>
+        <button class="btn-reset" onclick="resetSim()">Restart</button>
+    </div>
+
+    <script>
+        // Initialize 4x4 image grid
+        const imgGrid = document.getElementById('img-grid');
+        for (let i = 0; i < 16; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'cell';
+            cell.id = `px-${i}`;
+            cell.innerText = `P${i}`;
+            imgGrid.appendChild(cell);
+        }
+
+        // Define sliding window index paths (4x4 image, 2x2 Filter, Stride=1)
+        // Total of 3x3 = 9 slides
+        const windows = [
+            [0, 1, 4, 5],    [1, 2, 5, 6],    [2, 3, 6, 7],
+            [4, 5, 8, 9],    [5, 6, 9, 10],   [6, 7, 10, 11],
+            [8, 9, 12, 13],  [9, 10, 13, 14], [10, 11, 14, 15]
+        ];
+
+        const colors = ['var(--hl-1)', 'var(--hl-2)', 'var(--hl-3)', 'var(--hl-4)'];
+        let currentStep = 0;
+
+        function nextStep() {
+            if (currentStep < windows.length) {
+                // Clear all highlights
+                document.querySelectorAll('.grid-img .cell').forEach(c => {
+                    c.style.borderColor = 'transparent';
+                    c.classList.remove('active');
+                });
+
+                const win = windows[currentStep];
+                const gemmMatrix = document.getElementById('gemm-matrix');
+                
+                // Create a new row
+                const newRow = document.createElement('div');
+                newRow.className = 'gemm-row';
+
+                // Mark corresponding image pixels and copy to matrix row
+                win.forEach((pxIndex, i) => {
+                    const imgCell = document.getElementById(`px-${pxIndex}`);
+                    imgCell.style.borderColor = colors[i];
+                    imgCell.classList.add('active');
+
+                    const matrixCell = document.createElement('div');
+                    matrixCell.className = 'cell active';
+                    matrixCell.style.borderColor = colors[i];
+                    matrixCell.style.color = 'white';
+                    matrixCell.innerText = `P${pxIndex}`;
+                    newRow.appendChild(matrixCell);
+                });
+
+                gemmMatrix.appendChild(newRow);
+                
+                document.getElementById('desc').innerHTML = `<strong>Step ${currentStep + 1}/9:</strong> Extracting pixels [${win.map(i=>'P'+i).join(', ')}] and flattening them into Row ${currentStep + 1} of the GEMM matrix.`;
+                
+                currentStep++;
+            }
+
+            if (currentStep === windows.length) {
+                document.getElementById('btn-next').disabled = true;
+                document.getElementById('desc').innerHTML = `<strong>Transformation Complete!</strong> <br>The original 3D convolution operation has now become a standard <strong>Matrix Multiplication (GEMM)</strong>:<br>By multiplying this 9x4 matrix X with a flattened 4x1 Filter weight matrix W, you can feed it directly into a Systolic Array for high-speed computation!`;
+            }
+        }
+
+        function resetSim() {
+            currentStep = 0;
+            document.getElementById('btn-next').disabled = false;
+            document.getElementById('desc').innerHTML = "<strong>Ready:</strong> Click \"Next Step\" to highlight the first 2x2 block and \"flatten\" it into the first row of the matrix.";
+            
+            document.querySelectorAll('.grid-img .cell').forEach(c => {
+                c.style.borderColor = 'transparent';
+                c.classList.remove('active');
+            });
+            
+            document.getElementById('gemm-matrix').innerHTML = '';
+        }
+    </script>
+</body>
+</html>
