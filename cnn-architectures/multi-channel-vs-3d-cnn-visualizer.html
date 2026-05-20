@@ -1,0 +1,944 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #45 by Nanxiang Wang (@FrankNW511): Add Interactive multi-channel CNN vs 3D CNN Visualizer. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RGB CNN vs 3D CNN</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#0d1117;color:#e6edf3;min-height:100vh}
+.topbar{padding:10px 18px;background:#161b22;border-bottom:1px solid #30363d}
+.topbar h1{font-size:15px;font-weight:500}
+.tabs{display:flex;background:#161b22;border-bottom:1px solid #30363d;padding:0 18px}
+.tab{padding:9px 18px;font-size:13px;font-weight:500;cursor:pointer;color:#8b949e;border-bottom:2px solid transparent;transition:all .15s}
+.tab:hover{color:#e6edf3}
+.tab.active{color:#58a6ff;border-bottom-color:#58a6ff}
+.tc{display:none}.tc.active{display:block}
+.page{padding:16px;max-width:1200px;margin:0 auto}
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:720px){.g2{grid-template-columns:1fr}}
+.card{background:#161b22;border:1px solid #30363d;border-radius:10px;padding:14px}
+.ctitle{font-size:13px;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:8px}
+.badge{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500}
+canvas{display:block;border-radius:6px}
+.ctrl{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px}
+.btn{padding:6px 13px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#8b949e;font-size:12px;cursor:pointer;font-weight:500;transition:all .15s;white-space:nowrap}
+.btn:hover{background:#30363d;color:#e6edf3}
+.btn.b1{background:#1f4e79;border-color:#58a6ff;color:#79c0ff}
+.btn.b2{background:#1a4020;border-color:#3fb950;color:#7ee787}
+.btn.bsel{background:#2d2a00;border-color:#f0c244;color:#f0c244}
+select{padding:5px 10px;border-radius:6px;border:1px solid #30363d;background:#21262d;color:#8b949e;font-size:12px;cursor:pointer}
+.info{background:#0d1117;border:1px solid #21262d;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:12px;color:#8b949e;line-height:1.7;min-height:40px}
+.formula{background:#0d1117;border:1px solid #3d2e00;border-radius:7px;padding:8px 12px;font-family:'Courier New',monospace;font-size:12px;color:#f0c244;line-height:1.8;margin:8px 0}
+.prob-wrap{display:flex;flex-direction:column;gap:5px;margin-top:8px}
+.prob-row{display:flex;align-items:center;gap:8px}
+.prob-label{font-size:12px;font-family:monospace;min-width:72px;color:#cdd9e5}
+.prob-bg{flex:1;height:18px;background:#21262d;border-radius:3px;overflow:hidden}
+.prob-fill{height:100%;border-radius:3px;display:flex;align-items:center;padding-left:6px;transition:width .7s ease}
+.prob-pct{font-size:11px;color:#6e7681;min-width:30px;text-align:right}
+table{width:100%;border-collapse:collapse;font-size:12px}
+th{padding:8px 10px;background:#0d1117;color:#8b949e;font-weight:500;text-align:left;border-bottom:1px solid #30363d;font-size:11px;text-transform:uppercase;letter-spacing:.04em}
+td{padding:7px 10px;border-bottom:1px solid #21262d;color:#cdd9e5;line-height:1.5;vertical-align:top}
+tr:last-child td{border-bottom:none}
+.c1{color:#79c0ff}.c2{color:#7ee787}
+</style>
+</head>
+<body>
+<div class="topbar"><h1>RGB CNN vs 3D CNN — Interactive Visualization</h1></div>
+<div class="tabs">
+  <div class="tab active" onclick="sw('rgb')">① RGB CNN (Image)</div>
+  <div class="tab" onclick="sw('d3')">② 3D CNN (Video)</div>
+  <div class="tab" onclick="sw('cmp')">③ Comparison</div>
+</div>
+
+<!-- ═══ TAB RGB ═══ -->
+<div class="tc active" id="tab-rgb"><div class="page">
+<div class="g2">
+<div>
+  <div class="card">
+    <div class="ctitle"><span class="badge" style="background:#1f4e79;color:#79c0ff">RGB CNN</span>Real image — channel decomposition</div>
+    <div class="ctrl" style="margin-bottom:8px">
+      <span style="font-size:12px;color:#8b949e">Image:</span>
+      <button class="btn bsel" id="ibt0" onclick="selImg(0)">🌅 Sunset</button>
+      <button class="btn" id="ibt1" onclick="selImg(1)">🏙️ City</button>
+      <button class="btn" id="ibt2" onclick="selImg(2)">🌊 Ocean</button>
+      <button class="btn" id="ibt3" onclick="selImg(3)">🏔️ Mountain</button>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
+      <div><canvas id="c-orig" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#8b949e;text-align:center;margin-top:3px">Original</div></div>
+      <div><canvas id="c-r" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#ff6b6b;text-align:center;margin-top:3px">R channel</div></div>
+      <div><canvas id="c-g" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#56d364;text-align:center;margin-top:3px">G channel</div></div>
+      <div><canvas id="c-b" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#79c0ff;text-align:center;margin-top:3px">B channel</div></div>
+    </div>
+    <div style="font-size:11px;color:#484f58;margin:10px 0 6px;text-transform:uppercase;letter-spacing:.05em">Each channel convolved separately → summed into one output</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:5px">
+      <div><canvas id="c-fr" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#ff6b6b;text-align:center;margin-top:3px">R feature</div></div>
+      <div><canvas id="c-fg" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#56d364;text-align:center;margin-top:3px">G feature</div></div>
+      <div><canvas id="c-fb" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#79c0ff;text-align:center;margin-top:3px">B feature</div></div>
+      <div><canvas id="c-fsum" width="100" height="100" style="width:100%"></canvas><div style="font-size:10px;color:#f0c244;text-align:center;margin-top:3px">∑ Sum output</div></div>
+    </div>
+    <div class="ctrl">
+      <span style="font-size:12px;color:#8b949e">Filter:</span>
+      <select id="fsel" onchange="computeAllFeatures()">
+        <option value="edge">Edge detect</option>
+        <option value="sobel_h">Sobel H</option>
+        <option value="sobel_v">Sobel V</option>
+        <option value="sharpen">Sharpen</option>
+        <option value="blur">Blur</option>
+        <option value="emboss">Emboss</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="ctitle">All 3 channels convolved simultaneously → summed</div>
+    <canvas id="c-anim3" width="460" height="260" style="width:100%;background:#0d1117;border-radius:6px"></canvas>
+    <div class="ctrl">
+      <button class="btn b1" id="abtn" onclick="toggleAnim()">▶ Animate all 3 channels</button>
+      <button class="btn" onclick="resetAnim()">↺ Reset</button>
+    </div>
+    <div class="info" id="anim-info">Press ▶ to see R, G, B kernels slide simultaneously → three feature maps → summed into final output.</div>
+  </div>
+</div>
+
+<div>
+  <div class="card">
+    <div class="ctitle" style="color:#79c0ff">How RGB Convolution Works</div>
+    <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:8px">An RGB image is <strong style="color:#79c0ff">(H × W × 3)</strong>. Each filter has depth=3. The kernel slides only in H and W — processing all 3 channels simultaneously and summing into one value per position.</div>
+    <div class="formula">Input:   (H, W, 3)      e.g. (224, 224, 3)
+Kernel:  (k, k, 3)      e.g. (3, 3, 3)
+Output:  (H-2, W-2, 1)  per filter
+Sliding: H × W only  ←→ ↑↓</div>
+    <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-top:8px">With 64 filters → feature tensor <strong style="color:#79c0ff">(H-2, W-2, 64)</strong>. Each filter detects a different pattern.</div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="ctitle">Classification Demo</div>
+    <div class="ctrl">
+      <button class="btn" id="cls-btn-0" onclick="doCls('sunset',0)">🌅 Sunset</button>
+      <button class="btn" id="cls-btn-1" onclick="doCls('city',1)">🏙️ City</button>
+      <button class="btn" id="cls-btn-2" onclick="doCls('ocean',2)">🌊 Ocean</button>
+      <button class="btn" id="cls-btn-3" onclick="doCls('mountain',3)">🏔️ Mountain</button>
+      <button class="btn b1" onclick="runCls()">Classify ▶</button>
+    </div>
+    <div class="prob-wrap" id="rgb-cls"><div style="font-size:12px;color:#484f58;margin-top:6px">① Select image type above → ② Press Classify ▶</div></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="ctitle">Key insight: depth=3 in the kernel</div>
+    <div style="font-size:12px;color:#8b949e;line-height:1.7">The kernel must match input depth. For RGB (depth=3), every kernel is also depth=3.</div>
+    <div class="formula">output[y,x] = Σ_c Σ_i Σ_j  kernel[c,i,j] × input[c, y+i, x+j]
+         ↑ sum over R,G,B channels (c = 0,1,2)</div>
+  </div>
+</div>
+</div>
+</div></div>
+
+<!-- ═══ TAB 3D ═══ -->
+<div class="tc" id="tab-d3"><div class="page">
+<div class="g2">
+<div>
+  <div class="card">
+    <div class="ctitle"><span class="badge" style="background:#1a4020;color:#7ee787">3D CNN</span>Step 1 — Video frames → 3D volume</div>
+    <div class="ctrl" style="margin-bottom:8px">
+      <span style="font-size:12px;color:#8b949e">Scene:</span>
+      <button class="btn bsel" id="sbt0" onclick="selScene(0)">🌊 Ocean waves</button>
+      <button class="btn" id="sbt1" onclick="selScene(1)">🔥 Fire</button>
+      <button class="btn" id="sbt2" onclick="selScene(2)">☁️ Clouds</button>
+    </div>
+    <div style="display:flex;gap:3px;overflow-x:auto;padding-bottom:4px" id="frames-row"></div>
+    <div style="font-size:10px;color:#484f58;text-align:center;margin-top:4px">8 consecutive frames (t=0…7)</div>
+    <canvas id="c-stack" width="460" height="200" style="width:100%;background:#0d1117;border-radius:6px;margin-top:10px"></canvas>
+    <div style="font-size:10px;color:#484f58;text-align:center;margin-top:3px">Frames stacked → 3D volume (T × H × W)</div>
+    <div class="ctrl">
+      <button class="btn b2" id="stack-btn" onclick="toggleStack()">▶ Animate stacking</button>
+      <button class="btn" onclick="resetStack()">↺ Reset</button>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="ctitle"><span class="badge" style="background:#1a4020;color:#7ee787">3D CNN</span>Step 2 — 3D kernel slides T×H×W</div>
+    <canvas id="c-3dconv" width="460" height="260" style="width:100%;background:#0d1117;border-radius:6px"></canvas>
+    <div class="ctrl">
+      <button class="btn b2" id="conv3d-btn" onclick="toggle3DConv()">▶ Animate 3D conv</button>
+      <button class="btn" onclick="reset3DConv()">↺ Reset</button>
+    </div>
+    <div class="info" id="d3-info">Press ▶ to see the 3D kernel slide across T, H, and W dimensions.</div>
+  </div>
+</div>
+
+<div>
+  <div class="card">
+    <div class="ctitle" style="color:#7ee787">How 3D Convolution Works</div>
+    <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-bottom:8px">A video has shape <strong style="color:#7ee787">(T × H × W × C)</strong>. The 3D kernel spans d frames in time. It slides in T, H, and W simultaneously — detecting motion patterns across consecutive frames.</div>
+    <div class="formula">Input:   (T, H, W, 3)      e.g. (16, 112, 112, 3)
+Kernel:  (d, k, k, 3)      e.g. (3, 3, 3, 3)
+Output:  (T-d+1, H-2, W-2) per filter
+Sliding: T × H × W  ←→ ↑↓ ⏎</div>
+    <div style="font-size:12px;color:#8b949e;line-height:1.7;margin-top:8px">The 3D kernel detects temporal patterns — "wave crashing", "flame flickering", "cloud drifting" — that are invisible in a single frame.</div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="ctitle">Scene Classification Demo</div>
+    <div class="ctrl">
+      <button class="btn bsel" id="d3cls-btn-0" onclick="do3DCls('waves',0)">🌊 Ocean</button>
+      <button class="btn" id="d3cls-btn-1" onclick="do3DCls('fire',1)">🔥 Fire</button>
+      <button class="btn" id="d3cls-btn-2" onclick="do3DCls('clouds',2)">☁️ Clouds</button>
+      <button class="btn b2" onclick="run3DCls()">Classify ▶</button>
+    </div>
+    <div style="font-size:11px;color:#484f58;margin-top:6px">① Select scene above → ② Press Classify ▶</div>
+    <div class="prob-wrap" id="d3-cls"></div>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <div class="ctitle">Why 3D CNN needs multiple frames</div>
+    <div style="font-size:12px;color:#8b949e;line-height:1.7">A single frame of ocean waves looks similar to a single frame of a still lake. The 3D kernel sees d=3 consecutive frames simultaneously — detecting the wave motion pattern that distinguishes the two.</div>
+    <div class="formula">output[t,y,x] = Σ_c Σ_dt Σ_i Σ_j
+  kernel[c,dt,i,j] × input[c, t+dt, y+i, x+j]
+  ↑ also sums over time dimension dt = 0,1,2</div>
+  </div>
+</div>
+</div>
+</div></div>
+
+<!-- ═══ TAB CMP ═══ -->
+<div class="tc" id="tab-cmp"><div class="page">
+  <div class="g2" style="margin-bottom:14px">
+    <div class="card">
+      <div class="ctitle"><span class="badge" style="background:#1f4e79;color:#79c0ff">RGB CNN</span>R, G, B convolved separately → sum → feature map</div>
+      <canvas id="cmp-rgb-c" width="420" height="260" style="width:100%;background:#0d1117;border-radius:6px"></canvas>
+      <div style="font-size:10px;color:#8b949e;text-align:center;margin-top:4px">3 channel kernels slide H×W independently → outputs summed → one feature map</div>
+    </div>
+    <div class="card">
+      <div class="ctitle"><span class="badge" style="background:#1a4020;color:#7ee787">3D CNN</span>Frames stacked → 3D kernel slides T×H×W</div>
+      <canvas id="cmp-3d-c" width="420" height="260" style="width:100%;background:#0d1117;border-radius:6px"></canvas>
+      <div style="font-size:10px;color:#8b949e;text-align:center;margin-top:4px">3D kernel spans d frames, slides through time + space → 3D feature volume</div>
+    </div>
+  </div>
+  <div class="ctrl" style="justify-content:center;margin-bottom:14px">
+    <button class="btn b1" onclick="runCmpAnim()">▶ Animate both</button>
+    <button class="btn" onclick="stopCmpAnim()">⏸ Stop</button>
+  </div>
+  <div class="card">
+    <div class="ctitle">Key Differences</div>
+    <table>
+      <thead><tr><th>Property</th><th class="c1">RGB CNN (2D)</th><th class="c2">3D CNN</th></tr></thead>
+      <tbody>
+        <tr><td>Input</td><td class="c1">(H, W, 3) — one image</td><td class="c2">(T, H, W, C) — video clip</td></tr>
+        <tr><td>Kernel</td><td class="c1">(k, k, 3)</td><td class="c2">(d, k, k, C) — extra time dim d</td></tr>
+        <tr><td>Sliding</td><td class="c1">H and W only (2D)</td><td class="c2">T, H, and W (3D)</td></tr>
+        <tr><td>Captures</td><td class="c1">Spatial: edges, textures, shapes</td><td class="c2">Spatiotemporal: motion, temporal change</td></tr>
+        <tr><td>Use cases</td><td class="c1">Image classification, detection</td><td class="c2">Video classification, action recognition</td></tr>
+        <tr><td>Models</td><td class="c1">VGG, ResNet, EfficientNet</td><td class="c2">C3D, I3D, SlowFast</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div></div>
+
+<script>
+const SZ=100;
+
+/* ═══ HIGH QUALITY IMAGE GENERATORS ═══ */
+function genImg(type){
+  const d=new ImageData(SZ,SZ);
+  for(let y=0;y<SZ;y++) for(let x=0;x<SZ;x++){
+    const i=(y*SZ+x)*4,nx=x/SZ,ny=y/SZ;
+    let r=0,g=0,b=0;
+    if(type===0){ // sunset
+      r=Math.min(255,220+ny*20+Math.sin(x*.08)*8);
+      g=Math.min(255,Math.max(0,80+ny*60+Math.sin(x*.12)*10));
+      b=Math.round(20+ny*80);
+      const sdx=x-65,sdy=y-38,sd=Math.sqrt(sdx*sdx+sdy*sdy);
+      if(sd<12){r=255;g=240;b=80}
+      else if(sd<22){const f=1-(sd-12)/10;r=255;g=Math.round(200+f*40);b=Math.round(80-f*60)}
+      if(ny>.55&&ny<.68){const hw=1-Math.abs(ny-.615)/.065;r=Math.min(255,r+Math.round(hw*40));g=Math.min(255,g+Math.round(hw*20))}
+      if(ny>.65){const wy=ny-.65,wave=Math.sin(x*.4+wy*8)*3;r=Math.min(255,Math.round(180-wy*180+wave));g=Math.min(255,Math.round(60-wy*60+wave));b=Math.round(30+wy*60)}
+      if(ny>.62){const th=.62+Math.sin(x*.35)*.06+Math.cos(x*.18)*.04;if(ny>th){r=15;g=12;b=20}}
+    } else if(type===1){ // city - buildings with windows, night sky
+      // sky gradient dark blue to purple
+      r=Math.round(15+ny*20);g=Math.round(10+ny*15);b=Math.round(40+ny*30);
+      // building silhouettes
+      const buildW=14,nBuilds=7;
+      for(let b2=0;b2<nBuilds;b2++){
+        const bx=b2*14+2;
+        const bh=0.25+((b2*17+11)%35)/100;
+        if(nx>bx/SZ&&nx<(bx+buildW-1)/SZ&&ny>bh){
+          r=Math.round(25+Math.sin(x*.3)*5);g=Math.round(22+Math.sin(x*.3)*4);b=Math.round(35+Math.sin(x*.3)*5);
+          // windows - lit yellow
+          const wx=(x-bx)%5,wy=((y-Math.round(bh*SZ))%8);
+          if(wx>1&&wx<4&&wy>1&&wy<5&&Math.random()<.0001+((b2*7+x*3+y*2)%10)*.08){r=220;g=200;b=80}
+          // deterministic window lighting
+          const wlit=((b2*13+Math.floor((x-bx)/5)*7+Math.floor((y-Math.round(bh*SZ))/8)*11)%3)===0;
+          if(wx>1&&wx<4&&wy>1&&wy<5&&wlit){r=210;g=185;b=70}
+        }
+      }
+      // road at bottom
+      if(ny>.85){r=30;g=30;b=35;if(ny>.88&&Math.abs((x%20)-10)<2){r=180;g=160;b=80}}
+      // moon
+      const mdx=x-75,mdy=y-15,md=Math.sqrt(mdx*mdx+mdy*mdy);
+      if(md<8){r=230;g=230;b=200}
+    } else if(type===2){ // ocean - detailed waves
+      // sky
+      if(ny<.4){r=Math.round(80+ny*60);g=Math.round(130+ny*70);b=Math.round(200+ny*30)}
+      else{
+        const w1=Math.sin(x*.28)*14+Math.sin(x*.18+y*.05)*9;
+        const w2=Math.sin(x*.42)*.6;
+        const depth=y+w1-40;
+        r=Math.max(0,Math.round(8+w2*5));
+        g=Math.max(0,Math.round(80-depth*.8+w1*.5));
+        b=Math.min(255,Math.round(165+w1*1.0-depth*.4));
+        if(depth<10){const f=1-depth/10;r=Math.min(255,Math.round(r+f*180));g=Math.min(255,Math.round(g+f*180));b=Math.min(255,Math.round(b+f*60))}
+      }
+      // horizon line
+      if(ny>.38&&ny<.42){r=Math.min(255,r+20);g=Math.min(255,g+15)}
+    } else { // mountain
+      r=Math.round(120-ny*80);g=Math.round(160-ny*50);b=Math.round(220-ny*40);
+      const m1=.3+Math.sin(nx*2.2)*.18+Math.cos(nx*1.5)*.08;
+      const m2=.4+Math.sin(nx*3.1+.5)*.12+Math.cos(nx*2.2)*.06;
+      if(ny>m1){
+        const sh=ny-m1;
+        r=Math.round(140-sh*60+Math.sin(x*.4+y*.3)*10);
+        g=Math.round(130-sh*55+Math.sin(x*.35)*8);
+        b=Math.round(120-sh*50);
+        if(ny-m1<.06){const sw=1-(ny-m1)/.06;r=Math.min(255,Math.round(r+sw*120));g=Math.min(255,Math.round(g+sw*115));b=Math.min(255,Math.round(b+sw*130))}
+      }
+      if(ny>m2&&ny>m1+.05){
+        const sh=ny-m2;
+        r=Math.round(110-sh*50+Math.sin(x*.5)*12);
+        g=Math.round(100-sh*45);b=Math.round(95-sh*40);
+        if(ny-m2<.05){const sw=1-(ny-m2)/.05;r=Math.min(255,Math.round(r+sw*100));g=Math.min(255,Math.round(g+sw*95));b=Math.min(255,Math.round(b+sw*110))}
+      }
+      if(ny>.72&&ny<.82){const th=.72+Math.sin(x*.4)*.05+Math.cos(x*.25)*.03;if(ny>th){r=20;g=50;b=25}}
+    }
+    d.data[i]=Math.min(255,Math.max(0,Math.round(r)));
+    d.data[i+1]=Math.min(255,Math.max(0,Math.round(g)));
+    d.data[i+2]=Math.min(255,Math.max(0,Math.round(b)));
+    d.data[i+3]=255;
+  }
+  return d;
+}
+
+/* ═══ SCENE FRAME GENERATORS (ocean/fire/clouds) ═══ */
+function genSceneFrame(scene,t){
+  const d=new ImageData(70,70);
+  const phase=t*.45;
+  for(let y=0;y<70;y++) for(let x=0;x<70;x++){
+    const i=(y*70+x)*4;let r=0,g=0,b=0;
+    const nx=x/70,ny=y/70;
+    if(scene===0){ // ocean waves - rich blue-green
+      const w1=Math.sin(x*.28+phase)*14+Math.sin(x*.18-phase*.7)*9;
+      const w2=Math.sin(x*.42+phase*1.3)*.6;
+      const depth=y+w1;
+      // deep ocean base
+      r=Math.max(0,Math.round(10+w2*8));
+      g=Math.max(0,Math.round(85-depth*.9+w1*.6));
+      b=Math.min(255,Math.round(170+w1*1.2-depth*.5));
+      // foam crests
+      if(depth<14){const f=1-depth/14;r=Math.min(255,Math.round(r+f*200));g=Math.min(255,Math.round(g+f*200));b=Math.min(255,Math.round(b+f*80))}
+      // sky above
+      if(ny<.25){r=Math.round(100+ny*80);g=Math.round(160+ny*60);b=Math.round(220)}
+      // horizon shimmer
+      if(ny>.22&&ny<.3){const hw=(ny-.22)/.08;r=Math.min(255,Math.round(r+hw*40));g=Math.min(255,Math.round(g+hw*20))}
+    } else if(scene===1){ // fire - rich orange-yellow-red
+      const fl1=Math.sin(x*.32+phase*1.3)*12+Math.sin(x*.54-phase)*.9;
+      const fl2=Math.cos(x*.22+phase*.8)*8;
+      const heat=72-y+fl1+fl2;
+      if(heat>0){
+        r=Math.min(255,Math.round(heat*3.2));
+        g=Math.min(255,Math.round(heat*1.1));
+        b=Math.max(0,Math.round(heat>45?heat*.25:0));
+        // bright core
+        if(heat>50){const hf=(heat-50)/22;g=Math.min(255,Math.round(g+hf*80));r=255}
+      }
+      // smoke top
+      if(ny<.2){const sm=1-ny/.2;r=Math.round(40+sm*20);g=Math.round(35+sm*15);b=Math.round(35+sm*15)}
+      // ember base
+      if(ny>.85){r=Math.round(60+fl1*2);g=Math.round(25);b=Math.round(5)}
+    } else { // clouds - detailed white-gray puffs
+      const c1=Math.sin(x*.14+phase*.3)*28+Math.cos(y*.18-phase*.2)*22;
+      const c2=Math.sin(x*.09-phase*.15)*20+Math.cos(y*.12+phase*.1)*16;
+      const c3=Math.sin(x*.22+y*.15+phase*.25)*12;
+      const lum=Math.round(190+c1*.5+c2*.3+c3*.2);
+      // sky background
+      r=Math.round(140-ny*40+c1*.15);
+      g=Math.round(180-ny*30+c1*.1);
+      b=Math.round(230-ny*20);
+      // cloud mass
+      if(c1+c2>10){
+        const cf=Math.min(1,(c1+c2-10)/40);
+        r=Math.round(r*(1-cf)+lum*cf);
+        g=Math.round(g*(1-cf)+lum*cf);
+        b=Math.round(b*(1-cf)+(lum+15)*cf);
+        // shadow underside
+        if(c1<15&&c2<8){r=Math.max(0,r-20);g=Math.max(0,g-20);b=Math.max(0,b-15)}
+      }
+    }
+    d.data[i]=Math.min(255,Math.max(0,r));
+    d.data[i+1]=Math.min(255,Math.max(0,g));
+    d.data[i+2]=Math.min(255,Math.max(0,b));
+    d.data[i+3]=255;
+  }
+  return d;
+}
+
+const KERNELS={
+  edge:[[-1,-1,-1],[-1,8,-1],[-1,-1,-1]],
+  sobel_h:[[-1,0,1],[-2,0,2],[-1,0,1]],
+  sobel_v:[[-1,-2,-1],[0,0,0],[1,2,1]],
+  sharpen:[[0,-1,0],[-1,5,-1],[0,-1,0]],
+  blur:[[1/9,1/9,1/9],[1/9,1/9,1/9],[1/9,1/9,1/9]],
+  emboss:[[-2,-1,0],[-1,1,1],[0,1,2]]
+};
+
+let curImg=0,imgData=null,clsType='cat',d3ClsType='waves',curScene=0;
+let animT=null,animRunning=false,animPos=0;
+let stackT=null,stackRunning=false,stackPos=0;
+let conv3dT=null,conv3dRunning=false,conv3dPos=0;
+let cmpT=null,cmpRunning=false,cmpPos=0;
+
+function getKernel(){return KERNELS[document.getElementById('fsel').value]}
+
+function convChannel(src,ch,k){
+  const out=new Float32Array(SZ*SZ);
+  for(let y=1;y<SZ-1;y++) for(let x=1;x<SZ-1;x++){
+    let s=0;
+    for(let ky=0;ky<3;ky++) for(let kx=0;kx<3;kx++) s+=src[((y+ky-1)*SZ+(x+kx-1))*4+ch]*k[ky][kx];
+    out[y*SZ+x]=s;
+  }
+  return out;
+}
+
+function drawChannel(id,ch,tint){
+  const ctx=document.getElementById(id).getContext('2d');
+  const img=ctx.createImageData(SZ,SZ);
+  const src=imgData.data;
+  for(let i=0;i<SZ*SZ;i++){img.data[i*4+tint]=src[i*4+ch];img.data[i*4+3]=255}
+  ctx.putImageData(img,0,0);
+}
+
+function computeAllFeatures(){
+  const k=getKernel();
+  const fr=convChannel(imgData.data,0,k);
+  const fg=convChannel(imgData.data,1,k);
+  const fb=convChannel(imgData.data,2,k);
+  [[fr,0,'c-fr'],[fg,1,'c-fg'],[fb,2,'c-fb']].forEach(([f,ch,id])=>{
+    const ctx=document.getElementById(id).getContext('2d');
+    const img=ctx.createImageData(SZ,SZ);
+    for(let i=0;i<SZ*SZ;i++){img.data[i*4+ch]=Math.min(255,Math.max(0,f[i]+128));img.data[i*4+3]=255}
+    ctx.putImageData(img,0,0);
+  });
+  const ctx=document.getElementById('c-fsum').getContext('2d');
+  const img=ctx.createImageData(SZ,SZ);
+  for(let i=0;i<SZ*SZ;i++){
+    const v=Math.min(255,Math.max(0,(fr[i]+fg[i]+fb[i])/3+128));
+    img.data[i*4]=v;img.data[i*4+1]=Math.round(v*.85);img.data[i*4+3]=255;
+  }
+  ctx.putImageData(img,0,0);
+  resetAnim();
+}
+
+function selImg(idx){
+  curImg=idx;
+  const types=['sunset','city','ocean','mountain'];
+  document.querySelectorAll('[id^="ibt"]').forEach((b,i)=>b.className='btn'+(i===idx?' bsel':''));
+  // sync classify buttons
+  clsType=types[idx];
+  document.querySelectorAll('[id^="cls-btn-"]').forEach((b,i)=>b.className='btn'+(i===idx?' bsel':''));
+  imgData=genImg(idx);
+  document.getElementById('c-orig').getContext('2d').putImageData(imgData,0,0);
+  drawChannel('c-r',0,0);drawChannel('c-g',1,1);drawChannel('c-b',2,2);
+  computeAllFeatures();
+}
+
+/* ═══ 3-CHANNEL ANIMATED CONVOLUTION ═══ */
+function drawAnim3(){
+  const ctx=document.getElementById('c-anim3').getContext('2d');
+  const W=460,H=260;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#0d1117';ctx.fillRect(0,0,W,H);
+  const k=getKernel();
+  const DISP=70; // smaller to fit all elements
+  const kx=animPos%(SZ-2),ky=Math.floor(animPos/(SZ-2))%(SZ-2);
+  const chColors=['#ff4444','#44cc44','#4488ff'];
+  const chNames=['R','G','B'];
+
+  // Draw 3 channel images side by side (left)
+  [0,1,2].forEach((ch,ci)=>{
+    const ox=4+ci*(DISP+3);
+    const ic=document.createElement('canvas');ic.width=SZ;ic.height=SZ;
+    const ictx=ic.getContext('2d');
+    const idat=ictx.createImageData(SZ,SZ);
+    for(let i=0;i<SZ*SZ;i++){idat.data[i*4+ch]=imgData.data[i*4+ch];idat.data[i*4+3]=255}
+    ictx.putImageData(idat,0,0);
+    ctx.drawImage(ic,ox,22,DISP,DISP);
+    ctx.strokeStyle=chColors[ci];ctx.lineWidth=1.5;ctx.strokeRect(ox,22,DISP,DISP);
+    ctx.fillStyle=chColors[ci];ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+    ctx.fillText(chNames[ci],ox+DISP/2,17);
+    // sliding kernel box
+    const kpx=ox+kx*(DISP/(SZ-2));
+    const kpy=22+ky*(DISP/(SZ-2));
+    const ksz=DISP/(SZ-2)*3;
+    ctx.strokeStyle='#f0c244';ctx.lineWidth=2;ctx.strokeRect(kpx,kpy,ksz,ksz);
+  });
+
+  // kernel weights (center, compact)
+  const kwX=222,kwY=22,kCell=23;
+  ctx.fillStyle='#8b949e';ctx.font='10px sans-serif';ctx.textAlign='center';
+  ctx.fillText('kernel (shared)',kwX+kCell*1.5,16);
+  k.forEach((row,r)=>row.forEach((v,c)=>{
+    const bx=kwX+c*kCell,by=kwY+r*kCell;
+    ctx.fillStyle=v>0?`rgba(88,166,255,${Math.min(1,v/8)})`:(v<0?`rgba(255,100,100,${Math.min(1,-v/8)})`:'#21262d');
+    ctx.fillRect(bx,by,kCell-1,kCell-1);
+    ctx.fillStyle='#cdd9e5';ctx.font='bold 9px monospace';ctx.textAlign='center';
+    ctx.fillText(v%1===0?v:v.toFixed(1),bx+kCell/2,by+kCell/2+3);
+  }));
+
+  // compute channel outputs
+  const fr=convChannel(imgData.data,0,k);
+  const fg=convChannel(imgData.data,1,k);
+  const fb=convChannel(imgData.data,2,k);
+  const arrowX=kwX+kCell*3+4;
+
+  // per-channel output pixels (right of kernel)
+  const outBoxX=arrowX+14;
+  [fr,fg,fb].forEach((fm,ci)=>{
+    const oy=22+ci*24;
+    ctx.strokeStyle=chColors[ci];ctx.lineWidth=1;
+    ctx.beginPath();ctx.moveTo(arrowX,oy+kCell*.5);ctx.lineTo(arrowX+12,oy+kCell*.5);ctx.stroke();
+    const v=Math.min(255,Math.max(0,fm[Math.min(ky,SZ-2)*SZ+Math.min(kx,SZ-2)]+128));
+    ctx.fillStyle=ci===0?`rgb(${v},0,0)`:ci===1?`rgb(0,${v},0)`:`rgb(0,0,${v})`;
+    ctx.fillRect(outBoxX,oy+4,18,16);
+    ctx.strokeStyle=chColors[ci];ctx.lineWidth=1;ctx.strokeRect(outBoxX,oy+4,18,16);
+    ctx.fillStyle='#cdd9e5';ctx.font='9px monospace';ctx.textAlign='center';
+    ctx.fillText(Math.round(v),outBoxX+9,oy+15);
+  });
+
+  // Σ sum arrow pointing down to sum box
+  const sumBoxX=outBoxX,sumBoxY=100;
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(sumBoxX+9,92);ctx.lineTo(sumBoxX+9,sumBoxY-4);ctx.stroke();
+  ctx.fillStyle='#f0c244';ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Σ',sumBoxX+9,99);
+
+  // sum output pixel
+  const sv=Math.min(255,Math.max(0,Math.round((fr[ky*SZ+kx]+fg[ky*SZ+kx]+fb[ky*SZ+kx])/3+128)));
+  ctx.fillStyle=`rgb(${sv},${Math.round(sv*.8)},0)`;
+  ctx.fillRect(sumBoxX-2,sumBoxY+2,24,22);
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=2;ctx.strokeRect(sumBoxX-2,sumBoxY+2,24,22);
+  ctx.fillStyle=sv>100?'#000':'#fff';ctx.font='bold 9px monospace';ctx.textAlign='center';
+  ctx.fillText(Math.round(sv),sumBoxX+10,sumBoxY+16);
+
+  // arrow to feature map
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(sumBoxX+22,sumBoxY+12);ctx.lineTo(sumBoxX+36,sumBoxY+12);ctx.stroke();
+  ctx.fillStyle='#f0c244';
+  ctx.beginPath();ctx.moveTo(sumBoxX+36,sumBoxY+8);ctx.lineTo(sumBoxX+44,sumBoxY+12);ctx.lineTo(sumBoxX+36,sumBoxY+16);ctx.fill();
+
+  // growing feature map (right side, fits within W=460)
+  const fmX=360,fmY=20,fmSZ=88;
+  const fmImg=ctx.createImageData(fmSZ,fmSZ);
+  for(let py=0;py<fmSZ;py++) for(let px=0;px<fmSZ;px++){
+    const si=Math.floor(py*SZ/fmSZ)*SZ+Math.floor(px*SZ/fmSZ);
+    const flatK=Math.floor(py*(SZ-2)/fmSZ)*(SZ-2)+Math.floor(px*(SZ-2)/fmSZ);
+    if(flatK<=animPos){
+      const v=Math.min(255,Math.max(0,(fr[si]+fg[si]+fb[si])/3+128));
+      const di=(py*fmSZ+px)*4;
+      fmImg.data[di]=v;fmImg.data[di+1]=Math.round(v*.8);fmImg.data[di+3]=255;
+    }
+  }
+  ctx.putImageData(fmImg,fmX,fmY);
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=1.5;ctx.strokeRect(fmX,fmY,fmSZ,fmSZ);
+  ctx.fillStyle='#f0c244';ctx.font='10px sans-serif';ctx.textAlign='center';
+  ctx.fillText('Output feature map',fmX+fmSZ/2,fmY+fmSZ+13);
+  ctx.fillStyle='#8b949e';ctx.font='9px sans-serif';
+  ctx.fillText('(R+G+B summed)',fmX+fmSZ/2,fmY+fmSZ+23);
+
+  // bottom label
+  ctx.fillStyle='#484f58';ctx.font='11px sans-serif';ctx.textAlign='left';
+  ctx.fillText(`Position (${kx},${ky}): R=${Math.round(fr[ky*SZ+kx]+128)}, G=${Math.round(fg[ky*SZ+kx]+128)}, B=${Math.round(fb[ky*SZ+kx]+128)} → Σ=${sv}`,4,H-8);
+  document.getElementById('anim-info').textContent=
+    `Position (${kx},${ky}): R channel→${Math.round(fr[ky*SZ+kx]+128)}, G channel→${Math.round(fg[ky*SZ+kx]+128)}, B channel→${Math.round(fb[ky*SZ+kx]+128)} → summed output: ${sv}`;
+}
+
+function toggleAnim(){
+  if(animRunning){clearInterval(animT);animRunning=false;document.getElementById('abtn').textContent='▶ Animate all 3 channels';return}
+  animPos=0;
+  animRunning=true;document.getElementById('abtn').textContent='⏸ Pause';
+  const total=(SZ-2)*(SZ-2);
+  animT=setInterval(()=>{
+    animPos+=6;
+    if(animPos>=total){
+      animPos=total-1;drawAnim3();
+      clearInterval(animT);animRunning=false;document.getElementById('abtn').textContent='▶ Animate all 3 channels';
+    } else { drawAnim3(); }
+  },25);
+}
+function resetAnim(){clearInterval(animT);animRunning=false;animPos=0;document.getElementById('abtn').textContent='▶ Animate all 3 channels';drawAnim3()}
+
+/* ═══ STACKING ANIMATION ═══ */
+function renderFrames(){
+  const row=document.getElementById('frames-row');row.innerHTML='';
+  for(let t=0;t<8;t++){
+    const c=document.createElement('canvas');c.width=70;c.height=70;
+    c.getContext('2d').putImageData(genSceneFrame(curScene,t),0,0);
+    c.style.cssText='border-radius:4px;border:1px solid #30363d;flex-shrink:0;width:54px;height:54px';
+    const w=document.createElement('div');
+    const l=document.createElement('div');l.style.cssText='font-size:9px;color:#484f58;text-align:center;margin-top:2px';l.textContent='t='+t;
+    w.appendChild(c);w.appendChild(l);row.appendChild(w);
+  }
+}
+
+function drawStack(){
+  const ctx=document.getElementById('c-stack').getContext('2d');
+  const W=460,H=200;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#0d1117';ctx.fillRect(0,0,W,H);
+  const shown=Math.min(8,Math.floor(stackPos/8)+1);
+  const fw=60,fh=50,gX=10,gY=-5;
+  for(let i=shown-1;i>=0;i--){
+    const ox=14+i*gX,oy=120+i*gY;
+    const c=document.createElement('canvas');c.width=70;c.height=70;
+    c.getContext('2d').putImageData(genSceneFrame(curScene,i),0,0);
+    ctx.drawImage(c,ox,oy,fw,fh);
+    ctx.strokeStyle=i===shown-1?'#f0c244':'#30363d';
+    ctx.lineWidth=i===shown-1?2:1;ctx.strokeRect(ox,oy,fw,fh);
+  }
+  // T axis
+  ctx.strokeStyle='#7ee787';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(14,H-12);ctx.lineTo(14+(shown)*gX+20,H-12-shown*(-gY)+10);ctx.stroke();
+  ctx.fillStyle='#7ee787';ctx.font='10px sans-serif';ctx.textAlign='left';ctx.fillText('T (time) →',18,H-14);
+  if(shown>=8){
+    ctx.fillStyle='#7ee787';ctx.font='11px sans-serif';ctx.textAlign='center';
+    ctx.fillText('→ 3D Volume ready: (T=8, H=70, W=70)',W/2+60,H-6);
+  }
+}
+
+function toggleStack(){
+  if(stackRunning){clearInterval(stackT);stackRunning=false;document.getElementById('stack-btn').textContent='▶ Animate stacking';return}
+  stackRunning=true;document.getElementById('stack-btn').textContent='⏸ Pause';
+  stackT=setInterval(()=>{stackPos=Math.min(stackPos+2,64);drawStack();if(stackPos>=64){clearInterval(stackT);stackRunning=false;document.getElementById('stack-btn').textContent='▶ Animate stacking'}},60);
+}
+function resetStack(){clearInterval(stackT);stackRunning=false;stackPos=0;document.getElementById('stack-btn').textContent='▶ Animate stacking';drawStack()}
+
+/* ═══ 3D CONV ANIMATION ═══ */
+function draw3DConv(){
+  const ctx=document.getElementById('c-3dconv').getContext('2d');
+  const W=460,H=260;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#0d1117';ctx.fillRect(0,0,W,H);
+  const fw=58,fh=48,gX=10,gY=-5;
+  // draw frame stack
+  for(let i=5;i>=0;i--){
+    const ox=10+i*gX,oy=100+i*gY;
+    const c=document.createElement('canvas');c.width=70;c.height=70;
+    c.getContext('2d').putImageData(genSceneFrame(curScene,i),0,0);
+    ctx.drawImage(c,ox,oy,fw,fh);
+    ctx.strokeStyle='#1a4020';ctx.lineWidth=0.8;ctx.strokeRect(ox,oy,fw,fh);
+  }
+  // 3D kernel highlight - spans 3 frames
+  const tPos=conv3dPos%6;
+  const hPos=Math.floor(conv3dPos/6)%5;
+  const wPos=Math.floor(conv3dPos/30)%5;
+  for(let di=0;di<3;di++){
+    const fi=Math.min(tPos+di,5);
+    const ox=10+fi*gX+wPos*(fw/6);
+    const oy=100+fi*gY+hPos*(fh/6);
+    const kw=fw/6*2.4,kh=fh/6*2.4;
+    ctx.strokeStyle=`rgba(86,211,100,${.9-di*.25})`;ctx.lineWidth=2.5-di*.5;
+    ctx.strokeRect(ox,oy,kw,kh);
+    ctx.fillStyle=`rgba(86,211,100,${.1-di*.03})`;ctx.fillRect(ox,oy,kw,kh);
+  }
+
+  // ── 3D FEATURE VOLUME (right side, proper isometric box) ── declared FIRST so lines can reference
+  const vx=300,vy=30,vw=72,vh=58,vd=20;
+
+  // ── connection lines from kernel corners to feature volume left face ──
+  const kFrontFi=Math.min(tPos+2,5);
+  const kFrontOx=10+kFrontFi*gX+wPos*(fw/6);
+  const kFrontOy=100+kFrontFi*gY+hPos*(fh/6);
+  const kw2=fw/6*2.4,kh2=fh/6*2.4;
+  [[kFrontOx+kw2, kFrontOy,        vx, vy+8],
+   [kFrontOx+kw2, kFrontOy+kh2,    vx, vy+8+vh],
+   [kFrontOx+kw2, kFrontOy+kh2/2,  vx, vy+8+vh/2]
+  ].forEach(([x1,y1,x2,y2])=>{
+    const cpX=(x1+x2)/2;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.bezierCurveTo(cpX,y1,cpX,y2,x2,y2);
+    ctx.strokeStyle='rgba(86,211,100,0.55)';ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
+  });
+
+  // back face
+  ctx.fillStyle='#0a200a';ctx.strokeStyle='#1a4020';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(vx+vd,vy);ctx.lineTo(vx+vw+vd,vy);ctx.lineTo(vx+vw+vd,vy+vh);ctx.lineTo(vx+vd,vy+vh);ctx.closePath();
+  ctx.fill();ctx.stroke();
+  // top face
+  ctx.fillStyle='#0e2e0e';
+  ctx.beginPath();ctx.moveTo(vx,vy+8);ctx.lineTo(vx+vd,vy);ctx.lineTo(vx+vw+vd,vy);ctx.lineTo(vx+vw,vy+8);ctx.closePath();
+  ctx.fill();ctx.stroke();
+  // front face — draw real feature map content using scene frame
+  const fmOff=document.createElement('canvas');fmOff.width=vw;fmOff.height=vh;
+  const fctxOff=fmOff.getContext('2d');
+  const t2=conv3dPos%8;
+  const frame=genSceneFrame(curScene,t2);
+  // scale frame to box size and apply a green tint edge-detect look
+  for(let py=0;py<vh;py++) for(let px=0;px<vw;px++){
+    const sx=Math.floor(px*70/vw),sy=Math.floor(py*70/vh);
+    const fi=(sy*70+sx)*4;
+    const gray=Math.round((frame.data[fi]*0.299+frame.data[fi+1]*0.587+frame.data[fi+2]*0.114));
+    // edge-like: amplify contrast around midpoint
+    const edge=Math.min(255,Math.abs(gray-128)*2+30);
+    fctxOff.fillStyle=`rgb(${Math.round(edge*0.1)},${Math.min(255,edge)},${Math.round(edge*0.4)})`;
+    fctxOff.fillRect(px,py,1,1);
+  }
+  ctx.drawImage(fmOff,vx,vy+8,vw,vh);
+  // front face border
+  ctx.strokeStyle='#56d364';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(vx,vy+8);ctx.lineTo(vx+vw,vy+8);ctx.lineTo(vx+vw,vy+8+vh);ctx.lineTo(vx,vy+8+vh);ctx.closePath();
+  ctx.stroke();
+  // depth slice borders
+  for(let s=1;s<=3;s++){
+    ctx.strokeStyle=`rgba(86,211,100,${0.15+s*0.06})`;ctx.lineWidth=0.8;
+    ctx.strokeRect(vx+s*5,vy+8-s*3,vw,vh);
+  }
+  ctx.fillStyle='#7ee787';ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+  ctx.fillText('3D Feature Volume',vx+vw/2+10,vy+vh+26);
+  ctx.fillStyle='#484f58';ctx.font='10px sans-serif';
+  ctx.fillText("(T'×H'×W')",vx+vw/2+10,vy+vh+38);
+
+  // axes (bottom right, clean)
+  const axX=W-52,axY=H-40;
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(axX,axY);ctx.lineTo(axX-22,axY-15);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(axX,axY);ctx.lineTo(axX,axY-32);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(axX,axY);ctx.lineTo(axX+30,axY);ctx.stroke();
+  ctx.fillStyle='#f0c244';ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+  ctx.fillText('T',axX-27,axY-17);ctx.fillText('H',axX,axY-36);ctx.fillText('W',axX+36,axY+4);
+  ctx.fillStyle='#f0c244';ctx.beginPath();ctx.arc(axX,axY,3,0,Math.PI*2);ctx.fill();
+
+  const names=['Ocean','Fire','Clouds'];
+  document.getElementById('d3-info').textContent=
+    `3D kernel at time-frame ${tPos}, spatial (${hPos},${wPos}): spans frames ${tPos}–${Math.min(tPos+2,5)} → detects temporal motion in "${names[curScene]}" scene.`;
+}
+
+function toggle3DConv(){
+  if(conv3dRunning){clearInterval(conv3dT);conv3dRunning=false;document.getElementById('conv3d-btn').textContent='▶ Animate 3D conv';return}
+  conv3dPos=0;
+  conv3dRunning=true;document.getElementById('conv3d-btn').textContent='⏸ Pause';
+  conv3dT=setInterval(()=>{
+    conv3dPos++;
+    if(conv3dPos>=150){
+      conv3dPos=149;draw3DConv();
+      clearInterval(conv3dT);conv3dRunning=false;document.getElementById('conv3d-btn').textContent='▶ Animate 3D conv';
+    } else { draw3DConv(); }
+  },80);
+}
+function reset3DConv(){clearInterval(conv3dT);conv3dRunning=false;conv3dPos=0;document.getElementById('conv3d-btn').textContent='▶ Animate 3D conv';draw3DConv()}
+
+function selScene(idx){
+  curScene=idx;
+  const sceneTypes=['waves','fire','clouds'];
+  document.querySelectorAll('[id^="sbt"]').forEach((b,i)=>b.className='btn'+(i===idx?' bsel':''));
+  d3ClsType=sceneTypes[idx];
+  document.querySelectorAll('[id^="d3cls-btn-"]').forEach((b,i)=>b.className='btn'+(i===idx?' bsel':''));
+  renderFrames();resetStack();reset3DConv();
+}
+
+/* ═══ CLASSIFICATION ═══ */
+function doCls(t,idx){
+  clsType=t;
+  document.querySelectorAll('[id^="cls-btn-"]').forEach((b,i)=>b.className='btn'+(i===idx?' bsel':''));
+}
+function runCls(){
+  const m={sunset:[['Sunset',90],['Ocean',5],['Mountain',3],['City',2]],
+    city:[['City',88],['Sunset',7],['Mountain',3],['Ocean',2]],
+    ocean:[['Ocean',87],['Sunset',8],['City',3],['Mountain',2]],
+    mountain:[['Mountain',89],['Ocean',6],['Sunset',3],['City',2]]};
+  const cl=m[clsType]||m.sunset;
+  document.getElementById('rgb-cls').innerHTML=cl.map(([l,p],i)=>`
+    <div class="prob-row"><div class="prob-label">${l}</div>
+    <div class="prob-bg"><div class="prob-fill" style="width:${p}%;background:${i===0?'#1f4e79':'#21262d'}">
+    ${p>12?`<span style="font-size:11px;color:${i===0?'#79c0ff':'#8b949e'}">${p}%</span>`:''}</div></div>
+    <div class="prob-pct">${p}%</div></div>`).join('');
+}
+
+function do3DCls(t,idx){
+  d3ClsType=t;
+  document.querySelectorAll('[id^="d3cls-btn-"]').forEach((b,i)=>b.className='btn'+(i===idx?' bsel':''));
+}
+function run3DCls(){
+  const m={
+    waves:[['Ocean waves',87],['Clouds',9],['Fire',4]],
+    fire:[['Fire',91],['Ocean',6],['Clouds',3]],
+    clouds:[['Clouds',85],['Ocean',11],['Fire',4]]
+  };
+  const cl=m[d3ClsType]||m.waves;
+  document.getElementById('d3-cls').innerHTML=cl.map(([l,p],i)=>`
+    <div class="prob-row"><div class="prob-label">${l}</div>
+    <div class="prob-bg"><div class="prob-fill" style="width:${p}%;background:${i===0?'#1a4020':'#21262d'}">
+    ${p>12?`<span style="font-size:11px;color:${i===0?'#7ee787':'#8b949e'}">${p}%</span>`:''}</div></div>
+    <div class="prob-pct">${p}%</div></div>`).join('');
+}
+
+/* ═══ COMPARISON CANVASES ═══ */
+function drawCmpRGB(pos){
+  const ctx=document.getElementById('cmp-rgb-c').getContext('2d');
+  const W=420,H=260;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#0d1117';ctx.fillRect(0,0,W,H);
+  const DISP=68,k=getKernel();
+  const chColors=['#ff4444','#44cc44','#4488ff'];
+  const kx=pos%(SZ-2),ky=Math.floor(pos/(SZ-2))%(SZ-2);
+  // 3 input channel images
+  [0,1,2].forEach((ch,ci)=>{
+    const ox=6+ci*4,oy=16-ci*4;
+    const ic=document.createElement('canvas');ic.width=SZ;ic.height=SZ;
+    const ictx=ic.getContext('2d');const idat=ictx.createImageData(SZ,SZ);
+    for(let i=0;i<SZ*SZ;i++){idat.data[i*4+ch]=imgData.data[i*4+ch];idat.data[i*4+3]=255}
+    ictx.putImageData(idat,0,0);
+    ctx.drawImage(ic,ox,oy,DISP,DISP);
+    ctx.strokeStyle=chColors[ci];ctx.lineWidth=1.5;ctx.strokeRect(ox,oy,DISP,DISP);
+    // sliding kernel
+    const kpx=ox+kx*(DISP/(SZ-2)),kpy=oy+ky*(DISP/(SZ-2)),ksz=DISP/(SZ-2)*3;
+    ctx.strokeStyle='#f0c244';ctx.lineWidth=1.5;ctx.strokeRect(kpx,kpy,ksz,ksz);
+  });
+  ctx.fillStyle='#8b949e';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText('Input (H×W×3)',42,H-6);
+
+  // arrow
+  ctx.strokeStyle='#58a6ff';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(86,50);ctx.lineTo(104,50);ctx.stroke();
+  ctx.fillStyle='#58a6ff';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText('conv',95,44);
+
+  // 3 feature maps
+  const fms=[convChannel(imgData.data,0,k),convChannel(imgData.data,1,k),convChannel(imgData.data,2,k)];
+  fms.forEach((fm,ci)=>{
+    const ox=110+ci*5,oy=14-ci*5;
+    const fmC=document.createElement('canvas');fmC.width=SZ;fmC.height=SZ;
+    const fctx=fmC.getContext('2d');const fdat=fctx.createImageData(SZ,SZ);
+    for(let i=0;i<SZ*SZ;i++){
+      const flat=Math.floor(i/SZ)*(SZ-2)+i%SZ;
+      const v=flat<=pos*2?Math.min(255,Math.max(0,fm[i]+128)):0;
+      fdat.data[i*4+ci]=v;fdat.data[i*4+3]=255;
+    }
+    fctx.putImageData(fdat,0,0);
+    ctx.drawImage(fmC,ox,oy,DISP,DISP);
+    ctx.strokeStyle=chColors[ci];ctx.lineWidth=1;ctx.strokeRect(ox,oy,DISP,DISP);
+  });
+  ctx.fillStyle='#8b949e';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText('3 feature maps',146,H-18);
+
+  // sum arrow
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(196,40);ctx.lineTo(216,40);ctx.stroke();
+  ctx.fillStyle='#f0c244';ctx.font='bold 11px sans-serif';ctx.textAlign='center';ctx.fillText('Σ',206,36);
+
+  // output stacked feature maps
+  for(let i=4;i>=0;i--){
+    ctx.fillStyle=`hsl(${40+i*10},50%,${12+i*4}%)`;ctx.strokeStyle=`hsl(${40+i*10},60%,35%)`;ctx.lineWidth=1;
+    ctx.fillRect(222+i*4,14+i*3,DISP,DISP);ctx.strokeRect(222+i*4,14+i*3,DISP,DISP);
+  }
+  ctx.fillStyle='#f0c244';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText('Feature maps',256,H-6);
+  ctx.fillStyle='#484f58';ctx.font='10px sans-serif';ctx.textAlign='center';ctx.fillText('Kernel slides H × W (2D only)',W/2,H-18);
+}
+
+function drawCmp3D(pos){
+  const ctx=document.getElementById('cmp-3d-c').getContext('2d');
+  const W=420,H=260;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#0d1117';ctx.fillRect(0,0,W,H);
+  const fw=55,fh=46,gX=10,gY=-5;
+  // frame stack
+  for(let i=7;i>=0;i--){
+    const ox=8+i*gX,oy=110+i*gY;
+    const c=document.createElement('canvas');c.width=70;c.height=70;
+    c.getContext('2d').putImageData(genSceneFrame(curScene,i),0,0);
+    ctx.drawImage(c,ox,oy,fw,fh);
+    ctx.strokeStyle='#1a3d1a';ctx.lineWidth=.8;ctx.strokeRect(ox,oy,fw,fh);
+  }
+  // 3D kernel
+  const tPos=pos%6,hPos=Math.floor(pos/6)%4,wPos=Math.floor(pos/24)%4;
+  for(let di=0;di<3;di++){
+    const fi=Math.min(tPos+di,7);
+    const ox=8+fi*gX+wPos*(fw/5),oy=110+fi*gY+hPos*(fh/5);
+    const kw=fw/5*2.2,kh=fh/5*2.2;
+    ctx.strokeStyle=`rgba(86,211,100,${.9-di*.25})`;ctx.lineWidth=2.5-di*.5;
+    ctx.strokeRect(ox,oy,kw,kh);
+    ctx.fillStyle=`rgba(86,211,100,${.1-di*.03})`;ctx.fillRect(ox,oy,kw,kh);
+  }
+  ctx.fillStyle='#7ee787';ctx.font='10px sans-serif';ctx.textAlign='left';ctx.fillText('T →',12,H-8);
+
+  // arrow to output
+  ctx.strokeStyle='#56d364';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(8+7*gX+fw+8,130);ctx.lineTo(8+7*gX+fw+24,130);ctx.stroke();
+
+  // 3D output volume - isometric box
+  const vx=210,vy=80,vw=68,vh=55,vd=18;
+  ctx.fillStyle='#0a200a';ctx.strokeStyle='#1a4020';ctx.lineWidth=1;
+  ctx.beginPath();ctx.moveTo(vx+vd,vy);ctx.lineTo(vx+vw+vd,vy);ctx.lineTo(vx+vw+vd,vy+vh);ctx.lineTo(vx+vd,vy+vh);ctx.closePath();ctx.fill();ctx.stroke();
+  ctx.fillStyle='#0e2e0e';
+  ctx.beginPath();ctx.moveTo(vx,vy+7);ctx.lineTo(vx+vd,vy);ctx.lineTo(vx+vw+vd,vy);ctx.lineTo(vx+vw,vy+7);ctx.closePath();ctx.fill();ctx.stroke();
+  // front face with content
+  const fmC=document.createElement('canvas');fmC.width=68;fmC.height=55;
+  const fctx=fmC.getContext('2d');
+  const t2=pos%8;
+  const frame=genSceneFrame(curScene,t2);
+  for(let py=0;py<55;py++) for(let px=0;px<68;px++){
+    const fi=(Math.floor(py*70/55)*70+Math.floor(px*70/68))*4;
+    const v=Math.round((frame.data[fi]+frame.data[fi+1]+frame.data[fi+2])/3);
+    const edge=Math.abs(v-128);
+    fctx.fillStyle=`rgb(0,${Math.min(255,edge*2)},${Math.min(255,edge)})`;
+    fctx.fillRect(px,py,1,1);
+  }
+  ctx.drawImage(fmC,vx,vy+7,vw,vh);
+  ctx.strokeStyle='#56d364';ctx.lineWidth=1.5;
+  ctx.beginPath();ctx.moveTo(vx,vy+7);ctx.lineTo(vx+vw,vy+7);ctx.lineTo(vx+vw,vy+7+vh);ctx.lineTo(vx,vy+7+vh);ctx.closePath();ctx.stroke();
+  for(let s=1;s<=3;s++){ctx.strokeStyle=`rgba(86,211,100,${.12+s*.04})`;ctx.lineWidth=.8;ctx.strokeRect(vx+s*5,vy+7-s*3,vw,vh)}
+  ctx.fillStyle='#7ee787';ctx.font='bold 11px sans-serif';ctx.textAlign='center';ctx.fillText('3D Feature Volume',vx+vw/2+9,vy+vh+24);
+  ctx.fillStyle='#484f58';ctx.font='10px sans-serif';ctx.fillText("(T'×H'×W')",vx+vw/2+9,vy+vh+36);
+
+  // ── connection lines from highlighted kernel to output volume ──
+  const kFrontFi2=Math.min(tPos+2,7);
+  const koxF=8+kFrontFi2*gX+wPos*(fw/5),koyF=110+kFrontFi2*gY+hPos*(fh/5);
+  const kw3=fw/5*2.2,kh3=fh/5*2.2;
+  [[koxF+kw3, koyF,       vx, vy+7],
+   [koxF+kw3, koyF+kh3,   vx, vy+7+vh],
+   [koxF+kw3, koyF+kh3/2, vx, vy+7+vh/2]
+  ].forEach(([x1,y1,x2,y2])=>{
+    const cpX=(x1+x2)/2;
+    ctx.beginPath();ctx.moveTo(x1,y1);ctx.bezierCurveTo(cpX,y1,cpX,y2,x2,y2);
+    ctx.strokeStyle='rgba(86,211,100,0.5)';ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.stroke();ctx.setLineDash([]);
+  });
+
+  // axes (fixed, clear)
+  const axX=W-50,axY=H-38;
+  ctx.strokeStyle='#f0c244';ctx.lineWidth=2;
+  ctx.beginPath();ctx.moveTo(axX,axY);ctx.lineTo(axX-20,axY-14);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(axX,axY);ctx.lineTo(axX,axY-30);ctx.stroke();
+  ctx.beginPath();ctx.moveTo(axX,axY);ctx.lineTo(axX+28,axY);ctx.stroke();
+  ctx.fillStyle='#f0c244';ctx.font='bold 11px sans-serif';ctx.textAlign='center';
+  ctx.fillText('T',axX-25,axY-16);ctx.fillText('H',axX,axY-34);ctx.fillText('W',axX+34,axY+4);
+  ctx.fillStyle='#f0c244';ctx.beginPath();ctx.arc(axX,axY,3,0,Math.PI*2);ctx.fill();
+
+  ctx.fillStyle='#484f58';ctx.font='10px sans-serif';ctx.textAlign='center';
+  ctx.fillText('3D kernel slides T × H × W',W/2,H-8);
+}
+
+function runCmpAnim(){
+  if(cmpRunning)return;cmpRunning=true;
+  cmpT=setInterval(()=>{cmpPos=(cmpPos+2)%((SZ-2)*(SZ-2));drawCmpRGB(cmpPos%(SZ-2)*(SZ-2));drawCmp3D(Math.floor(cmpPos/10)%96)},50);
+}
+function stopCmpAnim(){clearInterval(cmpT);cmpRunning=false}
+
+/* ═══ TABS ═══ */
+function sw(id){
+  document.querySelectorAll('.tab').forEach((t,i)=>t.classList.toggle('active',['rgb','d3','cmp'][i]===id));
+  document.querySelectorAll('.tc').forEach(c=>c.classList.remove('active'));
+  document.getElementById('tab-'+id).classList.add('active');
+  if(id==='cmp'){drawCmpRGB(0);drawCmp3D(0)}
+}
+
+/* ═══ INIT ═══ */
+imgData=genImg(0);
+clsType='sunset';
+document.getElementById('c-orig').getContext('2d').putImageData(imgData,0,0);
+drawChannel('c-r',0,0);drawChannel('c-g',1,1);drawChannel('c-b',2,2);
+computeAllFeatures();
+// init classify button highlight
+document.querySelectorAll('[id^="cls-btn-"]').forEach((b,i)=>b.className='btn'+(i===0?' bsel':''));
+renderFrames();drawStack();draw3DConv();
+</script>
+</body>
+</html>

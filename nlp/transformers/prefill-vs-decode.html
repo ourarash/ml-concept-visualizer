@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #17 by Azrin Khan (@azrin984): feat: Add Prefill vs Decode Visualizer. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Transformer Inference: Prefill vs Decode Visualizer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;700;800&display=swap');
+
+    :root {
+      --ink: #0f172a;
+      --muted: #64748b;
+      --line: #e2e8f0;
+      --blue: #2563eb;
+      --violet: #7c3aed;
+      --cyan: #0891b2;
+      --green: #16a34a;
+      --amber: #d97706;
+      --rose: #e11d48;
+      --bg: #f8fafc;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at 8% 0%, rgba(37, 99, 235, 0.13), transparent 28rem),
+        radial-gradient(circle at 94% 5%, rgba(124, 58, 237, 0.11), transparent 30rem),
+        linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+    }
+
+    .mono { font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+    .glass {
+      background: rgba(255, 255, 255, 0.92);
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+      backdrop-filter: blur(10px);
+    }
+
+    .tiny-label {
+      font-size: 0.68rem;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+      font-weight: 900;
+    }
+
+    .token {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 58px;
+      padding: 0.55rem 0.7rem;
+      border-radius: 1rem;
+      border: 2px solid var(--line);
+      background: white;
+      font-weight: 900;
+      font-size: 0.82rem;
+      box-shadow: 0 9px 20px rgba(15, 23, 42, 0.07);
+      transition: all 250ms ease;
+      position: relative;
+    }
+
+    .token.prompt { border-color: rgba(37,99,235,0.25); color: #1d4ed8; background: #eff6ff; }
+    .token.generated { border-color: rgba(124,58,237,0.25); color: #6d28d9; background: #f5f3ff; }
+    .token.future { opacity: 0.22; transform: scale(0.94); filter: grayscale(0.6); }
+    .token.active { transform: translateY(-5px) scale(1.04); box-shadow: 0 18px 28px rgba(37, 99, 235, 0.14); }
+    .token.new { animation: pop 380ms ease both; border-color: rgba(22,163,74,0.7); background: #f0fdf4; color: #15803d; }
+
+    .phase-card {
+      border: 1px solid var(--line);
+      border-radius: 1.25rem;
+      padding: 1rem;
+      background: white;
+      transition: all 220ms ease;
+    }
+
+    .phase-card.active {
+      border-color: rgba(37, 99, 235, 0.55);
+      background: linear-gradient(135deg, #eff6ff, #ffffff);
+      box-shadow: 0 14px 28px rgba(37, 99, 235, 0.10);
+      transform: translateY(-2px);
+    }
+
+    .phase-card.decode-active {
+      border-color: rgba(124, 58, 237, 0.55);
+      background: linear-gradient(135deg, #f5f3ff, #ffffff);
+      box-shadow: 0 14px 28px rgba(124, 58, 237, 0.10);
+    }
+
+    .matrix-cell {
+      aspect-ratio: 1;
+      min-width: 20px;
+      border-radius: 0.35rem;
+      border: 1px solid rgba(226, 232, 240, 0.95);
+      display: grid;
+      place-items: center;
+      font-size: 0.62rem;
+      font-weight: 900;
+      transition: all 180ms ease;
+    }
+
+    .mask-allowed { background: #dbeafe; color: #1d4ed8; border-color: #bfdbfe; }
+    .mask-future {
+      background: repeating-linear-gradient(45deg, #f8fafc, #f8fafc 4px, #e2e8f0 4px, #e2e8f0 8px);
+      color: #94a3b8;
+    }
+    .mask-off { background: #ffffff; color: #cbd5e1; }
+
+    .kv-slot {
+      min-height: 64px;
+      border: 1px solid var(--line);
+      border-radius: 1rem;
+      background: #f8fafc;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      gap: 0.35rem;
+      transition: all 220ms ease;
+    }
+
+    .kv-slot.filled {
+      background: linear-gradient(135deg, #ecfeff, #f0fdf4);
+      border-color: rgba(8, 145, 178, 0.35);
+      box-shadow: inset 0 0 0 1px rgba(22, 163, 74, 0.08);
+    }
+
+    .kv-slot.recomputing {
+      background: repeating-linear-gradient(45deg, #fef2f2, #fef2f2 6px, #fff5f5 6px, #fff5f5 12px);
+      border-color: rgba(239, 68, 68, 0.4);
+      border-style: dashed;
+    }
+
+    .kv-slot.new { animation: cachePop 520ms ease both; }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      border-radius: 999px;
+      border: 1px solid var(--line);
+      background: white;
+      padding: 0.32rem 0.62rem;
+      font-size: 0.72rem;
+      font-weight: 900;
+      color: #334155;
+      white-space: nowrap;
+    }
+
+    .bar-shell {
+      height: 0.65rem;
+      border-radius: 999px;
+      overflow: hidden;
+      background: #e2e8f0;
+    }
+
+    .bar {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      transition: width 340ms ease;
+    }
+
+    .attention-line {
+      stroke-dasharray: 5;
+      animation: dash 14s linear infinite;
+    }
+
+    .btn {
+      border-radius: 1rem;
+      padding: 0.7rem 0.95rem;
+      font-weight: 900;
+      font-size: 0.83rem;
+      transition: all 180ms ease;
+    }
+
+    .btn:hover { transform: translateY(-1px); box-shadow: 0 12px 22px rgba(15, 23, 42, 0.12); }
+    .btn:disabled { opacity: 0.35; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    @media (max-width: 720px) {
+      body { padding: 0; }
+      .token { min-width: 48px; padding: 0.45rem 0.55rem; font-size: 0.74rem; }
+    }
+  </style>
+</head>
+<body class="p-4 lg:p-8">
+  <main class="max-w-[90rem] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-6">
+    
+    <!-- LEFT SIDEBAR: Header & Controls -->
+    <aside class="lg:col-span-4 space-y-6">
+      <div class="glass rounded-3xl p-6 sm:p-7 flex flex-col gap-6 lg:sticky lg:top-8">
+        <div>
+          <h1 class="text-3xl xl:text-4xl font-black tracking-tight text-slate-950 leading-tight">
+            Transformer Inference: <br/><span class="text-blue-600">Prefill</span> vs <span class="text-violet-600">Decode</span>
+          </h1>
+          <p class="mt-4 text-sm text-slate-600 leading-relaxed font-semibold">
+            Prefill processes the known prompt in parallel, then decode generates new tokens one at a time using cached history.
+          </p>
+        </div>
+        <div class="flex flex-col items-stretch gap-2 mt-2">
+          <button id="nextBtn" class="btn bg-slate-950 text-white">Next Step →</button>
+          <div class="grid grid-cols-2 gap-2">
+            <button id="prevBtn" class="btn border border-slate-200 bg-white text-slate-700">← Back</button>
+            <button id="resetBtn" class="btn border border-slate-200 bg-white text-slate-700">Reset</button>
+          </div>
+          <button id="cacheToggle" class="btn bg-blue-600 text-white mt-2">KV Cache ON</button>
+        </div>
+      </div>
+    </aside>
+
+    <!-- MAIN COLUMN: Visualizations & Math -->
+    <section class="lg:col-span-8 space-y-6">
+      <div class="glass rounded-3xl p-5 sm:p-6">
+        
+        <!-- Phase Cards -->
+        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+          <div id="trainingCard" class="phase-card">
+            <div class="tiny-label text-amber-600">Training reference</div>
+            <h3 class="text-lg font-black mt-1">Masked parallel prediction</h3>
+            <p class="text-xs text-slate-600 mt-2">Full target sequence can be fed at once. The causal mask blocks future positions.</p>
+          </div>
+          <div id="prefillCard" class="phase-card">
+            <div class="tiny-label text-blue-600">Inference phase 1</div>
+            <h3 class="text-lg font-black mt-1">Prefill</h3>
+            <p class="text-xs text-slate-600 mt-2">Process all prompt tokens together and create the initial K/V cache.</p>
+          </div>
+          <div id="decodeCard" class="phase-card">
+            <div class="tiny-label text-violet-600">Inference phase 2</div>
+            <h3 class="text-lg font-black mt-1">Decode</h3>
+            <p class="text-xs text-slate-600 mt-2">Generate one token at a time. Each new Query reads prior cached K/V.</p>
+          </div>
+        </div>
+
+        <!-- Step Info (Moved here and made horizontal) -->
+        <div class="flex flex-col md:flex-row md:items-start justify-between gap-4 px-2 mt-8 mb-5">
+          <div class="flex-1">
+            <div id="phaseKicker" class="tiny-label text-indigo-600 uppercase tracking-widest font-black">STEP 0: TRAINING REFERENCE</div>
+            <h2 id="phaseTitle" class="text-2xl sm:text-3xl font-black text-slate-900 mt-1 tracking-tight">Training-time masked attention</h2>
+            <p id="phaseDesc" class="mt-2 text-sm text-slate-600 leading-relaxed font-medium max-w-2xl">
+              During training, masked self-attention allows parallel predictions while preventing future-token cheating.
+            </p>
+          </div>
+          <div class="flex flex-row md:flex-col gap-2 shrink-0 mt-2 md:mt-0">
+            <span id="cacheStatus" class="pill shadow-sm">KV cache enabled</span>
+            <span id="lookRule" class="pill shadow-sm">Rule: left only</span>
+          </div>
+        </div>
+
+        <!-- Visualizer Canvas -->
+        <div class="relative min-h-[260px] rounded-3xl border-2 border-slate-200 bg-white shadow-xl p-8 flex items-center justify-center overflow-hidden transition-all duration-300 ring-4 ring-slate-50">
+          <svg id="attentionSvg" class="absolute inset-0 w-full h-full pointer-events-none overflow-visible"></svg>
+          <div id="tokenRow" class="relative z-10 flex flex-wrap justify-center gap-4"></div>
+        </div>
+      </div>
+
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div class="glass rounded-3xl p-5 sm:p-6 flex flex-col">
+          <div class="flex items-start justify-between gap-3 mb-4">
+            <div>
+              <div class="tiny-label text-cyan-600">K/V cache Memory</div>
+              <h3 class="text-xl font-black mt-1">What is stored?</h3>
+            </div>
+            <span id="cacheCount" class="pill">0 cached</span>
+          </div>
+          <div id="cacheGrid" class="grid grid-cols-2 sm:grid-cols-3 gap-3 flex-grow"></div>
+          <p id="cacheExplanation" class="mt-4 text-sm text-slate-600 leading-relaxed">
+            Cache is empty in the training reference. It becomes important during inference.
+          </p>
+        </div>
+
+        <div class="glass rounded-3xl p-5 sm:p-6 flex flex-col">
+          <div class="tiny-label text-blue-600">Causal mask</div>
+          <h3 class="text-xl font-black mt-1 mb-3">Who can each position attend to?</h3>
+          <div id="maskGrid" class="grid gap-1 max-w-[280px] mx-auto flex-grow"></div>
+          <div class="mt-4 grid grid-cols-3 gap-2 text-center">
+            <div class="rounded-xl bg-blue-50 border border-blue-100 p-2">
+              <div class="text-lg font-black text-blue-700">1</div>
+              <div class="text-[10px] font-bold text-blue-700 uppercase">Allowed</div>
+            </div>
+            <div class="rounded-xl bg-slate-50 border border-slate-200 p-2">
+              <div class="text-lg font-black text-slate-400">×</div>
+              <div class="text-[10px] font-bold text-slate-500 uppercase">Future masked</div>
+            </div>
+            <div class="rounded-xl bg-white border border-slate-200 p-2">
+              <div class="text-lg font-black text-slate-400">-</div>
+              <div class="text-[10px] font-bold text-slate-500 uppercase">Not active</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Horizontal Math & Cost blocks -->
+      <div class="grid grid-cols-1 xl:grid-cols-2 gap-6">
+        <div class="glass rounded-3xl p-5 sm:p-6 flex flex-col">
+          <div class="tiny-label text-slate-500">Shape tracker</div>
+          <h3 class="text-xl font-black mt-1 mb-3">Attention Math</h3>
+          
+          <div class="bg-slate-50 border border-slate-200 rounded-lg p-3 text-xs sm:text-sm font-mono text-slate-800 mb-4 text-center overflow-x-auto">
+            Attn(Q, K, V) = softmax( <span class="text-blue-700 font-bold">Q</span><span class="text-cyan-700 font-bold">K</span><sup>T</sup> / √d ) <span class="text-cyan-700 font-bold">V</span>
+          </div>
+
+          <div class="space-y-3 mono text-xs">
+            <div class="flex items-center justify-between rounded-2xl bg-blue-50 border border-blue-100 p-3">
+              <span class="font-black text-blue-700">Q</span>
+              <span id="qShape" class="font-black text-slate-700">T × d</span>
+            </div>
+            <div class="flex items-center justify-between rounded-2xl bg-cyan-50 border border-cyan-100 p-3">
+              <span class="font-black text-cyan-700">K, V available</span>
+              <span id="kvShape" class="font-black text-slate-700">T × d</span>
+            </div>
+            <div class="flex items-center justify-between rounded-2xl bg-violet-50 border border-violet-100 p-3">
+              <span class="font-black text-violet-700">Attention scores</span>
+              <span id="scoreShape" class="font-black text-slate-700">T × T</span>
+            </div>
+          </div>
+          <p id="shapeExplanation" class="mt-4 text-xs text-slate-600 leading-relaxed flex-grow">
+            In training and prefill, many positions can be processed together. In decode, the current token has one Query but attends across all cached K/V positions.
+          </p>
+        </div>
+
+        <div class="glass rounded-3xl p-5 sm:p-6 flex flex-col">
+          <div class="tiny-label text-slate-500">Simplified cost model</div>
+          <h3 class="text-xl font-black mt-1 mb-4">What changes?</h3>
+          <div class="space-y-5">
+            <div>
+              <div class="flex justify-between text-xs font-black uppercase mb-2 text-slate-500">
+                <span>Parallel work</span><span id="parallelVal">0 tokens</span>
+              </div>
+              <div class="bar-shell"><div id="parallelBar" class="bar bg-blue-600"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-black uppercase mb-2 text-slate-500">
+                <span>Sequential step</span><span id="sequentialVal">0</span>
+              </div>
+              <div class="bar-shell"><div id="sequentialBar" class="bar bg-violet-600"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-black uppercase mb-2 text-slate-500">
+                <span>K/V reads for Attn</span><span id="readVal">0 tokens</span>
+              </div>
+              <div class="bar-shell"><div id="readBar" class="bar bg-cyan-600"></div></div>
+            </div>
+            <div>
+              <div class="flex justify-between text-xs font-black uppercase mb-2 text-slate-500">
+                <span>Recomputes Avoided</span><span id="savedVal">0</span>
+              </div>
+              <div class="bar-shell"><div id="savedBar" class="bar bg-green-600"></div></div>
+            </div>
+          </div>
+          <div id="diagnostic" class="mt-auto pt-5 bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-xs text-emerald-900 leading-relaxed">
+            💡 <strong>Insight:</strong> Start at the training reference. Then step into prefill and decode to see how the computational bottleneck shifts.
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <section class="max-w-[90rem] mx-auto mt-6 glass rounded-3xl p-6 sm:p-8 mb-12">
+    <div class="font-semibold text-slate-900 mb-3 text-2xl tracking-tight">📚 How this connects to LLM Architecture</div>
+    <p class="text-sm text-slate-700 mb-4 leading-relaxed">
+      Understanding the shift from Prefill to Decode is critical for deploying modern LLMs. Strategies like batching, speculative decoding, and low-rank KV compression exist entirely to solve the bottlenecks you can see visually above.
+    </p>
+
+    <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mt-6">
+      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+        <div class="font-bold text-blue-700 mb-2">1. The O(N²) vs O(N) Problem</div>
+        <div class="text-sm text-slate-600 space-y-2">
+          <p>Without a KV Cache, calculating the attention for the <i>N</i><sup>th</sup> token requires passing all <i>N</i> tokens through the model again (an <i>O(N<sup>2</sup>)</i> operation over the sequence).</p>
+          <p>By saving the K and V matrices (as seen in the <strong>Cache Memory</strong> grid), we only calculate Q for the *newest* token, making each step <i>O(1 &times; N)</i>.</p>
+        </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+        <div class="font-bold text-violet-700 mb-2">2. The "Memory Wall" in Decode</div>
+        <div class="text-sm text-slate-600 space-y-2">
+          <p>Look at the <strong>Cost Model</strong> during Decode: Parallel work drops to 1, but "K/V reads" continues to grow.</p>
+          <p>During Decode, the GPU's math units are mostly idle because they are waiting to read the massive KV cache from memory. Prefill is <em>compute-bound</em>, but Decode is notoriously <em>memory-bandwidth bound</em>.</p>
+        </div>
+      </div>
+
+      <div class="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+        <div class="font-bold text-amber-700 mb-2">3. Why Context Windows Cost RAM</div>
+        <div class="text-sm text-slate-600 space-y-2">
+          <p>Every token in the KV slot stores vectors for every layer and every attention head. In a 70B parameter model, a single token might take ~1MB of RAM.</p>
+          <p>A 128,000 token context window requires over 100GB of VRAM just for the cache! This is why architectures like Multi-Query Attention (MQA) and MLA were invented.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script>
+    const promptTokens = ["The", "cat", "sat", "on"];
+    const generatedTokens = ["the", "mat", "."];
+    const trainingTargets = ["Le", "chat", "est", "assis"];
+    const maxStep = 1 + 1 + generatedTokens.length;
+
+    let step = 0;
+    let cacheOn = true;
+
+    const tokenRow = document.getElementById("tokenRow");
+    const cacheGrid = document.getElementById("cacheGrid");
+    const maskGrid = document.getElementById("maskGrid");
+    const attentionSvg = document.getElementById("attentionSvg");
+
+    const phaseKicker = document.getElementById("phaseKicker");
+    const phaseTitle = document.getElementById("phaseTitle");
+    const phaseDesc = document.getElementById("phaseDesc");
+
+    const cacheStatus = document.getElementById("cacheStatus");
+    const cacheToggle = document.getElementById("cacheToggle");
+    const cacheCount = document.getElementById("cacheCount");
+    const cacheExplanation = document.getElementById("cacheExplanation");
+
+    const qShape = document.getElementById("qShape");
+    const kvShape = document.getElementById("kvShape");
+    const scoreShape = document.getElementById("scoreShape");
+    const shapeExplanation = document.getElementById("shapeExplanation");
+
+    const parallelVal = document.getElementById("parallelVal");
+    const sequentialVal = document.getElementById("sequentialVal");
+    const readVal = document.getElementById("readVal");
+    const savedVal = document.getElementById("savedVal");
+    const parallelBar = document.getElementById("parallelBar");
+    const sequentialBar = document.getElementById("sequentialBar");
+    const readBar = document.getElementById("readBar");
+    const savedBar = document.getElementById("savedBar");
+    const diagnostic = document.getElementById("diagnostic");
+
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const resetBtn = document.getElementById("resetBtn");
+
+    function phase() {
+      if (step === 0) return "training";
+      if (step === 1) return "prefill";
+      return "decode";
+    }
+
+    function decodeIndex() {
+      return Math.max(0, step - 2);
+    }
+
+    function activeTokens() {
+      if (phase() === "training") return trainingTargets;
+      if (phase() === "prefill") return promptTokens;
+      return [...promptTokens, ...generatedTokens.slice(0, decodeIndex() + 1)];
+    }
+
+    function allInferenceTokens() {
+      return [...promptTokens, ...generatedTokens];
+    }
+
+    function cachedCount() {
+      if (phase() === "training") return 0;
+      if (phase() === "prefill") return promptTokens.length;
+      return promptTokens.length + decodeIndex() + 1;
+    }
+
+    function renderPhase() {
+      document.getElementById("trainingCard").className = "phase-card" + (phase() === "training" ? " active" : "");
+      document.getElementById("prefillCard").className = "phase-card" + (phase() === "prefill" ? " active" : "");
+      document.getElementById("decodeCard").className = "phase-card" + (phase() === "decode" ? " active decode-active" : "");
+
+      if (phase() === "training") {
+        phaseKicker.textContent = "STEP 0: TRAINING REFERENCE";
+        phaseKicker.className = "tiny-label text-amber-600 uppercase tracking-widest font-black";
+        phaseTitle.textContent = "Training-time masked attention";
+        phaseDesc.textContent = "The target sequence is known during training, so the decoder can process many positions at once. The causal mask prevents cheating.";
+        diagnostic.innerHTML = "💡 <strong>Insight:</strong> Training parallelism is only possible because the correct shifted outputs are already available. The model calculates the loss for the entire sentence simultaneously.";
+      } else if (phase() === "prefill") {
+        phaseKicker.textContent = "STEP 1: INFERENCE PHASE 1";
+        phaseKicker.className = "tiny-label text-blue-600 uppercase tracking-widest font-black";
+        phaseTitle.textContent = "Prefill: Prompt Processing";
+        phaseDesc.textContent = "The prompt is already known, so the model runs a parallel forward pass over all prompt tokens and stores their Keys and Values in the cache.";
+        diagnostic.innerHTML = "💡 <strong>Insight:</strong> Prefill is <strong>compute-bound</strong>. The GPU is very happy here because it can utilize its massive parallel matrix-multiplication cores across the entire prompt sequence.";
+      } else {
+        const newTok = generatedTokens[decodeIndex()];
+        phaseKicker.textContent = `STEP ${step}: INFERENCE PHASE 2`;
+        phaseKicker.className = "tiny-label text-violet-600 uppercase tracking-widest font-black";
+        phaseTitle.textContent = `Decode: Generate "${newTok}" sequentially`;
+        phaseDesc.textContent = "Future tokens are unknown, so generation is sequential: compute one token, append it to the cache, repeat.";
+        diagnostic.innerHTML = cacheOn
+          ? "💡 <strong>Insight:</strong> Decode is <strong>memory-bandwidth bound</strong>. The GPU parallel cores sit idle while waiting to read the entire prior KV Cache from RAM just to generate one token."
+          : "🚨 <strong>Warning:</strong> Without Cache, the model must re-run the entire sequence history (O(N²)) just to predict the next word. This is why KV caching is mandatory.";
+      }
+    }
+
+    function renderTokens() {
+      tokenRow.innerHTML = "";
+      const tokens = phase() === "training" ? trainingTargets : allInferenceTokens();
+      const visible = activeTokens().length;
+
+      tokens.forEach((tok, i) => {
+        const el = document.createElement("div");
+        const isPrompt = phase() === "prefill" || (phase() === "decode" && i < promptTokens.length);
+        const isVisible = i < visible;
+        el.className = "token mono " + (isPrompt ? "prompt " : "generated ");
+        if (!isVisible) el.classList.add("future");
+        if (isVisible && i === visible - 1) el.classList.add("active");
+        if (phase() === "decode" && isVisible && i === visible - 1) el.classList.add("new");
+        el.id = "tok-" + i;
+        el.innerHTML = `${tok}<span class="absolute -bottom-5 text-[9px] font-black text-slate-400">${i}</span>`;
+        tokenRow.appendChild(el);
+      });
+
+      window.setTimeout(drawAttention, 70);
+    }
+
+    function drawAttention() {
+      attentionSvg.innerHTML = "";
+      const visible = activeTokens().length;
+      if (visible === 0) return;
+
+      const targetIndex = phase() === "training" ? Math.min(2, visible - 1) : visible - 1;
+      const target = document.getElementById("tok-" + targetIndex);
+      if (!target) return;
+
+      const svgRect = attentionSvg.getBoundingClientRect();
+      const targetRect = target.getBoundingClientRect();
+      const tx = targetRect.left + targetRect.width / 2 - svgRect.left;
+      const ty = targetRect.top - svgRect.top;
+
+      for (let i = 0; i <= targetIndex; i++) {
+        const src = document.getElementById("tok-" + i);
+        if (!src) continue;
+        const srcRect = src.getBoundingClientRect();
+        const sx = srcRect.left + srcRect.width / 2 - svgRect.left;
+        const sy = srcRect.top - svgRect.top;
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        
+        const topY = Math.min(ty, sy);
+        const lift = Math.max(40, Math.abs(tx - sx) * 0.15);
+        const controlY = Math.max(10, topY - lift);
+        
+        path.setAttribute("d", `M ${tx} ${ty} Q ${(tx + sx) / 2} ${controlY} ${sx} ${sy}`);
+        path.setAttribute("fill", "none");
+        path.setAttribute("stroke", phase() === "decode" ? "rgba(124,58,237,0.35)" : "rgba(37,99,235,0.28)");
+        path.setAttribute("stroke-width", i === targetIndex ? "2.6" : "1.6");
+        path.classList.add("attention-line");
+        attentionSvg.appendChild(path);
+      }
+    }
+
+    function renderMask() {
+      const n = phase() === "training" ? trainingTargets.length : allInferenceTokens().length;
+      const visible = activeTokens().length;
+      maskGrid.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+      maskGrid.innerHTML = "";
+
+      for (let r = 0; r < n; r++) {
+        for (let c = 0; c < n; c++) {
+          const cell = document.createElement("div");
+          cell.className = "matrix-cell";
+          if (r >= visible || c >= visible) {
+            cell.classList.add("mask-off");
+            cell.textContent = "-";
+          } else if (c <= r) {
+            cell.classList.add("mask-allowed");
+            cell.textContent = "1";
+          } else {
+            cell.classList.add("mask-future");
+            cell.textContent = "×";
+          }
+          maskGrid.appendChild(cell);
+        }
+      }
+    }
+
+    function renderCache() {
+      const total = allInferenceTokens().length;
+      const cached = cachedCount();
+      const tokens = allInferenceTokens();
+      cacheGrid.innerHTML = "";
+
+      tokens.forEach((tok, i) => {
+        const cell = document.createElement("div");
+        cell.className = "kv-slot";
+        
+        const isCurrentlyComputing = (phase() === "decode" && i === cached - 1);
+        const isOldRecomputing = (!cacheOn && phase() === "decode" && i < cached - 1);
+
+        if (i < cached) {
+          if (isOldRecomputing) {
+            cell.classList.add("recomputing");
+            cell.innerHTML = `<span class="font-black text-red-500 mono">${tok}</span><div class="text-[9px] text-red-500 uppercase font-black tracking-widest mt-1">Recomputed</div>`;
+          } else {
+            cell.classList.add("filled");
+            if (isCurrentlyComputing) cell.classList.add("new");
+            cell.innerHTML = `<span class="font-black text-slate-500 mono">${tok}</span><div class="flex gap-1"><span class="pill py-0 px-2 text-[10px]">K</span><span class="pill py-0 px-2 text-[10px]">V</span></div>`;
+          }
+        } else {
+          cell.innerHTML = `<span class="text-slate-300 font-black">empty</span>`;
+        }
+
+        cacheGrid.appendChild(cell);
+      });
+
+      cacheCount.textContent = cacheOn || phase() !== "decode" ? `${cached}/${total} cached` : `0/${total} cached`;
+      cacheStatus.textContent = cacheOn ? "KV cache enabled" : "KV cache disabled";
+      cacheToggle.textContent = cacheOn ? "KV Cache ON" : "KV Cache OFF";
+      cacheToggle.className = cacheOn ? "btn bg-blue-600 text-white mt-2" : "btn bg-amber-100 text-amber-800 border border-amber-200 mt-2";
+
+      if (phase() === "training") {
+        cacheExplanation.textContent = "Training usually focuses on the full sequence loss. KV cache is an inference optimization, so this reference stage leaves the cache empty.";
+      } else if (phase() === "prefill") {
+        cacheExplanation.textContent = "Prefill writes K/V entries for every prompt token simultaneously. The first generated token can immediately attend over the full prompt.";
+      } else {
+        cacheExplanation.textContent = cacheOn
+          ? "Decode appends one new K/V entry per generated token and reuses all older entries."
+          : "With cache disabled, all old tokens must run back through the entire model to compute K/V every step, wasting massive compute.";
+      }
+    }
+
+    function renderShapesAndCost() {
+      const visible = activeTokens().length;
+      const cached = cachedCount();
+      const maxN = allInferenceTokens().length;
+
+      let parallel = 0;
+      let sequential = 0;
+      let reads = 0;
+      let saved = 0;
+
+      if (phase() === "training") {
+        qShape.textContent = `${visible} × d`;
+        kvShape.textContent = `${visible} × d`;
+        scoreShape.textContent = `${visible} × ${visible}`;
+        shapeExplanation.textContent = "Training uses a full masked attention matrix. Positions are computed together, but future positions are blocked by the causal mask.";
+        parallel = visible;
+        sequential = 0;
+        reads = visible;
+        saved = 0;
+      } else if (phase() === "prefill") {
+        qShape.textContent = `${visible} × d`;
+        kvShape.textContent = `${visible} × d stored`;
+        scoreShape.textContent = `${visible} × ${visible}`;
+        shapeExplanation.textContent = "Prefill acts like full-sequence attention over the known prompt, and it produces the initial KV cache.";
+        parallel = visible;
+        sequential = 0;
+        reads = visible;
+        saved = 0;
+      } else {
+        qShape.textContent = `1 × d`;
+        kvShape.textContent = cacheOn ? `${cached} × d cached` : `${cached} × d recomputed`;
+        scoreShape.textContent = `1 × ${cached}`;
+        shapeExplanation.textContent = "Decode has one current Query. It attends across all Keys and Values from the prompt and previous generated tokens.";
+        parallel = 1;
+        sequential = decodeIndex() + 1;
+        reads = cached;
+        saved = cacheOn ? Math.max(0, cached - 1) : 0;
+      }
+
+      parallelVal.textContent = `${parallel} token${parallel === 1 ? "" : "s"}`;
+      sequentialVal.textContent = phase() === "decode" ? `token ${sequential}` : "0";
+      readVal.textContent = `${reads} token${reads === 1 ? "" : "s"}`;
+      savedVal.textContent = `${saved} K/V`;
+
+      parallelBar.style.width = `${Math.min(100, (parallel / maxN) * 100)}%`;
+      sequentialBar.style.width = `${phase() === "decode" ? Math.min(100, (sequential / generatedTokens.length) * 100) : 0}%`;
+      readBar.style.width = `${Math.min(100, (reads / maxN) * 100)}%`;
+      savedBar.style.width = `${Math.min(100, (saved / maxN) * 100)}%`;
+      savedBar.className = "bar " + (cacheOn ? "bg-green-600" : "bg-slate-300");
+    }
+
+    function updateButtons() {
+      prevBtn.disabled = step === 0;
+      nextBtn.disabled = step === maxStep - 1;
+    }
+
+    function update() {
+      renderPhase();
+      renderTokens();
+      renderMask();
+      renderCache();
+      renderShapesAndCost();
+      updateButtons();
+    }
+
+    nextBtn.addEventListener("click", () => {
+      step = Math.min(maxStep - 1, step + 1);
+      update();
+    });
+
+    prevBtn.addEventListener("click", () => {
+      step = Math.max(0, step - 1);
+      update();
+    });
+
+    resetBtn.addEventListener("click", () => {
+      step = 0;
+      cacheOn = true;
+      update();
+    });
+
+    cacheToggle.addEventListener("click", () => {
+      cacheOn = !cacheOn;
+      update();
+    });
+
+    window.addEventListener("resize", drawAttention);
+    update();
+  </script>
+</body>
+</html>

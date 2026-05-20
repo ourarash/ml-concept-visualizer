@@ -1,0 +1,2012 @@
+<!doctype html>
+<!-- Source: Integrated from PR #54 by Mohith Suresh (@mohith-suresh): feat: add Regression Model Zoo & Outlier Sensitivity visualizer. -->
+<!-- Brief: Compare linear, polynomial, decision-tree, and SVR fits on shared data and stress-test them with outliers. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Regression Model Zoo & Outlier Sensitivity</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        window.MathJax = {
+            tex: { inlineMath: [["$", "$"], ["\\(", "\\)"]], displayMath: [["$$", "$$"], ["\\[", "\\]"]] }
+        };
+    </script>
+    <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        :root {
+            color-scheme: light;
+            --page-bg: #eef4f8;
+            --surface: #ffffff;
+            --surface-soft: rgba(255, 255, 255, 0.92);
+            --border: #d7e2eb;
+            --border-strong: #bfdbfe;
+            --text: #0f172a;
+            --muted: #475569;
+            --muted-soft: #64748b;
+            --shadow: 0 20px 48px rgba(15, 23, 42, 0.1);
+            --shadow-soft: 0 10px 24px rgba(15, 23, 42, 0.08);
+            --linear-color: #2563eb;
+            --poly-color: #f97316;
+            --tree-color: #16a34a;
+            --svr-color: #9333ea;
+            --truth-color: #475569;
+            --baseline-color: #94a3b8;
+            --outlier-color: #dc2626;
+            --point-color: #1f2937;
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            background:
+                radial-gradient(circle at top left, rgba(56, 189, 248, 0.16), transparent 24%),
+                radial-gradient(circle at top right, rgba(168, 85, 247, 0.14), transparent 22%),
+                linear-gradient(180deg, #f8fbfd 0%, var(--page-bg) 100%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+
+        .hero-wrap {
+            position: relative;
+            overflow: hidden;
+            background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 48%, #6d28d9 100%);
+            color: white;
+        }
+
+        .hero-wrap::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background:
+                radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.16), transparent 24%),
+                radial-gradient(circle at 82% 12%, rgba(167, 139, 250, 0.18), transparent 20%);
+            pointer-events: none;
+        }
+
+        .hero-kicker {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.45rem 0.85rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            background: rgba(255, 255, 255, 0.08);
+            font-size: 0.74rem;
+            font-weight: 700;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: #ddd6fe;
+        }
+
+        .toc {
+            position: sticky;
+            top: 0.75rem;
+            z-index: 30;
+            display: flex;
+            gap: 0.5rem;
+            overflow-x: auto;
+            padding: 0.7rem 0.9rem;
+            border: 1px solid var(--border);
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.92);
+            box-shadow: var(--shadow-soft);
+            backdrop-filter: blur(14px);
+            scrollbar-width: none;
+        }
+
+        .toc::-webkit-scrollbar { display: none; }
+
+        .toc a {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            white-space: nowrap;
+            padding: 0.4rem 0.85rem;
+            border-radius: 999px;
+            color: #334155;
+            font-size: 0.85rem;
+            font-weight: 700;
+            line-height: 1;
+            transition: background 0.18s, color 0.18s;
+        }
+
+        .toc a:hover { background: #ede9fe; color: var(--text); }
+
+        .toc a .num {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 1.5rem;
+            height: 1.5rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.07);
+            color: #0f172a;
+            font-size: 0.7rem;
+            font-weight: 800;
+        }
+
+        .card {
+            border: 1px solid var(--border);
+            border-radius: 1.5rem;
+            background: var(--surface);
+            box-shadow: var(--shadow-soft);
+        }
+
+        .card.section { padding: 1.5rem; }
+        @media (min-width: 768px) { .card.section { padding: 1.75rem; } }
+
+        .section-kicker {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+        }
+
+        .panel {
+            border: 1px solid var(--border);
+            border-radius: 1.1rem;
+            background: #f8fbfd;
+            padding: 1rem;
+        }
+
+        .panel-title {
+            font-size: 0.7rem;
+            font-weight: 800;
+            letter-spacing: 0.16em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 0.55rem;
+        }
+
+        .control-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.78rem;
+            color: var(--muted);
+            margin-bottom: 0.25rem;
+            margin-top: 0.6rem;
+        }
+
+        .control-row .v {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            color: #0f172a;
+            font-weight: 700;
+        }
+
+        input[type="range"] {
+            -webkit-appearance: none;
+            width: 100%;
+            height: 4px;
+            background: #cbd5e1;
+            border-radius: 999px;
+            outline: none;
+        }
+
+        input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+            border: 2px solid white;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18);
+        }
+
+        input[type="range"]::-moz-range-thumb {
+            width: 14px;
+            height: 14px;
+            border-radius: 50%;
+            background: #2563eb;
+            cursor: pointer;
+            border: 2px solid white;
+        }
+
+        .pill-btn {
+            padding: 0.35rem 0.7rem;
+            border-radius: 999px;
+            border: 1px solid var(--border);
+            background: white;
+            color: var(--muted);
+            font-size: 0.72rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .pill-btn:hover { border-color: var(--border-strong); color: var(--text); }
+
+        .pill-btn.active {
+            background: #1e293b;
+            color: white;
+            border-color: #1e293b;
+        }
+
+        .toggle-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 999px;
+            border: 1.5px solid var(--border);
+            background: white;
+            font-size: 0.78rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .toggle-chip .swatch {
+            width: 0.7rem;
+            height: 0.7rem;
+            border-radius: 999px;
+            display: inline-block;
+        }
+
+        .toggle-chip.active.linear { border-color: var(--linear-color); background: rgba(37, 99, 235, 0.08); }
+        .toggle-chip.active.poly { border-color: var(--poly-color); background: rgba(249, 115, 22, 0.08); }
+        .toggle-chip.active.tree { border-color: var(--tree-color); background: rgba(22, 163, 74, 0.08); }
+        .toggle-chip.active.svr { border-color: var(--svr-color); background: rgba(147, 51, 234, 0.08); }
+        .toggle-chip:not(.active) { opacity: 0.55; }
+
+        .action-btn {
+            padding: 0.55rem 0.95rem;
+            border-radius: 0.7rem;
+            border: 1px solid var(--border-strong);
+            background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+            color: #1e293b;
+            font-size: 0.82rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+
+        .action-btn:hover { background: linear-gradient(180deg, #f8fafc 0%, #e2e8f0 100%); }
+
+        .action-btn.primary {
+            background: linear-gradient(180deg, #2563eb 0%, #1d4ed8 100%);
+            color: white;
+            border-color: #1e40af;
+        }
+
+        .action-btn.primary:hover { filter: brightness(1.05); }
+
+        .plot-host {
+            position: relative;
+            width: 100%;
+            border-radius: 1rem;
+            background: #fbfcfe;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .plot-host canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem 1rem;
+            font-size: 0.75rem;
+            color: var(--muted);
+        }
+
+        .legend-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+        }
+
+        .legend-item .swatch {
+            width: 0.85rem;
+            height: 0.4rem;
+            border-radius: 2px;
+            display: inline-block;
+        }
+
+        .legend-item .dot {
+            width: 0.55rem;
+            height: 0.55rem;
+            border-radius: 999px;
+            display: inline-block;
+        }
+
+        .metric-card {
+            padding: 0.85rem 1rem;
+            border-radius: 0.9rem;
+            border: 1px solid var(--border);
+            background: white;
+        }
+
+        .metric-card .label {
+            font-size: 0.7rem;
+            font-weight: 700;
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            color: var(--muted-soft);
+        }
+
+        .metric-card .value {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-size: 1.15rem;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .metric-card .delta {
+            font-size: 0.72rem;
+            font-weight: 700;
+            margin-top: 0.15rem;
+        }
+
+        .metric-card .delta.pos { color: #b91c1c; }
+        .metric-card .delta.neg { color: #047857; }
+
+        table.zoo-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.8rem;
+        }
+
+        table.zoo-table th {
+            text-align: left;
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--muted-soft);
+            padding: 0.55rem 0.6rem;
+            border-bottom: 1px solid var(--border);
+            font-weight: 700;
+        }
+
+        table.zoo-table td {
+            padding: 0.55rem 0.6rem;
+            border-bottom: 1px solid var(--border);
+            color: #1e293b;
+            vertical-align: top;
+        }
+
+        table.zoo-table td.color-cell {
+            width: 0.8rem;
+            padding: 0.55rem 0.4rem 0.55rem 0.6rem;
+        }
+
+        table.zoo-table td .stripe {
+            display: inline-block;
+            width: 0.35rem;
+            height: 1.4rem;
+            border-radius: 2px;
+            vertical-align: middle;
+        }
+
+        table.zoo-table td.mono {
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            font-weight: 700;
+            color: #0f172a;
+        }
+
+        .small-illus {
+            position: relative;
+            width: 100%;
+            height: 140px;
+            border-radius: 0.85rem;
+            background: #fbfcfe;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .small-illus canvas { display: block; width: 100%; height: 100%; }
+
+        .footer-link {
+            color: #1e3a8a;
+            text-decoration: underline;
+            text-decoration-thickness: 1px;
+            text-underline-offset: 2px;
+        }
+
+        .focus-tag {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.35rem;
+            padding: 0.25rem 0.55rem;
+            border-radius: 999px;
+            background: #f1f5f9;
+            color: #334155;
+            font-size: 0.7rem;
+            font-weight: 700;
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Hero -->
+    <header class="hero-wrap py-12 md:py-16 px-5 md:px-10">
+        <div class="max-w-6xl mx-auto relative" style="z-index:1;">
+            <div class="hero-kicker mb-4">EE508 · Fundamentals · Regression</div>
+            <h1 class="text-4xl md:text-5xl font-extrabold tracking-tight mb-4">
+                Regression Model Zoo &amp; Outlier Sensitivity
+            </h1>
+            <p class="text-base md:text-lg text-blue-100 max-w-3xl leading-relaxed">
+                Different regression models make different assumptions about structure, smoothness, and tolerance to error.
+                Compare linear, polynomial, decision-tree, and support-vector regression on the same data — then stress-test
+                them with noise and outliers and watch each model's inductive bias surface.
+            </p>
+            <div class="mt-6 flex flex-wrap gap-2 text-xs">
+                <span class="hero-kicker" style="letter-spacing:0.1em;">Linear · OLS</span>
+                <span class="hero-kicker" style="letter-spacing:0.1em;">Polynomial · degree d</span>
+                <span class="hero-kicker" style="letter-spacing:0.1em;">CART tree · 1D</span>
+                <span class="hero-kicker" style="letter-spacing:0.1em;">SVR · ε-tube + C</span>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-6xl mx-auto px-4 md:px-6 py-6 md:py-10 space-y-8">
+        <!-- Sticky local TOC -->
+        <nav class="toc" aria-label="Sections">
+            <a href="#playground"><span class="num">1</span> Playground</a>
+            <a href="#zoo"><span class="num">2</span> Model Zoo</a>
+            <a href="#outliers"><span class="num">3</span> Outlier Lab</a>
+            <a href="#explanations"><span class="num">4</span> How They Work</a>
+            <a href="#sources"><span class="num">5</span> Sources</a>
+        </nav>
+
+        <!-- Section 1: Playground -->
+        <section id="playground" class="card section">
+            <div class="section-kicker text-blue-700">Section 1</div>
+            <h2 class="text-2xl md:text-3xl font-bold mt-1">Regression Playground</h2>
+            <p class="text-sm md:text-base text-slate-600 mt-2 max-w-3xl">
+                Pick a ground-truth shape, then add noise and outliers. The plot below shows the data the four models
+                will see — outliers are highlighted so the contamination stays visible.
+            </p>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
+                <div class="lg:col-span-1 space-y-4">
+                    <div class="panel">
+                        <div class="panel-title">Ground-truth preset</div>
+                        <div class="grid grid-cols-2 gap-2">
+                            <button class="pill-btn preset-btn" data-preset="linear">Mostly linear</button>
+                            <button class="pill-btn preset-btn" data-preset="poly">Curved polynomial</button>
+                            <button class="pill-btn preset-btn" data-preset="step">Piecewise step</button>
+                            <button class="pill-btn preset-btn" data-preset="sin">Sinusoidal</button>
+                        </div>
+                        <p class="text-xs text-slate-500 mt-3 leading-relaxed" id="preset-desc">
+                            $y_{\text{true}}(x) = 0.15x^3 - 0.8x$, with $x \in [-4, 4]$.
+                        </p>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-title">Data shape</div>
+                        <div class="control-row"><span>Samples</span><span class="v" id="samples-val">30</span></div>
+                        <input type="range" id="samples-slider" min="12" max="80" step="1" value="30" />
+                        <div class="control-row"><span>Noise σ</span><span class="v" id="noise-val">0.40</span></div>
+                        <input type="range" id="noise-slider" min="0" max="1.5" step="0.01" value="0.4" />
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-title">Outliers</div>
+                        <div class="control-row"><span>Count</span><span class="v" id="ocount-val">3</span></div>
+                        <input type="range" id="ocount-slider" min="0" max="8" step="1" value="3" />
+                        <div class="control-row"><span>Magnitude</span><span class="v" id="omag-val">4.0</span></div>
+                        <input type="range" id="omag-slider" min="0" max="8" step="0.1" value="4" />
+                        <div class="control-row mt-3"><span>Position</span></div>
+                        <div class="grid grid-cols-4 gap-1.5">
+                            <button class="pill-btn opos-btn" data-opos="left">Left</button>
+                            <button class="pill-btn opos-btn" data-opos="middle">Mid</button>
+                            <button class="pill-btn opos-btn" data-opos="right">Right</button>
+                            <button class="pill-btn opos-btn active" data-opos="random">Random</button>
+                        </div>
+                        <div class="flex flex-wrap gap-2 mt-4">
+                            <button class="action-btn primary" id="resample-btn">Resample data</button>
+                            <button class="action-btn" id="add-outlier-btn">Add manual outlier</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2">
+                    <div class="plot-host" style="aspect-ratio: 16 / 9; min-height: 320px;">
+                        <canvas id="play-canvas"></canvas>
+                    </div>
+                    <div class="legend mt-3 px-1">
+                        <span class="legend-item"><span class="dot" style="background:var(--point-color);"></span> training samples</span>
+                        <span class="legend-item"><span class="dot" style="background:var(--outlier-color);transform:rotate(45deg);border-radius:1px;"></span> outliers</span>
+                        <span class="legend-item"><span class="swatch" style="background:repeating-linear-gradient(90deg,var(--truth-color) 0 6px,transparent 6px 10px);height:0.18rem;"></span> $y_{\text{true}}(x)$</span>
+                    </div>
+                    <p class="text-xs text-slate-500 mt-2">
+                        Manual outliers stay until you resample or change the preset. Validation points are drawn from the same ground truth without contamination.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Section 2: Model Zoo -->
+        <section id="zoo" class="card section">
+            <div class="section-kicker text-orange-600">Section 2</div>
+            <h2 class="text-2xl md:text-3xl font-bold mt-1">Model Zoo Comparison</h2>
+            <p class="text-sm md:text-base text-slate-600 mt-2 max-w-3xl">
+                Four model families on one dataset. Toggle visibility, compare fits, and tune the per-model knobs to feel
+                each model's inductive bias.
+            </p>
+
+            <div class="mt-5 flex flex-wrap items-center gap-2">
+                <button class="toggle-chip linear active" data-toggle="linear">
+                    <span class="swatch" style="background:var(--linear-color);"></span> Linear
+                </button>
+                <button class="toggle-chip poly active" data-toggle="poly">
+                    <span class="swatch" style="background:var(--poly-color);"></span> Polynomial
+                </button>
+                <button class="toggle-chip tree active" data-toggle="tree">
+                    <span class="swatch" style="background:var(--tree-color);"></span> Tree
+                </button>
+                <button class="toggle-chip svr active" data-toggle="svr">
+                    <span class="swatch" style="background:var(--svr-color);"></span> SVR
+                </button>
+                <span class="ml-2 focus-tag">Focus
+                    <select id="focus-select" class="bg-transparent text-xs font-bold focus:outline-none">
+                        <option value="all">Show all</option>
+                        <option value="linear">Linear</option>
+                        <option value="poly">Polynomial</option>
+                        <option value="tree">Tree</option>
+                        <option value="svr">SVR</option>
+                    </select>
+                </span>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
+                <div class="lg:col-span-2">
+                    <div class="plot-host" style="aspect-ratio: 16 / 9; min-height: 360px;">
+                        <canvas id="zoo-canvas"></canvas>
+                    </div>
+                    <div class="legend mt-3 px-1">
+                        <span class="legend-item"><span class="swatch" style="background:var(--linear-color);"></span> Linear</span>
+                        <span class="legend-item"><span class="swatch" style="background:var(--poly-color);"></span> Polynomial</span>
+                        <span class="legend-item"><span class="swatch" style="background:var(--tree-color);"></span> Tree</span>
+                        <span class="legend-item"><span class="swatch" style="background:var(--svr-color);"></span> SVR</span>
+                        <span class="legend-item"><span class="swatch" style="background:rgba(147,51,234,0.18);"></span> ε-tube</span>
+                        <span class="legend-item"><span class="dot" style="background:transparent;border:2px solid var(--svr-color);"></span> SVR support vector</span>
+                    </div>
+                </div>
+                <div class="space-y-3">
+                    <div class="panel">
+                        <div class="panel-title">Polynomial</div>
+                        <div class="control-row"><span>Degree d</span><span class="v" id="poly-deg-val">3</span></div>
+                        <input type="range" id="poly-deg-slider" min="1" max="10" step="1" value="3" />
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">Decision tree</div>
+                        <div class="control-row"><span>Max depth</span><span class="v" id="tree-depth-val">4</span></div>
+                        <input type="range" id="tree-depth-slider" min="1" max="8" step="1" value="4" />
+                    </div>
+                    <div class="panel">
+                        <div class="panel-title">Support-vector regression</div>
+                        <div class="control-row"><span>ε (tube width)</span><span class="v" id="svr-eps-val">0.30</span></div>
+                        <input type="range" id="svr-eps-slider" min="0" max="1.5" step="0.01" value="0.3" />
+                        <div class="control-row"><span>C (penalty)</span><span class="v" id="svr-c-val">5.0</span></div>
+                        <input type="range" id="svr-c-slider" min="0.1" max="100" step="0.1" value="5" />
+                        <div class="control-row mt-3"><span>Kernel</span></div>
+                        <div class="grid grid-cols-3 gap-1.5">
+                            <button class="pill-btn kernel-btn" data-kernel="linear">Linear</button>
+                            <button class="pill-btn kernel-btn active" data-kernel="rbf">RBF</button>
+                            <button class="pill-btn kernel-btn" data-kernel="poly">Poly</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="mt-5 panel" style="background:white;">
+                <div class="panel-title">Comparison table</div>
+                <div class="overflow-x-auto">
+                    <table class="zoo-table">
+                        <thead>
+                            <tr>
+                                <th></th>
+                                <th>Model</th>
+                                <th>Flexibility</th>
+                                <th>Prediction style</th>
+                                <th class="text-right">Train MSE</th>
+                                <th class="text-right">Validation MSE</th>
+                                <th>Outlier sensitivity</th>
+                            </tr>
+                        </thead>
+                        <tbody id="zoo-table-body">
+                            <!-- filled by JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+                    Validation MSE is computed on a clean held-out grid drawn from the same ground-truth function, so it
+                    rewards models that capture the underlying signal rather than the noise or the outliers.
+                </p>
+            </div>
+        </section>
+
+        <!-- Section 3: Outlier Lab -->
+        <section id="outliers" class="card section">
+            <div class="section-kicker text-red-600">Section 3</div>
+            <h2 class="text-2xl md:text-3xl font-bold mt-1">Outlier Sensitivity Lab</h2>
+            <p class="text-sm md:text-base text-slate-600 mt-2 max-w-3xl">
+                Now make outlier robustness the focus. Push the magnitude and count up — linear regression gets pulled
+                globally, high-degree polynomials contort, trees absorb the shock locally with extra splits, and SVR's
+                ε-tube and $C$ knob let it trade fit for robustness.
+            </p>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mt-5">
+                <div class="lg:col-span-1 space-y-4">
+                    <div class="panel">
+                        <div class="panel-title">Outlier knobs (mirrored)</div>
+                        <div class="control-row"><span>Count</span><span class="v" id="lab-ocount-val">3</span></div>
+                        <input type="range" id="lab-ocount-slider" min="0" max="8" step="1" value="3" />
+                        <div class="control-row"><span>Magnitude</span><span class="v" id="lab-omag-val">4.0</span></div>
+                        <input type="range" id="lab-omag-slider" min="0" max="8" step="0.1" value="4" />
+                        <div class="control-row mt-3"><span>Position</span></div>
+                        <div class="grid grid-cols-4 gap-1.5">
+                            <button class="pill-btn lab-opos-btn" data-opos="left">Left</button>
+                            <button class="pill-btn lab-opos-btn" data-opos="middle">Mid</button>
+                            <button class="pill-btn lab-opos-btn" data-opos="right">Right</button>
+                            <button class="pill-btn lab-opos-btn active" data-opos="random">Random</button>
+                        </div>
+                    </div>
+
+                    <div class="panel">
+                        <div class="panel-title">SVR · C in focus</div>
+                        <div class="control-row"><span>C</span><span class="v" id="lab-svr-c-val">5.0</span></div>
+                        <input type="range" id="lab-svr-c-slider" min="0.1" max="100" step="0.1" value="5" />
+                        <p class="text-xs text-slate-500 mt-2 leading-relaxed">
+                            Small $C$ → wider tolerance → smoother, outlier-resistant fit.<br>
+                            Large $C$ → tight fit, the SVR chases difficult points.
+                        </p>
+                    </div>
+
+                    <div class="flex flex-col gap-2">
+                        <label class="flex items-center gap-2 text-sm text-slate-700">
+                            <input type="checkbox" id="show-baseline" class="w-4 h-4 accent-blue-600" checked />
+                            Show fit before outliers
+                        </label>
+                        <button class="action-btn" id="reset-outliers-btn">Reset outlier experiment</button>
+                    </div>
+                </div>
+
+                <div class="lg:col-span-2 space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Without outliers</div>
+                            <div class="plot-host" style="aspect-ratio: 5 / 4; min-height: 220px;">
+                                <canvas id="lab-clean-canvas"></canvas>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">With outliers</div>
+                            <div class="plot-host" style="aspect-ratio: 5 / 4; min-height: 220px;">
+                                <canvas id="lab-dirty-canvas"></canvas>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div>
+                        <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">Influence summary</div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3" id="lab-metrics"></div>
+                        <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+                            <strong>Curve shift</strong> averages $|f_{\text{with}}(x) - f_{\text{without}}(x)|$ over a dense
+                            grid in $[-4, 4]$. Larger values mean outliers reshaped the prediction more.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel mt-5" style="background:white;">
+                <div class="panel-title">SVR · C demonstration</div>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                        <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">$C = 0.5$ — relaxed</div>
+                        <div class="plot-host" style="aspect-ratio: 5 / 4; min-height: 180px;">
+                            <canvas id="svr-c-low-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">$C = 5$ — balanced</div>
+                        <div class="plot-host" style="aspect-ratio: 5 / 4; min-height: 180px;">
+                            <canvas id="svr-c-mid-canvas"></canvas>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="text-xs font-bold uppercase tracking-wider text-slate-500 mb-2">$C = 80$ — strict</div>
+                        <div class="plot-host" style="aspect-ratio: 5 / 4; min-height: 180px;">
+                            <canvas id="svr-c-high-canvas"></canvas>
+                        </div>
+                    </div>
+                </div>
+                <p class="text-xs text-slate-500 mt-3 leading-relaxed">
+                    Same data, same kernel, different penalty. With small $C$, residuals outside the ε-tube cost little, so the
+                    fit stays smooth and ignores outliers. With large $C$, those same residuals cost a lot and the fit bends to
+                    accommodate them — exactly the trade-off described on slide 18 of the lecture deck.
+                </p>
+            </div>
+
+            <div class="panel mt-5" style="background:#fff7ed; border-color: #fed7aa;">
+                <p class="text-sm text-slate-700 leading-relaxed">
+                    <strong>Takeaway.</strong> Outliers reveal each model's inductive bias. Linear models can be pulled
+                    globally, high-degree polynomials can contort, trees react locally through extra splits, and SVR can
+                    trade off robustness and fit through $C$ and $\varepsilon$.
+                </p>
+            </div>
+        </section>
+
+        <!-- Section 4: Explanations -->
+        <section id="explanations" class="card section">
+            <div class="section-kicker text-emerald-700">Section 4</div>
+            <h2 class="text-2xl md:text-3xl font-bold mt-1">How The Models Work</h2>
+            <p class="text-sm md:text-base text-slate-600 mt-2 max-w-3xl">
+                Each card pairs a one-glance illustration with the structural assumption the model is making. Read these
+                alongside the comparison plot above to see why the curves take the shapes they do.
+            </p>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
+                <div class="panel" style="background:white;">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="swatch" style="display:inline-block;width:0.5rem;height:1.4rem;border-radius:2px;background:var(--linear-color);"></span>
+                        <h3 class="text-lg font-bold">Linear regression</h3>
+                    </div>
+                    <div class="small-illus mb-3"><canvas id="illus-linear"></canvas></div>
+                    <p class="text-sm text-slate-700 leading-relaxed">
+                        Fits one global straight line $\hat{y} = w x + b$ by minimizing squared residuals. Simple, interpretable,
+                        and the squared loss penalizes large residuals heavily — so a single far-off outlier can drag the line
+                        substantially.
+                    </p>
+                </div>
+
+                <div class="panel" style="background:white;">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="swatch" style="display:inline-block;width:0.5rem;height:1.4rem;border-radius:2px;background:var(--poly-color);"></span>
+                        <h3 class="text-lg font-bold">Polynomial regression</h3>
+                    </div>
+                    <div class="small-illus mb-3"><canvas id="illus-poly"></canvas></div>
+                    <p class="text-sm text-slate-700 leading-relaxed">
+                        Adds polynomial features $x, x^2, \dots, x^d$ and fits a linear model in that lifted space. Higher
+                        degree means more flexibility, but also more capacity to wiggle around noise and outliers — classic
+                        bias–variance tension.
+                    </p>
+                </div>
+
+                <div class="panel" style="background:white;">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="swatch" style="display:inline-block;width:0.5rem;height:1.4rem;border-radius:2px;background:var(--tree-color);"></span>
+                        <h3 class="text-lg font-bold">Decision tree regression</h3>
+                    </div>
+                    <div class="small-illus mb-3"><canvas id="illus-tree"></canvas></div>
+                    <p class="text-sm text-slate-700 leading-relaxed">
+                        Recursively partitions the input space and predicts the regional mean. The result is piecewise constant —
+                        flat steps with hard jumps at split boundaries. Distant outliers usually distort just one or two leaves
+                        rather than the global shape.
+                    </p>
+                </div>
+
+                <div class="panel" style="background:white;">
+                    <div class="flex items-center gap-2 mb-2">
+                        <span class="swatch" style="display:inline-block;width:0.5rem;height:1.4rem;border-radius:2px;background:var(--svr-color);"></span>
+                        <h3 class="text-lg font-bold">Support-vector regression</h3>
+                    </div>
+                    <div class="small-illus mb-3"><canvas id="illus-svr"></canvas></div>
+                    <p class="text-sm text-slate-700 leading-relaxed">
+                        Allows free errors inside an ε-tube around the fit and penalizes only points outside it. Those outside
+                        points become support vectors. The penalty $C$ controls how hard the model insists on shrinking those
+                        violations: smaller $C$ → smoother and more robust, larger $C$ → tighter fit.
+                    </p>
+                </div>
+            </div>
+
+            <div class="panel mt-5" style="background:#eef2ff; border-color:#c7d2fe;">
+                <p class="text-sm text-slate-700 leading-relaxed">
+                    <strong>Implementation notes.</strong> Linear and polynomial fits use ordinary least squares solved via
+                    normal equations with a small Tikhonov regularizer for numerical stability at high degree (and inputs are
+                    rescaled to $[-1, 1]$ before lifting). The decision tree is a faithful 1D CART — greedy squared-error splits
+                    down to the depth limit, with leaves predicting the regional mean. SVR is solved with dual coordinate descent
+                    (libsvm-style) on the ε-insensitive loss: each per-coordinate update is the closed-form
+                    soft-threshold-then-clip $\beta_i \in [-C, C]$, with linear, RBF, and polynomial kernels.
+                </p>
+            </div>
+        </section>
+
+        <!-- Sources / footer -->
+        <section id="sources" class="card section">
+            <div class="section-kicker text-slate-500">Sources</div>
+            <h2 class="text-2xl font-bold mt-1">Slide anchors</h2>
+            <ul class="list-disc list-inside mt-3 space-y-1 text-sm text-slate-700">
+                <li><code>ML_Lecture3Sp26_ML_Review.pdf</code> · page 13 — linear &amp; polynomial regression</li>
+                <li>pages 14–15 — decision-tree regression (and random forest)</li>
+                <li>pages 16–17 — support-vector regression and the ε-tube</li>
+                <li>page 18 — outlier resistance and the role of $C$</li>
+                <li>pages 20–29, 68 — gradient boosting and random forest aggregation (extension)</li>
+            </ul>
+        </section>
+
+        <footer class="text-center text-xs text-slate-500 py-6">
+            EE508 · Spring 2026 — interactive companion for ML Lecture 3 (regression review).
+            Models computed in-browser; no data leaves your machine.
+        </footer>
+    </main>
+
+    <script>
+        // ---------- Utilities ----------
+        // Mulberry32 PRNG for reproducibility
+        function mulberry32(a) {
+            return function () {
+                a |= 0; a = a + 0x6D2B79F5 | 0;
+                let t = a;
+                t = Math.imul(t ^ t >>> 15, t | 1);
+                t ^= t + Math.imul(t ^ t >>> 7, t | 61);
+                return ((t ^ t >>> 14) >>> 0) / 4294967296;
+            };
+        }
+
+        function gaussian(rand) {
+            // Box-Muller
+            let u = 0, v = 0;
+            while (u === 0) u = rand();
+            while (v === 0) v = rand();
+            return Math.sqrt(-2.0 * Math.log(u)) * Math.cos(2.0 * Math.PI * v);
+        }
+
+        const X_MIN = -4, X_MAX = 4;
+
+        const PRESETS = {
+            linear: { fn: (x) => 1.2 * x + 0.5, label: "$y_{\\text{true}}(x) = 1.2x + 0.5$" },
+            poly: { fn: (x) => 0.15 * x * x * x - 0.8 * x, label: "$y_{\\text{true}}(x) = 0.15x^3 - 0.8x$" },
+            step: {
+                fn: (x) => x < -1 ? -2 : (x < 1 ? 0 : 2),
+                label: "Piecewise step: $-2,\\,0,\\,2$ across $x = -1, 1$"
+            },
+            sin: { fn: (x) => 1.3 * Math.sin(1.2 * x), label: "$y_{\\text{true}}(x) = 1.3\\,\\sin(1.2x)$" },
+        };
+
+        // ---------- State ----------
+        const STATE = {
+            preset: "poly",
+            samples: 30,
+            noise: 0.4,
+            outlierCount: 3,
+            outlierMagnitude: 4,
+            outlierPosition: "random",
+            seed: 1234,
+            manualOutliers: [], // {x, dy} added via button
+            visible: { linear: true, poly: true, tree: true, svr: true },
+            focus: "all",
+            polyDegree: 3,
+            treeDepth: 4,
+            svrEpsilon: 0.3,
+            svrC: 5,
+            svrKernel: "rbf",
+            labSvrC: 5,
+            showBaseline: true,
+        };
+
+        let trainData = [];        // contaminated training data {x, y, isOutlier}
+        let cleanTrainData = [];   // training data without outliers (same x positions)
+        let validationData = [];   // clean held-out points
+
+        // ---------- Data generation ----------
+        function generateData() {
+            const rand = mulberry32(STATE.seed);
+            const fn = PRESETS[STATE.preset].fn;
+            const n = STATE.samples;
+            const xs = [];
+            for (let i = 0; i < n; i++) xs.push(X_MIN + (X_MAX - X_MIN) * rand());
+            xs.sort((a, b) => a - b);
+
+            cleanTrainData = xs.map((x) => ({
+                x,
+                y: fn(x) + STATE.noise * gaussian(rand),
+                isOutlier: false,
+            }));
+
+            // Decide outlier indices
+            const outlierIdx = pickOutlierIndices(xs, STATE.outlierCount, STATE.outlierPosition, rand);
+            const outlierSet = new Set(outlierIdx);
+
+            // Build contaminated copy
+            trainData = cleanTrainData.map((p, i) => ({ ...p }));
+            for (const i of outlierIdx) {
+                const sign = rand() < 0.5 ? -1 : 1;
+                trainData[i].y += sign * STATE.outlierMagnitude;
+                trainData[i].isOutlier = true;
+            }
+
+            // Manual outliers
+            for (const m of STATE.manualOutliers) {
+                trainData.push({ x: m.x, y: fn(m.x) + m.dy, isOutlier: true });
+                cleanTrainData.push({ x: m.x, y: fn(m.x), isOutlier: false });
+            }
+            trainData.sort((a, b) => a.x - b.x);
+            cleanTrainData.sort((a, b) => a.x - b.x);
+
+            // Validation: clean grid, separate seed
+            const vrand = mulberry32(STATE.seed ^ 0xABCDEF);
+            const vn = 60;
+            const vxs = [];
+            for (let i = 0; i < vn; i++) vxs.push(X_MIN + (X_MAX - X_MIN) * vrand());
+            vxs.sort((a, b) => a - b);
+            validationData = vxs.map((x) => ({ x, y: fn(x), isOutlier: false }));
+        }
+
+        function pickOutlierIndices(xs, count, position, rand) {
+            if (count <= 0 || xs.length === 0) return [];
+            const n = xs.length;
+            const eligible = [];
+            for (let i = 0; i < n; i++) {
+                const x = xs[i];
+                if (position === "left" && x < (X_MIN + X_MAX) / 2 - (X_MAX - X_MIN) * 0.15) eligible.push(i);
+                else if (position === "right" && x > (X_MIN + X_MAX) / 2 + (X_MAX - X_MIN) * 0.15) eligible.push(i);
+                else if (position === "middle" && Math.abs(x - (X_MIN + X_MAX) / 2) < (X_MAX - X_MIN) * 0.2) eligible.push(i);
+                else if (position === "random") eligible.push(i);
+            }
+            if (eligible.length === 0) return [];
+            // shuffle eligible
+            const shuffled = eligible.slice();
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(rand() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            return shuffled.slice(0, Math.min(count, shuffled.length));
+        }
+
+        // ---------- Linear algebra: solve Ax = b via Gauss-Jordan with partial pivoting ----------
+        function solveLinearSystem(A, b) {
+            const n = A.length;
+            const M = A.map((row, i) => row.slice().concat([b[i]]));
+            for (let i = 0; i < n; i++) {
+                let pivot = i;
+                for (let k = i + 1; k < n; k++) {
+                    if (Math.abs(M[k][i]) > Math.abs(M[pivot][i])) pivot = k;
+                }
+                if (pivot !== i) [M[i], M[pivot]] = [M[pivot], M[i]];
+                if (Math.abs(M[i][i]) < 1e-14) return null;
+                const div = M[i][i];
+                for (let j = i; j <= n; j++) M[i][j] /= div;
+                for (let k = 0; k < n; k++) {
+                    if (k !== i && Math.abs(M[k][i]) > 1e-14) {
+                        const f = M[k][i];
+                        for (let j = i; j <= n; j++) M[k][j] -= f * M[i][j];
+                    }
+                }
+            }
+            return M.map((row) => row[n]);
+        }
+
+        // ---------- Linear regression ----------
+        function fitLinear(data) {
+            const n = data.length;
+            if (n < 2) {
+                const mean = data.length ? data[0].y : 0;
+                return { a: 0, b: mean, predict: () => mean };
+            }
+            let sx = 0, sy = 0, sxx = 0, sxy = 0;
+            for (const p of data) { sx += p.x; sy += p.y; sxx += p.x * p.x; sxy += p.x * p.y; }
+            const denom = n * sxx - sx * sx;
+            if (Math.abs(denom) < 1e-12) {
+                const mean = sy / n;
+                return { a: 0, b: mean, predict: () => mean };
+            }
+            const a = (n * sxy - sx * sy) / denom;
+            const b = (sy - a * sx) / n;
+            return { a, b, predict: (x) => a * x + b };
+        }
+
+        // ---------- Polynomial regression with input scaling and ridge ----------
+        function fitPolynomial(data, degree) {
+            const n = data.length;
+            const d = Math.max(1, Math.min(degree, 10));
+            // Scale x to [-1, 1] using observed extremes
+            let xmin = Infinity, xmax = -Infinity;
+            for (const p of data) { if (p.x < xmin) xmin = p.x; if (p.x > xmax) xmax = p.x; }
+            if (!isFinite(xmin) || xmin === xmax) {
+                const mean = data.length ? data.reduce((s, p) => s + p.y, 0) / n : 0;
+                return { coeffs: [mean], scale: { mid: 0, half: 1 }, predict: () => mean };
+            }
+            const mid = 0.5 * (xmin + xmax);
+            const half = 0.5 * (xmax - xmin) || 1;
+            const xs = data.map((p) => (p.x - mid) / half);
+            const ys = data.map((p) => p.y);
+
+            // Build Vandermonde-style normal equations with small ridge
+            const m = d + 1;
+            const A = Array.from({ length: m }, () => new Array(m).fill(0));
+            const b = new Array(m).fill(0);
+            for (let k = 0; k < n; k++) {
+                let xpow = new Array(2 * m - 1);
+                xpow[0] = 1;
+                for (let p = 1; p < 2 * m - 1; p++) xpow[p] = xpow[p - 1] * xs[k];
+                for (let i = 0; i < m; i++) {
+                    for (let j = 0; j < m; j++) A[i][j] += xpow[i + j];
+                    b[i] += xpow[i] * ys[k];
+                }
+            }
+            // Tiny ridge for stability at high degree
+            const ridge = 1e-7 * n;
+            for (let i = 0; i < m; i++) A[i][i] += ridge;
+            const coeffs = solveLinearSystem(A, b);
+            if (!coeffs) {
+                const mean = data.reduce((s, p) => s + p.y, 0) / n;
+                return { coeffs: [mean], scale: { mid, half }, predict: () => mean };
+            }
+            const predict = (x) => {
+                const u = (x - mid) / half;
+                let acc = 0, up = 1;
+                for (let i = 0; i < coeffs.length; i++) {
+                    acc += coeffs[i] * up;
+                    up *= u;
+                }
+                return acc;
+            };
+            return { coeffs, scale: { mid, half }, predict };
+        }
+
+        // ---------- 1D CART regression tree ----------
+        function fitTree(data, maxDepth) {
+            const sorted = data.slice().sort((a, b) => a.x - b.x);
+            function sse(points) {
+                if (points.length === 0) return 0;
+                let m = 0; for (const p of points) m += p.y; m /= points.length;
+                let s = 0; for (const p of points) s += (p.y - m) * (p.y - m);
+                return s;
+            }
+            function build(points, depth) {
+                if (points.length === 0) return { leaf: true, value: 0 };
+                if (points.length === 1 || depth >= maxDepth) {
+                    let m = 0; for (const p of points) m += p.y; m /= points.length;
+                    return { leaf: true, value: m };
+                }
+                let bestSse = sse(points);
+                let bestSplit = null, bestLeft = null, bestRight = null;
+                // candidate splits: midpoints between consecutive sorted x values
+                for (let i = 0; i < points.length - 1; i++) {
+                    if (points[i].x === points[i + 1].x) continue;
+                    const split = 0.5 * (points[i].x + points[i + 1].x);
+                    const left = points.slice(0, i + 1);
+                    const right = points.slice(i + 1);
+                    if (left.length === 0 || right.length === 0) continue;
+                    const total = sse(left) + sse(right);
+                    if (total < bestSse - 1e-9) {
+                        bestSse = total; bestSplit = split; bestLeft = left; bestRight = right;
+                    }
+                }
+                if (bestSplit === null) {
+                    let m = 0; for (const p of points) m += p.y; m /= points.length;
+                    return { leaf: true, value: m };
+                }
+                return {
+                    leaf: false, split: bestSplit,
+                    left: build(bestLeft, depth + 1),
+                    right: build(bestRight, depth + 1),
+                };
+            }
+            const root = build(sorted, 0);
+            function predict(x) {
+                let node = root;
+                while (!node.leaf) node = (x < node.split) ? node.left : node.right;
+                return node.value;
+            }
+            // collect splits for visualization
+            const splits = [];
+            (function walk(n) { if (!n.leaf) { splits.push(n.split); walk(n.left); walk(n.right); } })(root);
+            return { root, splits, predict };
+        }
+
+        // ---------- Kernels ----------
+        function makeKernel(kind) {
+            if (kind === "linear") return (a, b) => a * b;
+            if (kind === "rbf") {
+                const gamma = 0.5;
+                return (a, b) => {
+                    const d = a - b;
+                    return Math.exp(-gamma * d * d);
+                };
+            }
+            if (kind === "poly") {
+                // (gamma*ab + 1)^3 with gamma=0.3
+                return (a, b) => Math.pow(0.3 * a * b + 1, 3);
+            }
+            return (a, b) => a * b;
+        }
+
+        // ---------- SVR via dual coordinate descent (libsvm-style) ----------
+        // Dual: max -0.5 β^T K β - ε ‖β‖₁ + y^T β, s.t. -C ≤ β_i ≤ C.
+        // Each coordinate update is a closed-form soft-threshold-then-clip.
+        // Prediction: f(x) = Σ_j β_j K(x_j, x) + b, with b fit as a separate 1D problem.
+        function fitSVR(data, epsilon, C, kernelKind) {
+            const n = data.length;
+            if (n === 0) return { predict: () => 0, supportIdx: [], alpha: [], b: 0, kernel: kernelKind };
+            const X = data.map((p) => p.x);
+            const Y = data.map((p) => p.y);
+            const kfun = makeKernel(kernelKind);
+            // Precompute kernel matrix
+            const K = Array.from({ length: n }, () => new Array(n));
+            for (let i = 0; i < n; i++) {
+                for (let j = i; j < n; j++) {
+                    const v = kfun(X[i], X[j]);
+                    K[i][j] = v;
+                    K[j][i] = v;
+                }
+            }
+            const beta = new Array(n).fill(0);
+            const Kbeta = new Array(n).fill(0); // K @ beta (kept in sync)
+            let b = Y.reduce((a, v) => a + v, 0) / n;
+
+            // Coordinate descent on β. Each pass cycles through all n indices.
+            // Per-coord update minimizes 0.5 K_ii β_i² + (Kβ_i - K_ii β_i - (y_i - b)) β_i + ε |β_i|, then clips to [-C, C].
+            const passes = 40;
+            const tol = 1e-4;
+            for (let pass = 0; pass < passes; pass++) {
+                let maxChange = 0;
+                for (let i = 0; i < n; i++) {
+                    const Ki = K[i];
+                    const a = Ki[i];
+                    if (a < 1e-12) continue;
+                    const oldBeta = beta[i];
+                    // Gradient direction: bp = sum_{j≠i} β_j K_ij - (y_i - b) = Kβ_i - a*β_i - (y_i - b)
+                    const bp = Kbeta[i] - a * oldBeta - (Y[i] - b);
+                    let xStar;
+                    if (bp > epsilon) xStar = -(bp - epsilon) / a;
+                    else if (bp < -epsilon) xStar = -(bp + epsilon) / a;
+                    else xStar = 0;
+                    if (xStar > C) xStar = C;
+                    else if (xStar < -C) xStar = -C;
+                    const delta = xStar - oldBeta;
+                    if (delta !== 0) {
+                        beta[i] = xStar;
+                        for (let j = 0; j < n; j++) Kbeta[j] += delta * Ki[j];
+                        if (Math.abs(delta) > maxChange) maxChange = Math.abs(delta);
+                    }
+                }
+                // Update b by 1D bisection on the balance condition Σ sign(r_i) = 0 over violations.
+                // r_i = y_i - (Kβ_i + b). Balanced b is the median-like crossing of residuals.
+                // Use bisection over b in a bounded window around current b.
+                let bLo = b - 5, bHi = b + 5;
+                for (let bs = 0; bs < 30; bs++) {
+                    const bMid = 0.5 * (bLo + bHi);
+                    let sumS = 0;
+                    for (let i = 0; i < n; i++) {
+                        const r = Y[i] - (Kbeta[i] + bMid);
+                        if (r > epsilon) sumS += 1;
+                        else if (r < -epsilon) sumS -= 1;
+                    }
+                    if (sumS > 0) bLo = bMid;       // need to raise b (more positives), so f goes up, residuals shrink
+                    else if (sumS < 0) bHi = bMid;
+                    else { bLo = bHi = bMid; break; }
+                }
+                b = 0.5 * (bLo + bHi);
+                if (maxChange < tol) break;
+            }
+
+            const supportIdx = [];
+            const thresh = 1e-4;
+            for (let i = 0; i < n; i++) if (Math.abs(beta[i]) > thresh) supportIdx.push(i);
+            function predict(x) {
+                let f = b;
+                for (let j = 0; j < n; j++) {
+                    if (beta[j] !== 0) f += beta[j] * kfun(X[j], x);
+                }
+                return f;
+            }
+            return { predict, supportIdx, alpha: beta, b, X, Y, kernel: kernelKind };
+        }
+
+        // ---------- MSE helper ----------
+        function mse(predict, data) {
+            if (!data.length) return 0;
+            let s = 0;
+            for (const p of data) {
+                const r = p.y - predict(p.x);
+                s += r * r;
+            }
+            return s / data.length;
+        }
+
+        // ---------- Plot utilities ----------
+        function setupCanvas(canvas) {
+            const dpr = window.devicePixelRatio || 1;
+            const rect = canvas.getBoundingClientRect();
+            const w = Math.max(1, Math.round(rect.width * dpr));
+            const h = Math.max(1, Math.round(rect.height * dpr));
+            if (canvas.width !== w || canvas.height !== h) {
+                canvas.width = w; canvas.height = h;
+            }
+            const ctx = canvas.getContext("2d");
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+            return { ctx, w: rect.width, h: rect.height };
+        }
+
+        function makeAxes(w, h, xRange, yRange) {
+            const padL = 38, padR = 14, padT = 14, padB = 28;
+            const plotW = Math.max(10, w - padL - padR);
+            const plotH = Math.max(10, h - padT - padB);
+            const [x0, x1] = xRange;
+            const [y0, y1] = yRange;
+            const sx = (x) => padL + ((x - x0) / (x1 - x0)) * plotW;
+            const sy = (y) => padT + (1 - (y - y0) / (y1 - y0)) * plotH;
+            return { padL, padR, padT, padB, plotW, plotH, sx, sy, x0, x1, y0, y1 };
+        }
+
+        function drawGrid(ctx, ax, options = {}) {
+            const { padL, padT, plotW, plotH, sx, sy, x0, x1, y0, y1 } = ax;
+            ctx.save();
+            ctx.fillStyle = options.bg || "#fbfcfe";
+            ctx.fillRect(padL, padT, plotW, plotH);
+
+            // grid lines
+            ctx.strokeStyle = "#e2e8f0";
+            ctx.lineWidth = 1;
+            ctx.font = "10px ui-sans-serif, system-ui, sans-serif";
+            ctx.fillStyle = "#94a3b8";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "top";
+            const xTicks = niceTicks(x0, x1, 5);
+            for (const t of xTicks) {
+                const x = sx(t);
+                ctx.beginPath(); ctx.moveTo(x, padT); ctx.lineTo(x, padT + plotH); ctx.stroke();
+                ctx.fillText(formatTick(t), x, padT + plotH + 4);
+            }
+            ctx.textAlign = "right";
+            ctx.textBaseline = "middle";
+            const yTicks = niceTicks(y0, y1, 4);
+            for (const t of yTicks) {
+                const y = sy(t);
+                ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(padL + plotW, y); ctx.stroke();
+                ctx.fillText(formatTick(t), padL - 4, y);
+            }
+            // axis line on bottom + left
+            ctx.strokeStyle = "#cbd5e1";
+            ctx.lineWidth = 1.2;
+            ctx.beginPath();
+            ctx.moveTo(padL, padT);
+            ctx.lineTo(padL, padT + plotH);
+            ctx.lineTo(padL + plotW, padT + plotH);
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function niceTicks(a, b, count) {
+            const span = b - a;
+            const step0 = span / Math.max(1, count);
+            const mag = Math.pow(10, Math.floor(Math.log10(step0)));
+            const norm = step0 / mag;
+            let step;
+            if (norm < 1.5) step = mag;
+            else if (norm < 3) step = 2 * mag;
+            else if (norm < 7) step = 5 * mag;
+            else step = 10 * mag;
+            const start = Math.ceil(a / step) * step;
+            const ticks = [];
+            for (let v = start; v <= b + 1e-9; v += step) ticks.push(v);
+            return ticks;
+        }
+
+        function formatTick(v) {
+            if (Math.abs(v) < 1e-9) return "0";
+            if (Math.abs(v) >= 100) return v.toFixed(0);
+            if (Math.abs(v) >= 10) return v.toFixed(1);
+            return v.toFixed(2).replace(/\.?0+$/, "");
+        }
+
+        function drawCurve(ctx, ax, points, color, opts = {}) {
+            if (points.length < 2) return;
+            const { sx, sy, padL, padT, plotW, plotH } = ax;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(padL, padT, plotW, plotH);
+            ctx.clip();
+            ctx.strokeStyle = color;
+            ctx.lineWidth = opts.width || 2.4;
+            if (opts.dash) ctx.setLineDash(opts.dash);
+            if (opts.alpha != null) ctx.globalAlpha = opts.alpha;
+            // For piecewise predictions (tree), draw without smoothing — points already dense enough.
+            ctx.beginPath();
+            ctx.moveTo(sx(points[0].x), sy(points[0].y));
+            for (let i = 1; i < points.length; i++) ctx.lineTo(sx(points[i].x), sy(points[i].y));
+            ctx.stroke();
+            ctx.restore();
+        }
+
+        function drawBand(ctx, ax, upper, lower, fillColor) {
+            if (upper.length < 2) return;
+            const { sx, sy, padL, padT, plotW, plotH } = ax;
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(padL, padT, plotW, plotH);
+            ctx.clip();
+            ctx.fillStyle = fillColor;
+            ctx.beginPath();
+            ctx.moveTo(sx(upper[0].x), sy(upper[0].y));
+            for (let i = 1; i < upper.length; i++) ctx.lineTo(sx(upper[i].x), sy(upper[i].y));
+            for (let i = lower.length - 1; i >= 0; i--) ctx.lineTo(sx(lower[i].x), sy(lower[i].y));
+            ctx.closePath();
+            ctx.fill();
+            ctx.restore();
+        }
+
+        function drawDataPoints(ctx, ax, data, opts = {}) {
+            const { sx, sy } = ax;
+            const pointColor = opts.pointColor || "#1f2937";
+            const outlierColor = opts.outlierColor || "#dc2626";
+            ctx.save();
+            for (const p of data) {
+                const x = sx(p.x), y = sy(p.y);
+                if (p.isOutlier) {
+                    // X marker
+                    ctx.strokeStyle = outlierColor;
+                    ctx.lineWidth = 2.2;
+                    ctx.beginPath();
+                    ctx.moveTo(x - 5, y - 5); ctx.lineTo(x + 5, y + 5);
+                    ctx.moveTo(x + 5, y - 5); ctx.lineTo(x - 5, y + 5);
+                    ctx.stroke();
+                    // halo
+                    ctx.strokeStyle = "rgba(220,38,38,0.25)";
+                    ctx.lineWidth = 4.5;
+                    ctx.beginPath();
+                    ctx.moveTo(x - 5, y - 5); ctx.lineTo(x + 5, y + 5);
+                    ctx.moveTo(x + 5, y - 5); ctx.lineTo(x - 5, y + 5);
+                    ctx.stroke();
+                } else {
+                    ctx.fillStyle = pointColor;
+                    ctx.beginPath();
+                    ctx.arc(x, y, 3, 0, Math.PI * 2);
+                    ctx.fill();
+                    ctx.strokeStyle = "rgba(255,255,255,0.95)";
+                    ctx.lineWidth = 1;
+                    ctx.stroke();
+                }
+            }
+            ctx.restore();
+        }
+
+        function drawSupportVectors(ctx, ax, points) {
+            const { sx, sy } = ax;
+            ctx.save();
+            ctx.strokeStyle = "var(--svr-color)";
+            ctx.strokeStyle = "#9333ea";
+            ctx.lineWidth = 1.8;
+            for (const p of points) {
+                const x = sx(p.x), y = sy(p.y);
+                ctx.beginPath();
+                ctx.arc(x, y, 6.5, 0, Math.PI * 2);
+                ctx.stroke();
+            }
+            ctx.restore();
+        }
+
+        // ---------- Range helpers ----------
+        function computeYRange(data) {
+            if (!data.length) return [-3, 3];
+            let lo = Infinity, hi = -Infinity;
+            for (const p of data) { if (p.y < lo) lo = p.y; if (p.y > hi) hi = p.y; }
+            const pad = Math.max(0.6, 0.18 * (hi - lo || 1));
+            return [lo - pad, hi + pad];
+        }
+
+        function makeGrid(n) {
+            const xs = new Array(n);
+            for (let i = 0; i < n; i++) xs[i] = X_MIN + (X_MAX - X_MIN) * (i / (n - 1));
+            return xs;
+        }
+
+        // ---------- Model registry helpers ----------
+        function fitAllModels(data) {
+            return {
+                linear: fitLinear(data),
+                poly: fitPolynomial(data, STATE.polyDegree),
+                tree: fitTree(data, STATE.treeDepth),
+                svr: fitSVR(data, STATE.svrEpsilon, STATE.svrC, STATE.svrKernel),
+            };
+        }
+
+        const COLORS = {
+            linear: "#2563eb",
+            poly: "#f97316",
+            tree: "#16a34a",
+            svr: "#9333ea",
+            truth: "#475569",
+            outlier: "#dc2626",
+            point: "#1f2937",
+            baseline: "#94a3b8",
+        };
+
+        // ---------- Main rendering ----------
+        function renderPlayground() {
+            const canvas = document.getElementById("play-canvas");
+            const { ctx, w, h } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+            const yRange = computeYRange(trainData.concat([{ y: -3 }, { y: 3 }]));
+            const ax = makeAxes(w, h, [X_MIN, X_MAX], yRange);
+            drawGrid(ctx, ax);
+            // truth
+            const fn = PRESETS[STATE.preset].fn;
+            const grid = makeGrid(STATE.preset === "step" ? 401 : 201);
+            const truthPts = grid.map((x) => ({ x, y: fn(x) }));
+            drawCurve(ctx, ax, truthPts, COLORS.truth, { dash: [6, 5], width: 2 });
+            drawDataPoints(ctx, ax, trainData);
+        }
+
+        function renderZoo() {
+            const canvas = document.getElementById("zoo-canvas");
+            const { ctx, w, h } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+            const fn = PRESETS[STATE.preset].fn;
+            const models = fitAllModels(trainData);
+
+            // y range from data + sample model values
+            const samples = [];
+            const probeXs = makeGrid(60);
+            for (const x of probeXs) {
+                if (STATE.visible.linear) samples.push({ y: models.linear.predict(x) });
+                if (STATE.visible.poly) samples.push({ y: models.poly.predict(x) });
+                if (STATE.visible.tree) samples.push({ y: models.tree.predict(x) });
+                if (STATE.visible.svr) samples.push({ y: models.svr.predict(x) });
+            }
+            const yRange = computeYRange(trainData.concat(samples).concat([{ y: -3 }, { y: 3 }]));
+            const ax = makeAxes(w, h, [X_MIN, X_MAX], yRange);
+            drawGrid(ctx, ax);
+
+            // truth
+            const denseGrid = makeGrid(STATE.preset === "step" ? 401 : 241);
+            const truthPts = denseGrid.map((x) => ({ x, y: fn(x) }));
+            drawCurve(ctx, ax, truthPts, COLORS.truth, { dash: [6, 5], width: 1.6, alpha: 0.7 });
+
+            // SVR ε-tube (drawn first behind other curves) when SVR visible
+            if (STATE.visible.svr) {
+                const svrPts = denseGrid.map((x) => ({ x, y: models.svr.predict(x) }));
+                const upper = svrPts.map((p) => ({ x: p.x, y: p.y + STATE.svrEpsilon }));
+                const lower = svrPts.map((p) => ({ x: p.x, y: p.y - STATE.svrEpsilon }));
+                const fade = STATE.focus === "all" || STATE.focus === "svr" ? "rgba(147,51,234,0.13)" : "rgba(147,51,234,0.06)";
+                drawBand(ctx, ax, upper, lower, fade);
+            }
+
+            // tree splits as light vertical bars when visible & focused
+            if (STATE.visible.tree && (STATE.focus === "all" || STATE.focus === "tree")) {
+                const { sx, padT, plotH } = ax;
+                ctx.save();
+                ctx.strokeStyle = "rgba(22,163,74,0.18)";
+                ctx.setLineDash([3, 4]);
+                ctx.lineWidth = 1;
+                for (const s of models.tree.splits) {
+                    if (s < X_MIN || s > X_MAX) continue;
+                    ctx.beginPath();
+                    ctx.moveTo(sx(s), padT);
+                    ctx.lineTo(sx(s), padT + plotH);
+                    ctx.stroke();
+                }
+                ctx.restore();
+            }
+
+            // model curves
+            const order = ["linear", "poly", "tree", "svr"];
+            for (const m of order) {
+                if (!STATE.visible[m]) continue;
+                const isFocused = STATE.focus === "all" || STATE.focus === m;
+                const alpha = isFocused ? 1 : 0.18;
+                const width = isFocused ? 2.6 : 1.6;
+                let pts;
+                if (m === "tree") {
+                    // Render piecewise constant explicitly using split points so steps are crisp
+                    pts = treeRenderPoints(models.tree, [X_MIN, X_MAX]);
+                } else {
+                    pts = denseGrid.map((x) => ({ x, y: models[m].predict(x) }));
+                }
+                drawCurve(ctx, ax, pts, COLORS[m], { width, alpha });
+            }
+
+            // SVR support vectors
+            if (STATE.visible.svr && (STATE.focus === "all" || STATE.focus === "svr")) {
+                const sv = models.svr.supportIdx.map((i) => trainData[i]).filter(Boolean);
+                drawSupportVectors(ctx, ax, sv);
+            }
+
+            // data points on top
+            drawDataPoints(ctx, ax, trainData);
+
+            // Update comparison table & metrics
+            updateZooTable(models);
+            return models;
+        }
+
+        function treeRenderPoints(treeModel, range) {
+            const splits = Array.from(new Set(treeModel.splits)).sort((a, b) => a - b)
+                .filter((s) => s > range[0] && s < range[1]);
+            const pts = [];
+            const eps = 1e-4 * (range[1] - range[0]);
+            let prev = range[0];
+            pts.push({ x: prev, y: treeModel.predict(prev) });
+            for (const s of splits) {
+                pts.push({ x: s - eps, y: treeModel.predict(s - eps) });
+                pts.push({ x: s + eps, y: treeModel.predict(s + eps) });
+            }
+            pts.push({ x: range[1], y: treeModel.predict(range[1]) });
+            // densify each segment slightly so the curve renders smoothly even for non-step funcs (it's still piecewise constant)
+            return pts;
+        }
+
+        function updateZooTable(models) {
+            const rows = [
+                {
+                    key: "linear",
+                    family: "Linear (OLS)",
+                    flex: "Single line",
+                    style: "Smooth global fit",
+                    sens: "High — squared loss amplifies outliers",
+                },
+                {
+                    key: "poly",
+                    family: `Polynomial · d=${STATE.polyDegree}`,
+                    flex: "Global polynomial",
+                    style: "Smooth curve, can wiggle",
+                    sens: "Grows with degree",
+                },
+                {
+                    key: "tree",
+                    family: `CART tree · depth ≤ ${STATE.treeDepth}`,
+                    flex: "Piecewise constant",
+                    style: "Step function with hard jumps",
+                    sens: "Local — outliers distort one leaf",
+                },
+                {
+                    key: "svr",
+                    family: `SVR · ${STATE.svrKernel.toUpperCase()}, C=${STATE.svrC.toFixed(1)}, ε=${STATE.svrEpsilon.toFixed(2)}`,
+                    flex: "Smooth kernel fit",
+                    style: "Curve with ε-tube",
+                    sens: "Tunable via C — small C → robust",
+                },
+            ];
+            const tbody = document.getElementById("zoo-table-body");
+            tbody.innerHTML = rows.map((r) => {
+                const visible = STATE.visible[r.key];
+                const trainErr = visible ? mse(models[r.key].predict, trainData) : null;
+                const valErr = visible ? mse(models[r.key].predict, validationData) : null;
+                const fmt = (v) => v == null ? "—" : v.toFixed(3);
+                return `
+                    <tr style="opacity:${visible ? 1 : 0.4};">
+                        <td class="color-cell"><span class="stripe" style="background:${COLORS[r.key]};"></span></td>
+                        <td>${escapeHtml(r.family)}</td>
+                        <td>${escapeHtml(r.flex)}</td>
+                        <td>${escapeHtml(r.style)}</td>
+                        <td class="mono text-right">${fmt(trainErr)}</td>
+                        <td class="mono text-right">${fmt(valErr)}</td>
+                        <td>${escapeHtml(r.sens)}</td>
+                    </tr>
+                `;
+            }).join("");
+        }
+
+        function escapeHtml(s) {
+            return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+        }
+
+        // ---------- Outlier Lab rendering ----------
+        function renderOutlierLab() {
+            const cleanModels = fitAllModelsForLab(cleanTrainData);
+            // Use STATE.labSvrC for the dirty fit's SVR but match other model knobs
+            const dirtyModelsLab = fitAllModelsLabDirty(trainData, STATE.labSvrC);
+            // Common y-range based on both datasets and curves
+            const probeXs = makeGrid(60);
+            const samples = [];
+            for (const m of ["linear", "poly", "tree", "svr"]) {
+                if (!STATE.visible[m]) continue;
+                for (const x of probeXs) {
+                    samples.push({ y: cleanModels[m].predict(x) });
+                    samples.push({ y: dirtyModelsLab[m].predict(x) });
+                }
+            }
+            const yRange = computeYRange(trainData.concat(cleanTrainData).concat(samples).concat([{ y: -3 }, { y: 3 }]));
+
+            renderLabPanel("lab-clean-canvas", cleanTrainData, cleanModels, yRange, /* showOutliers */ false, /* baselineModels */ null);
+            renderLabPanel("lab-dirty-canvas", trainData, dirtyModelsLab, yRange, true, STATE.showBaseline ? cleanModels : null);
+
+            updateLabMetrics(cleanModels, dirtyModelsLab);
+            renderSvrCDemo();
+        }
+
+        function fitAllModelsForLab(data) {
+            return {
+                linear: fitLinear(data),
+                poly: fitPolynomial(data, STATE.polyDegree),
+                tree: fitTree(data, STATE.treeDepth),
+                svr: fitSVR(data, STATE.svrEpsilon, STATE.labSvrC, STATE.svrKernel),
+            };
+        }
+
+        function fitAllModelsLabDirty(data, cVal) {
+            return {
+                linear: fitLinear(data),
+                poly: fitPolynomial(data, STATE.polyDegree),
+                tree: fitTree(data, STATE.treeDepth),
+                svr: fitSVR(data, STATE.svrEpsilon, cVal, STATE.svrKernel),
+            };
+        }
+
+        function renderLabPanel(canvasId, data, models, yRange, showOutliers, baselineModels) {
+            const canvas = document.getElementById(canvasId);
+            const { ctx, w, h } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+            const ax = makeAxes(w, h, [X_MIN, X_MAX], yRange);
+            drawGrid(ctx, ax);
+            const fn = PRESETS[STATE.preset].fn;
+            const dense = makeGrid(STATE.preset === "step" ? 401 : 241);
+            const truthPts = dense.map((x) => ({ x, y: fn(x) }));
+            drawCurve(ctx, ax, truthPts, COLORS.truth, { dash: [6, 5], width: 1.4, alpha: 0.65 });
+
+            // Baseline (clean) fits behind, faint
+            if (baselineModels) {
+                for (const m of ["linear", "poly", "tree", "svr"]) {
+                    if (!STATE.visible[m]) continue;
+                    const pts = m === "tree"
+                        ? treeRenderPoints(baselineModels.tree, [X_MIN, X_MAX])
+                        : dense.map((x) => ({ x, y: baselineModels[m].predict(x) }));
+                    drawCurve(ctx, ax, pts, COLORS[m], { width: 1.4, alpha: 0.28, dash: [4, 4] });
+                }
+            }
+            // Active fits
+            for (const m of ["linear", "poly", "tree", "svr"]) {
+                if (!STATE.visible[m]) continue;
+                const pts = m === "tree"
+                    ? treeRenderPoints(models.tree, [X_MIN, X_MAX])
+                    : dense.map((x) => ({ x, y: models[m].predict(x) }));
+                drawCurve(ctx, ax, pts, COLORS[m], { width: 2.2 });
+            }
+            // points
+            drawDataPoints(ctx, ax, data);
+        }
+
+        function updateLabMetrics(cleanModels, dirtyModels) {
+            const dense = makeGrid(80);
+            const order = ["linear", "poly", "tree", "svr"];
+            const cards = [];
+            for (const m of order) {
+                if (!STATE.visible[m]) continue;
+                let curveShift = 0;
+                for (const x of dense) {
+                    curveShift += Math.abs(dirtyModels[m].predict(x) - cleanModels[m].predict(x));
+                }
+                curveShift /= dense.length;
+                const valClean = mse(cleanModels[m].predict, validationData);
+                const valDirty = mse(dirtyModels[m].predict, validationData);
+                const delta = valDirty - valClean;
+                const deltaClass = delta > 0.001 ? "pos" : (delta < -0.001 ? "neg" : "");
+                const sign = delta >= 0 ? "+" : "";
+                cards.push(`
+                    <div class="metric-card" style="border-left:4px solid ${COLORS[m]};">
+                        <div class="label">${escapeHtml(modelLabel(m))}</div>
+                        <div class="value">Δcurve ${curveShift.toFixed(2)}</div>
+                        <div class="delta ${deltaClass}">val MSE ${valDirty.toFixed(2)} (${sign}${delta.toFixed(2)})</div>
+                    </div>
+                `);
+            }
+            document.getElementById("lab-metrics").innerHTML = cards.join("") || `
+                <div class="metric-card"><div class="label">No models visible</div><div class="value">—</div></div>
+            `;
+        }
+
+        function modelLabel(m) {
+            return ({ linear: "Linear", poly: "Polynomial", tree: "Tree", svr: "SVR" })[m] || m;
+        }
+
+        function renderSvrCDemo() {
+            const Cs = [
+                { id: "svr-c-low-canvas", c: 0.5 },
+                { id: "svr-c-mid-canvas", c: 5 },
+                { id: "svr-c-high-canvas", c: 80 },
+            ];
+            // shared y-range
+            const probeXs = makeGrid(40);
+            const samples = [];
+            for (const cfg of Cs) {
+                const m = fitSVR(trainData, STATE.svrEpsilon, cfg.c, STATE.svrKernel);
+                for (const x of probeXs) samples.push({ y: m.predict(x) });
+            }
+            const yRange = computeYRange(trainData.concat(samples).concat([{ y: -3 }, { y: 3 }]));
+            for (const cfg of Cs) {
+                const canvas = document.getElementById(cfg.id);
+                const { ctx, w, h } = setupCanvas(canvas);
+                ctx.clearRect(0, 0, w, h);
+                const ax = makeAxes(w, h, [X_MIN, X_MAX], yRange);
+                drawGrid(ctx, ax);
+                const fn = PRESETS[STATE.preset].fn;
+                const dense = makeGrid(STATE.preset === "step" ? 401 : 201);
+                drawCurve(ctx, ax, dense.map((x) => ({ x, y: fn(x) })), COLORS.truth, { dash: [4, 4], width: 1.2, alpha: 0.55 });
+                const m = fitSVR(trainData, STATE.svrEpsilon, cfg.c, STATE.svrKernel);
+                const pts = dense.map((x) => ({ x, y: m.predict(x) }));
+                const upper = pts.map((p) => ({ x: p.x, y: p.y + STATE.svrEpsilon }));
+                const lower = pts.map((p) => ({ x: p.x, y: p.y - STATE.svrEpsilon }));
+                drawBand(ctx, ax, upper, lower, "rgba(147,51,234,0.12)");
+                drawCurve(ctx, ax, pts, COLORS.svr, { width: 2.2 });
+                drawDataPoints(ctx, ax, trainData);
+            }
+        }
+
+        // ---------- Section 4 mini illustrations ----------
+        function renderIllustrations() {
+            // Linear: a clean line
+            renderIllusLinear();
+            renderIllusPoly();
+            renderIllusTree();
+            renderIllusSVR();
+        }
+
+        function illusAxes(canvas) {
+            const { ctx, w, h } = setupCanvas(canvas);
+            ctx.clearRect(0, 0, w, h);
+            const ax = makeAxes(w, h, [-3.2, 3.2], [-2.5, 2.5]);
+            drawGrid(ctx, ax, { bg: "#fbfcfe" });
+            return { ctx, w, h, ax };
+        }
+
+        function renderIllusLinear() {
+            const canvas = document.getElementById("illus-linear");
+            if (!canvas) return;
+            const { ctx, ax } = illusAxes(canvas);
+            const xs = [-2.6, -1.7, -0.9, -0.1, 0.7, 1.4, 2.1, 2.6];
+            const fn = (x) => 0.6 * x + 0.1;
+            const data = xs.map((x, i) => ({ x, y: fn(x) + ((i % 2 === 0) ? 0.18 : -0.22), isOutlier: i === 6 }));
+            data[6].y = fn(data[6].x) + 1.4;
+            const dense = makeGrid(60).map((x) => ({ x, y: fn(x) }));
+            drawCurve(ctx, ax, dense, COLORS.linear, { width: 2.4 });
+            drawDataPoints(ctx, ax, data);
+        }
+
+        function renderIllusPoly() {
+            const canvas = document.getElementById("illus-poly");
+            if (!canvas) return;
+            const { ctx, ax } = illusAxes(canvas);
+            const fnLow = (x) => 0.4 * x;
+            const fnHigh = (x) => 0.05 * x * x * x - 0.5 * x + 0.6 * Math.sin(2.4 * x);
+            const dense = makeGrid(80);
+            drawCurve(ctx, ax, dense.map((x) => ({ x, y: fnLow(x) })), COLORS.poly, { width: 1.8, alpha: 0.45, dash: [4, 4] });
+            drawCurve(ctx, ax, dense.map((x) => ({ x, y: fnHigh(x) })), COLORS.poly, { width: 2.4 });
+            const xs = [-2.7, -2.0, -1.3, -0.5, 0.3, 1.0, 1.6, 2.2, 2.8];
+            const data = xs.map((x, i) => ({ x, y: fnHigh(x) + (i % 2 === 0 ? 0.18 : -0.18), isOutlier: false }));
+            drawDataPoints(ctx, ax, data);
+        }
+
+        function renderIllusTree() {
+            const canvas = document.getElementById("illus-tree");
+            if (!canvas) return;
+            const { ctx, ax } = illusAxes(canvas);
+            const segments = [
+                { x0: -3.2, x1: -1.5, y: -1.6 },
+                { x0: -1.5, x1: 0.3, y: 0.1 },
+                { x0: 0.3, x1: 1.6, y: 1.2 },
+                { x0: 1.6, x1: 3.2, y: -0.4 },
+            ];
+            // step curve
+            const stepPts = [];
+            for (const s of segments) {
+                stepPts.push({ x: s.x0, y: s.y });
+                stepPts.push({ x: s.x1, y: s.y });
+            }
+            drawCurve(ctx, ax, stepPts, COLORS.tree, { width: 2.4 });
+            // splits
+            const { sx, padT, plotH } = ax;
+            ctx.save();
+            ctx.strokeStyle = "rgba(22,163,74,0.35)";
+            ctx.setLineDash([3, 4]);
+            ctx.lineWidth = 1;
+            for (const s of [-1.5, 0.3, 1.6]) {
+                ctx.beginPath(); ctx.moveTo(sx(s), padT); ctx.lineTo(sx(s), padT + plotH); ctx.stroke();
+            }
+            ctx.restore();
+            // points
+            const xs = [-2.5, -1.9, -0.7, -0.2, 0.6, 1.1, 1.4, 2.0, 2.7];
+            const ys = xs.map((x) => {
+                const seg = segments.find((s) => x >= s.x0 && x < s.x1) || segments[segments.length - 1];
+                return seg.y + (Math.sin(x * 7.3) * 0.18);
+            });
+            drawDataPoints(ctx, ax, xs.map((x, i) => ({ x, y: ys[i], isOutlier: false })));
+        }
+
+        function renderIllusSVR() {
+            const canvas = document.getElementById("illus-svr");
+            if (!canvas) return;
+            const { ctx, ax } = illusAxes(canvas);
+            const fn = (x) => 0.7 * Math.sin(0.9 * x);
+            const dense = makeGrid(80);
+            const pts = dense.map((x) => ({ x, y: fn(x) }));
+            const eps = 0.45;
+            drawBand(ctx, ax, pts.map((p) => ({ x: p.x, y: p.y + eps })), pts.map((p) => ({ x: p.x, y: p.y - eps })), "rgba(147,51,234,0.16)");
+            drawCurve(ctx, ax, pts, COLORS.svr, { width: 2.4 });
+            const data = [
+                { x: -2.6, y: fn(-2.6) + 0.2 },
+                { x: -1.8, y: fn(-1.8) - 0.18 },
+                { x: -0.8, y: fn(-0.8) + 0.95 }, // outside tube
+                { x: 0.1, y: fn(0.1) + 0.1 },
+                { x: 0.9, y: fn(0.9) - 0.95 }, // outside tube
+                { x: 1.7, y: fn(1.7) + 0.2 },
+                { x: 2.5, y: fn(2.5) - 0.85 }, // outside tube
+            ];
+            const sv = data.filter((p) => Math.abs(p.y - fn(p.x)) >= eps);
+            drawDataPoints(ctx, ax, data.map((p) => ({ ...p, isOutlier: false })));
+            drawSupportVectors(ctx, ax, sv);
+        }
+
+        // ---------- Full render loop ----------
+        let renderQueued = false;
+        function rerender() {
+            if (renderQueued) return;
+            renderQueued = true;
+            requestAnimationFrame(() => {
+                renderQueued = false;
+                generateData();
+                renderPlayground();
+                renderZoo();
+                renderOutlierLab();
+                renderIllustrations();
+                if (window.MathJax && window.MathJax.typesetPromise) {
+                    window.MathJax.typesetPromise([document.getElementById("preset-desc")]).catch(() => { });
+                }
+            });
+        }
+
+        // ---------- Wire up controls ----------
+        function setActive(buttons, predicate) {
+            for (const btn of buttons) btn.classList.toggle("active", predicate(btn));
+        }
+
+        function syncMirroredOutlierControls() {
+            // playground -> lab
+            document.getElementById("ocount-val").textContent = STATE.outlierCount;
+            document.getElementById("omag-val").textContent = STATE.outlierMagnitude.toFixed(1);
+            document.getElementById("ocount-slider").value = STATE.outlierCount;
+            document.getElementById("omag-slider").value = STATE.outlierMagnitude;
+            document.getElementById("lab-ocount-val").textContent = STATE.outlierCount;
+            document.getElementById("lab-omag-val").textContent = STATE.outlierMagnitude.toFixed(1);
+            document.getElementById("lab-ocount-slider").value = STATE.outlierCount;
+            document.getElementById("lab-omag-slider").value = STATE.outlierMagnitude;
+            setActive(document.querySelectorAll(".opos-btn"), (b) => b.dataset.opos === STATE.outlierPosition);
+            setActive(document.querySelectorAll(".lab-opos-btn"), (b) => b.dataset.opos === STATE.outlierPosition);
+        }
+
+        function wireControls() {
+            // Presets
+            for (const btn of document.querySelectorAll(".preset-btn")) {
+                btn.addEventListener("click", () => {
+                    STATE.preset = btn.dataset.preset;
+                    setActive(document.querySelectorAll(".preset-btn"), (b) => b.dataset.preset === STATE.preset);
+                    document.getElementById("preset-desc").innerHTML = PRESETS[STATE.preset].label;
+                    STATE.manualOutliers = [];
+                    rerender();
+                });
+            }
+            setActive(document.querySelectorAll(".preset-btn"), (b) => b.dataset.preset === STATE.preset);
+            document.getElementById("preset-desc").innerHTML = PRESETS[STATE.preset].label;
+
+            // Sliders
+            document.getElementById("samples-slider").addEventListener("input", (e) => {
+                STATE.samples = parseInt(e.target.value, 10);
+                document.getElementById("samples-val").textContent = STATE.samples;
+                rerender();
+            });
+            document.getElementById("noise-slider").addEventListener("input", (e) => {
+                STATE.noise = parseFloat(e.target.value);
+                document.getElementById("noise-val").textContent = STATE.noise.toFixed(2);
+                rerender();
+            });
+            const onCount = (e) => { STATE.outlierCount = parseInt(e.target.value, 10); syncMirroredOutlierControls(); rerender(); };
+            const onMag = (e) => { STATE.outlierMagnitude = parseFloat(e.target.value); syncMirroredOutlierControls(); rerender(); };
+            document.getElementById("ocount-slider").addEventListener("input", onCount);
+            document.getElementById("omag-slider").addEventListener("input", onMag);
+            document.getElementById("lab-ocount-slider").addEventListener("input", onCount);
+            document.getElementById("lab-omag-slider").addEventListener("input", onMag);
+
+            for (const btn of document.querySelectorAll(".opos-btn, .lab-opos-btn")) {
+                btn.addEventListener("click", () => {
+                    STATE.outlierPosition = btn.dataset.opos;
+                    syncMirroredOutlierControls();
+                    rerender();
+                });
+            }
+
+            document.getElementById("resample-btn").addEventListener("click", () => {
+                STATE.seed = (STATE.seed + 0x9E3779B1) | 0;
+                STATE.manualOutliers = [];
+                rerender();
+            });
+
+            document.getElementById("add-outlier-btn").addEventListener("click", () => {
+                const rand = mulberry32((STATE.seed ^ 0x55555) + STATE.manualOutliers.length);
+                const x = X_MIN + (X_MAX - X_MIN) * rand();
+                const sign = rand() < 0.5 ? -1 : 1;
+                const dy = sign * (STATE.outlierMagnitude || 4) * (0.8 + 0.4 * rand());
+                STATE.manualOutliers.push({ x, dy });
+                rerender();
+            });
+
+            // Model toggles
+            for (const btn of document.querySelectorAll(".toggle-chip")) {
+                btn.addEventListener("click", () => {
+                    const key = btn.dataset.toggle;
+                    STATE.visible[key] = !STATE.visible[key];
+                    btn.classList.toggle("active", STATE.visible[key]);
+                    rerender();
+                });
+            }
+
+            // Focus
+            document.getElementById("focus-select").addEventListener("change", (e) => {
+                STATE.focus = e.target.value;
+                rerender();
+            });
+
+            // Per-model knobs
+            document.getElementById("poly-deg-slider").addEventListener("input", (e) => {
+                STATE.polyDegree = parseInt(e.target.value, 10);
+                document.getElementById("poly-deg-val").textContent = STATE.polyDegree;
+                rerender();
+            });
+            document.getElementById("tree-depth-slider").addEventListener("input", (e) => {
+                STATE.treeDepth = parseInt(e.target.value, 10);
+                document.getElementById("tree-depth-val").textContent = STATE.treeDepth;
+                rerender();
+            });
+            document.getElementById("svr-eps-slider").addEventListener("input", (e) => {
+                STATE.svrEpsilon = parseFloat(e.target.value);
+                document.getElementById("svr-eps-val").textContent = STATE.svrEpsilon.toFixed(2);
+                rerender();
+            });
+            document.getElementById("svr-c-slider").addEventListener("input", (e) => {
+                STATE.svrC = parseFloat(e.target.value);
+                document.getElementById("svr-c-val").textContent = STATE.svrC.toFixed(1);
+                STATE.labSvrC = STATE.svrC;
+                document.getElementById("lab-svr-c-slider").value = STATE.svrC;
+                document.getElementById("lab-svr-c-val").textContent = STATE.svrC.toFixed(1);
+                rerender();
+            });
+            for (const btn of document.querySelectorAll(".kernel-btn")) {
+                btn.addEventListener("click", () => {
+                    STATE.svrKernel = btn.dataset.kernel;
+                    setActive(document.querySelectorAll(".kernel-btn"), (b) => b.dataset.kernel === STATE.svrKernel);
+                    rerender();
+                });
+            }
+            setActive(document.querySelectorAll(".kernel-btn"), (b) => b.dataset.kernel === STATE.svrKernel);
+
+            // Lab SVR C
+            document.getElementById("lab-svr-c-slider").addEventListener("input", (e) => {
+                STATE.labSvrC = parseFloat(e.target.value);
+                document.getElementById("lab-svr-c-val").textContent = STATE.labSvrC.toFixed(1);
+                STATE.svrC = STATE.labSvrC;
+                document.getElementById("svr-c-slider").value = STATE.svrC;
+                document.getElementById("svr-c-val").textContent = STATE.svrC.toFixed(1);
+                rerender();
+            });
+
+            document.getElementById("show-baseline").addEventListener("change", (e) => {
+                STATE.showBaseline = e.target.checked;
+                rerender();
+            });
+
+            document.getElementById("reset-outliers-btn").addEventListener("click", () => {
+                STATE.outlierCount = 0;
+                STATE.outlierMagnitude = 0;
+                STATE.manualOutliers = [];
+                syncMirroredOutlierControls();
+                rerender();
+            });
+
+            // Resize
+            let resizeTimer = null;
+            window.addEventListener("resize", () => {
+                if (resizeTimer) cancelAnimationFrame(resizeTimer);
+                resizeTimer = requestAnimationFrame(() => rerender());
+            });
+        }
+
+        // ---------- Boot ----------
+        document.addEventListener("DOMContentLoaded", () => {
+            wireControls();
+            syncMirroredOutlierControls();
+            rerender();
+        });
+    </script>
+</body>
+
+</html>

@@ -1,0 +1,743 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #55 by Sreehari (@sreeharikk25): feat: add activation functions & loss functions visualizer. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Activation Functions & Loss Functions Visualizer</title>
+    <style>
+        :root {
+            --bg: #0d1117; --surface: #161b22; --surface2: #1c2230;
+            --border: #30363d; --text: #e6edf3; --text-dim: #8b949e;
+            --accent: #58a6ff; --green: #3fb950; --orange: #f0883e;
+            --pink: #f778ba; --red: #f85149; --purple: #bc8cff;
+            --yellow: #e3b341; --cyan: #39d2c0;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:var(--bg); color:var(--text); font-family:'Segoe UI',system-ui,sans-serif; line-height:1.6; }
+
+        .hero { text-align:center; padding:2.5rem 1.5rem 1.5rem; background:linear-gradient(180deg,#0f1a2e,var(--bg)); border-bottom:1px solid var(--border); }
+        .hero h1 { font-size:clamp(1.5rem,4.5vw,2.3rem); font-weight:700; letter-spacing:-0.02em; }
+        .hero .hl { color:var(--accent); } .hero .hl2 { color:var(--green); }
+        .hero .sub { color:var(--text-dim); font-size:clamp(0.88rem,2.5vw,1rem); max-width:640px; margin:0.3rem auto 0; }
+
+        .container { max-width:1100px; margin:0 auto; padding:0 1rem; }
+        .main-tabs { display:flex; gap:2px; margin:1.5rem 0 0; border-bottom:2px solid var(--border); overflow-x:auto; }
+        .main-tab { padding:0.55rem 1.1rem; border:none; background:transparent; color:var(--text-dim); font-size:0.88rem; font-weight:500; cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-2px; transition:all 0.2s; white-space:nowrap; }
+        .main-tab:hover { color:var(--text); }
+        .main-tab.active { color:var(--accent); border-bottom-color:var(--accent); font-weight:600; }
+        .tab-panel { display:none; padding:1.25rem 0; }
+        .tab-panel.active { display:block; }
+
+        .card { background:var(--surface); border:1px solid var(--border); border-radius:10px; padding:1.5rem; margin-bottom:1rem; }
+        .card h2 { font-size:1.15rem; margin-bottom:0.2rem; display:flex; align-items:center; gap:0.5rem; }
+        .card .desc { color:var(--text-dim); font-size:0.86rem; margin-bottom:1rem; max-width:700px; }
+
+        .ctrls { display:flex; flex-wrap:wrap; gap:0.75rem; align-items:flex-end; margin-bottom:1rem; }
+        .ctrl { display:flex; flex-direction:column; gap:0.2rem; }
+        .ctrl label { font-size:0.7rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.05em; }
+        .ctrl select, .ctrl input[type="number"] { background:var(--surface2); border:1px solid var(--border); color:var(--text); padding:0.35rem 0.5rem; border-radius:5px; font-size:0.85rem; }
+        .ctrl input[type="range"] { width:160px; accent-color:var(--accent); }
+        .ctrl .val { font-size:0.82rem; color:var(--accent); font-weight:600; }
+        .row-flex { display:flex; align-items:center; gap:0.4rem; }
+
+        canvas { width:100%; border-radius:8px; background:var(--surface2); border:1px solid var(--border); }
+
+        .stats-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:0.6rem; margin-top:0.75rem; }
+        .stat-card { background:var(--surface2); border:1px solid var(--border); border-radius:7px; padding:0.6rem 0.75rem; }
+        .stat-card .lbl { font-size:0.67rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; }
+        .stat-card .val { font-size:1.05rem; font-weight:700; margin-top:0.1rem; }
+        .c-blue{color:var(--accent)}.c-green{color:var(--green)}.c-orange{color:var(--orange)}.c-red{color:var(--red)}.c-purple{color:var(--purple)}.c-cyan{color:var(--cyan)}.c-pink{color:var(--pink)}
+
+        .fn-toggles { display:flex; flex-wrap:wrap; gap:0.4rem; margin-bottom:0.75rem; }
+        .fn-toggle { padding:0.3rem 0.7rem; border-radius:14px; font-size:0.78rem; font-weight:600; cursor:pointer; border:1.5px solid; transition:all 0.2s; user-select:none; }
+        .fn-toggle.off { opacity:0.35; }
+
+        .step-desc { font-size:0.88rem; padding:0.65rem 0.9rem; background:var(--surface2); border-left:3px solid var(--accent); border-radius:0 6px 6px 0; margin:0.5rem 0; min-height:2.5rem; }
+
+        .split-view { display:grid; grid-template-columns:1fr 1fr; gap:1rem; }
+        .split-label { text-align:center; font-size:0.78rem; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.04em; margin-bottom:0.3rem; }
+
+        footer { text-align:center; padding:1.5rem 1rem; color:var(--text-dim); font-size:0.8rem; border-top:1px solid var(--border); margin-top:1.5rem; }
+
+        @media(max-width:640px) {
+            .card{padding:1rem;} .split-view{grid-template-columns:1fr;} .stats-grid{grid-template-columns:1fr 1fr;}
+            .ctrl input[type="range"]{width:100%;}
+        }
+    </style>
+</head>
+<body>
+
+<div class="hero">
+    <h1>⚡ <span class="hl">Activation Functions</span> & <span class="hl2">Loss Functions</span></h1>
+    <p class="sub">Explore how activations shape neuron outputs and how loss functions measure prediction error — then see how they chain together in a forward-backward pass.</p>
+</div>
+
+<div class="container">
+<div class="main-tabs">
+    <button class="main-tab active" data-panel="activations">Activation Functions</button>
+    <button class="main-tab" data-panel="losses">Loss Functions</button>
+    <button class="main-tab" data-panel="pipeline">Activation → Loss Pipeline</button>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 1: ACTIVATION FUNCTIONS -->
+<!-- ============================================================ -->
+<div id="panel-activations" class="tab-panel active">
+    <div class="card">
+        <h2>📈 Activation Functions</h2>
+        <p class="desc">Toggle functions on/off. Drag the <strong>input x</strong> slider to see how each activation transforms the input and what gradient it produces. Watch for <strong>vanishing gradients</strong> (flat zones) and <strong>dead neurons</strong> (zero output regions).</p>
+
+        <div id="act-toggles" class="fn-toggles"></div>
+
+        <div class="ctrls">
+            <div class="ctrl">
+                <label>Input x</label>
+                <div class="row-flex">
+                    <input type="range" id="act-x" min="-6" max="6" step="0.05" value="1.0" />
+                    <span class="val" id="act-x-val">1.00</span>
+                </div>
+            </div>
+            <div class="ctrl">
+                <label>Show</label>
+                <select id="act-show">
+                    <option value="both" selected>Function + Derivative</option>
+                    <option value="fn">Function Only</option>
+                    <option value="deriv">Derivative Only</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Leaky α</label>
+                <div class="row-flex">
+                    <input type="range" id="act-alpha" min="0.01" max="0.5" step="0.01" value="0.1" />
+                    <span class="val" id="act-alpha-val">0.10</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="split-view">
+            <div>
+                <div class="split-label">f(x) — Activation Output</div>
+                <canvas id="act-fn-canvas" height="300"></canvas>
+            </div>
+            <div>
+                <div class="split-label">f'(x) — Derivative / Gradient</div>
+                <canvas id="act-deriv-canvas" height="300"></canvas>
+            </div>
+        </div>
+
+        <div class="stats-grid" id="act-stats"></div>
+
+        <div class="step-desc" id="act-desc">Select activations above and drag the x slider.</div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 2: LOSS FUNCTIONS -->
+<!-- ============================================================ -->
+<div id="panel-losses" class="tab-panel">
+    <div class="card">
+        <h2>📉 Loss Functions</h2>
+        <p class="desc">Drag <strong>predicted value</strong> to see how each loss function penalizes the error. Notice how cross-entropy heavily penalizes confident wrong predictions, while MSE grows quadratically.</p>
+
+        <div id="loss-toggles" class="fn-toggles"></div>
+
+        <div class="ctrls">
+            <div class="ctrl">
+                <label>True Label (y)</label>
+                <select id="loss-y">
+                    <option value="1" selected>1 (Positive class)</option>
+                    <option value="0">0 (Negative class)</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Predicted (ŷ)</label>
+                <div class="row-flex">
+                    <input type="range" id="loss-pred" min="0.01" max="0.99" step="0.005" value="0.7" />
+                    <span class="val" id="loss-pred-val">0.70</span>
+                </div>
+            </div>
+            <div class="ctrl">
+                <label>Huber δ</label>
+                <div class="row-flex">
+                    <input type="range" id="loss-delta" min="0.1" max="2.0" step="0.1" value="1.0" />
+                    <span class="val" id="loss-delta-val">1.0</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="split-view">
+            <div>
+                <div class="split-label">Loss Value vs Predicted ŷ</div>
+                <canvas id="loss-fn-canvas" height="300"></canvas>
+            </div>
+            <div>
+                <div class="split-label">Gradient ∂L/∂ŷ vs Predicted ŷ</div>
+                <canvas id="loss-grad-canvas" height="300"></canvas>
+            </div>
+        </div>
+
+        <div class="stats-grid" id="loss-stats"></div>
+
+        <div class="step-desc" id="loss-desc">Toggle loss functions and drag the predicted value slider.</div>
+    </div>
+</div>
+
+<!-- ============================================================ -->
+<!-- TAB 3: PIPELINE -->
+<!-- ============================================================ -->
+<div id="panel-pipeline" class="tab-panel">
+    <div class="card">
+        <h2>🔗 Activation → Loss Pipeline</h2>
+        <p class="desc">See a complete forward-backward pass: raw logit <strong>z</strong> → activation <strong>a = f(z)</strong> → loss <strong>L(a, y)</strong> → gradient <strong>∂L/∂z = ∂L/∂a · f'(z)</strong>. Observe how activation choice affects gradient flow.</p>
+
+        <div class="ctrls">
+            <div class="ctrl">
+                <label>Activation</label>
+                <select id="pipe-act">
+                    <option value="sigmoid" selected>Sigmoid</option>
+                    <option value="tanh">Tanh</option>
+                    <option value="relu">ReLU</option>
+                    <option value="leaky">Leaky ReLU</option>
+                    <option value="gelu">GELU</option>
+                    <option value="swish">Swish</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Loss</label>
+                <select id="pipe-loss">
+                    <option value="bce" selected>Binary Cross-Entropy</option>
+                    <option value="mse">MSE</option>
+                    <option value="hinge">Hinge</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>True Label (y)</label>
+                <select id="pipe-y">
+                    <option value="1" selected>1</option>
+                    <option value="0">0</option>
+                </select>
+            </div>
+            <div class="ctrl">
+                <label>Logit z</label>
+                <div class="row-flex">
+                    <input type="range" id="pipe-z" min="-5" max="5" step="0.05" value="0.5" />
+                    <span class="val" id="pipe-z-val">0.50</span>
+                </div>
+            </div>
+        </div>
+
+        <canvas id="pipe-canvas" height="360"></canvas>
+
+        <div class="stats-grid" id="pipe-stats"></div>
+
+        <div class="step-desc" id="pipe-desc">Drag the logit z slider to see the full forward → backward pipeline.</div>
+    </div>
+</div>
+
+</div>
+
+<footer>Interactive Learning Guide &bull; Activation Functions &amp; Loss Functions for Neural Networks</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const $$ = s => document.querySelectorAll(s);
+
+// Tab switching
+$$('.main-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        $$('.main-tab').forEach(t => t.classList.remove('active'));
+        $$('.tab-panel').forEach(p => p.classList.remove('active'));
+        tab.classList.add('active');
+        $(`#panel-${tab.dataset.panel}`).classList.add('active');
+        if (tab.dataset.panel === 'activations') drawActivations();
+        if (tab.dataset.panel === 'losses') drawLosses();
+        if (tab.dataset.panel === 'pipeline') drawPipeline();
+    });
+});
+
+function getCtx(canvas, h) {
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = canvas.clientWidth * dpr;
+    canvas.height = h * dpr;
+    const ctx = canvas.getContext('2d');
+    ctx.scale(dpr, dpr);
+    return { ctx, W: canvas.clientWidth, H: h };
+}
+
+// ================================================================
+// ACTIVATION FUNCTIONS
+// ================================================================
+const ACT_FNS = {
+    relu:    { name:'ReLU',       color:'#f85149', fn: x => Math.max(0, x), deriv: x => x > 0 ? 1 : 0 },
+    sigmoid: { name:'Sigmoid',    color:'#58a6ff', fn: x => 1/(1+Math.exp(-x)), deriv: x => { const s=1/(1+Math.exp(-x)); return s*(1-s); } },
+    tanh:    { name:'Tanh',       color:'#3fb950', fn: x => Math.tanh(x), deriv: x => 1 - Math.tanh(x)**2 },
+    gelu:    { name:'GELU',       color:'#f778ba', fn: x => 0.5*x*(1+Math.tanh(Math.sqrt(2/Math.PI)*(x+0.044715*x**3))), deriv: x => { const c=Math.sqrt(2/Math.PI); const t=Math.tanh(c*(x+0.044715*x**3)); return 0.5*(1+t)+0.5*x*(1-t**2)*c*(1+3*0.044715*x**2); } },
+    swish:   { name:'Swish',      color:'#e3b341', fn: x => x/(1+Math.exp(-x)), deriv: x => { const s=1/(1+Math.exp(-x)); return s+x*s*(1-s); } },
+    leaky:   { name:'Leaky ReLU', color:'#bc8cff', fn: null, deriv: null },
+};
+
+function getLeakyFns() {
+    const a = parseFloat($('#act-alpha').value);
+    return {
+        fn: x => x >= 0 ? x : a * x,
+        deriv: x => x >= 0 ? 1 : a
+    };
+}
+
+let actEnabled = { relu:true, sigmoid:true, tanh:true, gelu:false, swish:false, leaky:false };
+
+// Build toggles
+function buildActToggles() {
+    const c = $('#act-toggles');
+    c.innerHTML = '';
+    for (const [key, def] of Object.entries(ACT_FNS)) {
+        const el = document.createElement('span');
+        el.className = 'fn-toggle' + (actEnabled[key] ? '' : ' off');
+        el.style.borderColor = def.color;
+        el.style.background = actEnabled[key] ? def.color + '22' : 'transparent';
+        el.style.color = def.color;
+        el.textContent = def.name;
+        el.addEventListener('click', () => { actEnabled[key] = !actEnabled[key]; buildActToggles(); drawActivations(); });
+        c.appendChild(el);
+    }
+}
+buildActToggles();
+
+function drawGraph(canvasId, h, fns, xMin, xMax, yMin, yMax, markerX, xLabel, yLabel) {
+    const canvas = $(canvasId);
+    const { ctx, W, H } = getCtx(canvas, h);
+    ctx.clearRect(0, 0, W, H);
+
+    const m = { top:20, right:20, bottom:35, left:45 };
+    const cW = W - m.left - m.right;
+    const cH = H - m.top - m.bottom;
+
+    function xPos(v) { return m.left + ((v - xMin)/(xMax - xMin)) * cW; }
+    function yPos(v) { return m.top + cH - ((v - yMin)/(yMax - yMin)) * cH; }
+
+    // Grid
+    ctx.strokeStyle = '#1c2230'; ctx.lineWidth = 1;
+    for (let v = Math.ceil(xMin); v <= xMax; v++) {
+        const x = xPos(v); ctx.beginPath(); ctx.moveTo(x, m.top); ctx.lineTo(x, m.top + cH); ctx.stroke();
+    }
+    for (let v = Math.ceil(yMin); v <= yMax; v++) {
+        const y = yPos(v); ctx.beginPath(); ctx.moveTo(m.left, y); ctx.lineTo(m.left + cW, y); ctx.stroke();
+    }
+
+    // Axes
+    ctx.strokeStyle = '#30363d'; ctx.lineWidth = 1.5;
+    if (xMin <= 0 && xMax >= 0) { const x = xPos(0); ctx.beginPath(); ctx.moveTo(x, m.top); ctx.lineTo(x, m.top + cH); ctx.stroke(); }
+    if (yMin <= 0 && yMax >= 0) { const y = yPos(0); ctx.beginPath(); ctx.moveTo(m.left, y); ctx.lineTo(m.left + cW, y); ctx.stroke(); }
+
+    // Axis labels
+    ctx.fillStyle = '#8b949e'; ctx.font = '10px monospace'; ctx.textAlign = 'center';
+    for (let v = Math.ceil(xMin); v <= xMax; v++) ctx.fillText(v, xPos(v), H - m.bottom + 15);
+    ctx.textAlign = 'right';
+    for (let v = Math.ceil(yMin); v <= yMax; v++) ctx.fillText(v.toFixed(0), m.left - 6, yPos(v) + 4);
+
+    ctx.textAlign = 'center';
+    ctx.fillText(xLabel || 'x', W/2, H - 3);
+    ctx.save(); ctx.translate(10, H/2); ctx.rotate(-Math.PI/2); ctx.fillText(yLabel || 'y', 0, 0); ctx.restore();
+
+    // Plot functions
+    for (const { fn, color, name } of fns) {
+        ctx.strokeStyle = color; ctx.lineWidth = 2.5; ctx.beginPath();
+        let started = false;
+        for (let px = 0; px <= cW; px++) {
+            const xv = xMin + (px / cW) * (xMax - xMin);
+            const yv = fn(xv);
+            const sx = m.left + px;
+            const sy = yPos(yv);
+            if (sy >= m.top - 5 && sy <= m.top + cH + 5) {
+                if (!started) { ctx.moveTo(sx, sy); started = true; } else ctx.lineTo(sx, sy);
+            } else { started = false; }
+        }
+        ctx.stroke();
+    }
+
+    // Marker line + dots
+    if (markerX !== undefined) {
+        const mx = xPos(markerX);
+        ctx.strokeStyle = '#ffffff33'; ctx.lineWidth = 1; ctx.setLineDash([3,3]);
+        ctx.beginPath(); ctx.moveTo(mx, m.top); ctx.lineTo(mx, m.top + cH); ctx.stroke();
+        ctx.setLineDash([]);
+
+        for (const { fn, color } of fns) {
+            const yv = fn(markerX);
+            let sy = yPos(yv);
+            const visible = sy >= m.top - 10 && sy <= m.top + cH + 10;
+            sy = Math.max(m.top, Math.min(m.top + cH, sy));
+            ctx.fillStyle = color; ctx.beginPath(); ctx.arc(mx, sy, 5, 0, Math.PI*2); ctx.fill();
+            ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif';
+            const nearRight = mx > W - 80;
+            ctx.textAlign = nearRight ? 'right' : 'left';
+            const label = visible ? yv.toFixed(3) : (yv > 0 ? '▲ ' : '▼ ') + yv.toFixed(1);
+            ctx.fillText(label, nearRight ? mx - 8 : mx + 8, sy - 4);
+        }
+    }
+}
+
+function drawActivations() {
+    const x = parseFloat($('#act-x').value);
+    const show = $('#act-show').value;
+    const alpha = parseFloat($('#act-alpha').value);
+    $('#act-x-val').textContent = x.toFixed(2);
+    $('#act-alpha-val').textContent = alpha.toFixed(2);
+
+    const leaky = getLeakyFns();
+
+    const fnList = [], derivList = [];
+    for (const [key, def] of Object.entries(ACT_FNS)) {
+        if (!actEnabled[key]) continue;
+        const fn = key === 'leaky' ? leaky.fn : def.fn;
+        const deriv = key === 'leaky' ? leaky.deriv : def.deriv;
+        fnList.push({ fn, color: def.color, name: def.name });
+        derivList.push({ fn: deriv, color: def.color, name: def.name });
+    }
+
+    if (show !== 'deriv') drawGraph('#act-fn-canvas', 300, fnList, -6, 6, -2, 4, x, 'x', 'f(x)');
+    else { const c=$('#act-fn-canvas'); const{ctx,W,H}=getCtx(c,300); ctx.clearRect(0,0,W,H); ctx.fillStyle='#8b949e'; ctx.font='12px sans-serif'; ctx.textAlign='center'; ctx.fillText('(Showing derivatives only)',W/2,H/2); }
+
+    if (show !== 'fn') drawGraph('#act-deriv-canvas', 300, derivList, -6, 6, -0.5, 1.5, x, 'x', "f'(x)");
+    else { const c=$('#act-deriv-canvas'); const{ctx,W,H}=getCtx(c,300); ctx.clearRect(0,0,W,H); ctx.fillStyle='#8b949e'; ctx.font='12px sans-serif'; ctx.textAlign='center'; ctx.fillText('(Showing functions only)',W/2,H/2); }
+
+    // Stats
+    let statsHTML = '';
+    for (const [key, def] of Object.entries(ACT_FNS)) {
+        if (!actEnabled[key]) continue;
+        const fn = key === 'leaky' ? leaky.fn : def.fn;
+        const deriv = key === 'leaky' ? leaky.deriv : def.deriv;
+        const fv = fn(x), dv = deriv(x);
+        const gradWarn = (key === 'relu' && x <= 0) ? '💀 dead neuron' : Math.abs(dv) < 0.01 ? '⚠️ vanishing' : Math.abs(dv) < 0.1 ? '⚠️ small' : '✓ healthy';
+        statsHTML += `<div class="stat-card"><div class="lbl" style="color:${def.color}">${def.name}</div><div class="val" style="color:${def.color}">f(${x.toFixed(1)}) = ${fv.toFixed(4)}</div><div style="font-size:0.75rem;color:var(--text-dim)">f' = ${dv.toFixed(4)} ${gradWarn}</div></div>`;
+    }
+    $('#act-stats').innerHTML = statsHTML;
+
+    // Description
+    let desc = `<strong>x = ${x.toFixed(2)}:</strong> `;
+    if (x < -3) desc += 'Deep negative region — Sigmoid/Tanh saturate (gradient ≈ 0, vanishing gradient problem). ReLU outputs 0 (dead neuron). GELU and Swish allow small negative values.';
+    else if (x < 0) desc += 'Negative region — ReLU is 0 (dead). Leaky ReLU passes a small signal (α×x). Sigmoid/Tanh still have some gradient.';
+    else if (x < 0.5) desc += 'Near-zero region — all activations are approximately linear. Gradients are near their maximum.';
+    else if (x < 3) desc += 'Positive region — all activations active. ReLU is linear (gradient=1). Sigmoid approaches 1. Tanh approaches 1.';
+    else desc += 'Deep positive region — Sigmoid/Tanh saturate near 1 (gradient ≈ 0). ReLU stays linear (gradient=1, no saturation).';
+    $('#act-desc').innerHTML = desc;
+}
+
+$('#act-x').addEventListener('input', drawActivations);
+$('#act-show').addEventListener('change', drawActivations);
+$('#act-alpha').addEventListener('input', drawActivations);
+drawActivations();
+
+// ================================================================
+// LOSS FUNCTIONS
+// ================================================================
+const LOSS_FNS = {
+    bce:   { name:'Binary Cross-Entropy', color:'#58a6ff',
+        fn: (y,p) => -(y*Math.log(Math.max(p,1e-7))+(1-y)*Math.log(Math.max(1-p,1e-7))),
+        grad: (y,p) => -(y/Math.max(p,1e-7)) + (1-y)/Math.max(1-p,1e-7) },
+    mse:   { name:'MSE', color:'#3fb950',
+        fn: (y,p) => (y-p)**2,
+        grad: (y,p) => -2*(y-p) },
+    hinge: { name:'Hinge', color:'#f0883e',
+        fn: (y,p) => { const yy=y===1?1:-1; return Math.max(0, 1-yy*(2*p-1)); },
+        grad: (y,p) => { const yy=y===1?1:-1; return (1-yy*(2*p-1))>0 ? -yy*2 : 0; } },
+    huber: { name:'Huber', color:'#bc8cff',
+        fn: null, grad: null },
+};
+
+function getHuberFns() {
+    const d = parseFloat($('#loss-delta').value);
+    return {
+        fn: (y,p) => { const a=Math.abs(y-p); return a<=d ? 0.5*a**2 : d*(a-0.5*d); },
+        grad: (y,p) => { const r=p-y; const a=Math.abs(r); return a<=d ? r : d*Math.sign(r); }
+    };
+}
+
+let lossEnabled = { bce:true, mse:true, hinge:false, huber:false };
+
+function buildLossToggles() {
+    const c = $('#loss-toggles');
+    c.innerHTML = '';
+    for (const [key, def] of Object.entries(LOSS_FNS)) {
+        const el = document.createElement('span');
+        el.className = 'fn-toggle' + (lossEnabled[key] ? '' : ' off');
+        el.style.borderColor = def.color;
+        el.style.background = lossEnabled[key] ? def.color + '22' : 'transparent';
+        el.style.color = def.color;
+        el.textContent = def.name;
+        el.addEventListener('click', () => { lossEnabled[key] = !lossEnabled[key]; buildLossToggles(); drawLosses(); });
+        c.appendChild(el);
+    }
+}
+buildLossToggles();
+
+function drawLosses() {
+    const y = parseInt($('#loss-y').value);
+    const pred = parseFloat($('#loss-pred').value);
+    const delta = parseFloat($('#loss-delta').value);
+    $('#loss-pred-val').textContent = pred.toFixed(2);
+    $('#loss-delta-val').textContent = delta.toFixed(1);
+
+    const huber = getHuberFns();
+
+    const fnList = [], gradList = [];
+    for (const [key, def] of Object.entries(LOSS_FNS)) {
+        if (!lossEnabled[key]) continue;
+        const fn = key === 'huber' ? huber.fn : def.fn;
+        const grad = key === 'huber' ? huber.grad : def.grad;
+        fnList.push({ fn: p => fn(y, p), color: def.color, name: def.name });
+        gradList.push({ fn: p => grad(y, p), color: def.color, name: def.name });
+    }
+
+    drawGraph('#loss-fn-canvas', 300, fnList, 0.01, 0.99, -0.5, 5, pred, 'ŷ (predicted)', 'Loss');
+    drawGraph('#loss-grad-canvas', 300, gradList, 0.01, 0.99, -6, 6, pred, 'ŷ (predicted)', '∂L/∂ŷ');
+
+    // Stats
+    let statsHTML = '';
+    for (const [key, def] of Object.entries(LOSS_FNS)) {
+        if (!lossEnabled[key]) continue;
+        const fn = key === 'huber' ? huber.fn : def.fn;
+        const grad = key === 'huber' ? huber.grad : def.grad;
+        const lv = fn(y, pred), gv = grad(y, pred);
+        statsHTML += `<div class="stat-card"><div class="lbl" style="color:${def.color}">${def.name}</div><div class="val" style="color:${def.color}">L = ${lv.toFixed(4)}</div><div style="font-size:0.75rem;color:var(--text-dim)">∂L/∂ŷ = ${gv.toFixed(4)}</div></div>`;
+    }
+    $('#loss-stats').innerHTML = statsHTML;
+
+    // Description
+    const correct = (y === 1 && pred > 0.5) || (y === 0 && pred < 0.5);
+    const confidence = Math.abs(pred - 0.5) * 2;
+    let desc = `<strong>y=${y}, ŷ=${pred.toFixed(2)}:</strong> Prediction is ${correct ? '✓ correct' : '✗ wrong'} (${(confidence*100).toFixed(0)}% confident). `;
+    if (lossEnabled.bce) {
+        const bceVal = LOSS_FNS.bce.fn(y, pred);
+        if (!correct && pred > 0.9 || !correct && pred < 0.1)
+            desc += 'Cross-entropy is very high — it heavily penalizes confident wrong predictions. ';
+        else if (correct && confidence > 0.8)
+            desc += 'Cross-entropy is low — confident correct prediction. ';
+    }
+    if (lossEnabled.mse && lossEnabled.bce)
+        desc += 'Notice MSE grows quadratically while cross-entropy grows logarithmically for wrong predictions.';
+    $('#loss-desc').innerHTML = desc;
+}
+
+$('#loss-y').addEventListener('change', drawLosses);
+$('#loss-pred').addEventListener('input', drawLosses);
+$('#loss-delta').addEventListener('input', drawLosses);
+drawLosses();
+
+// ================================================================
+// TAB 3: PIPELINE
+// ================================================================
+function drawPipeline() {
+    const actKey = $('#pipe-act').value;
+    const lossKey = $('#pipe-loss').value;
+    const y = parseInt($('#pipe-y').value);
+    const z = parseFloat($('#pipe-z').value);
+    $('#pipe-z-val').textContent = z.toFixed(2);
+
+    const alpha = parseFloat($('#act-alpha').value);
+    const leaky = getLeakyFns();
+
+    // Get activation
+    const actDef = ACT_FNS[actKey];
+    const actFn = actKey === 'leaky' ? leaky.fn : actDef.fn;
+    const actDeriv = actKey === 'leaky' ? leaky.deriv : actDef.deriv;
+
+    // Get loss
+    const lossDef = LOSS_FNS[lossKey];
+    const lossFn = lossDef.fn;
+    const lossGrad = lossDef.grad;
+
+    // Forward pass
+    const a = actFn(z);
+    const aClamped = Math.max(0.001, Math.min(0.999, a)); // clamp for log safety
+    const L = lossFn(y, aClamped);
+
+    // Backward pass
+    const dL_da = lossGrad(y, aClamped);
+    const da_dz = actDeriv(z);
+    const dL_dz = dL_da * da_dz;
+
+    // Draw pipeline diagram
+    const canvas = $('#pipe-canvas');
+    const { ctx, W, H } = getCtx(canvas, 360);
+    ctx.clearRect(0, 0, W, H);
+
+    const boxW = Math.min(140, (W - 60) / 5);
+    const boxH = 70;
+    const gap = Math.min(30, (W - 4 * boxW) / 5);
+    const startX = (W - 4 * boxW - 3 * gap) / 2;
+    const topY = 40;
+
+    const boxes = [
+        { label: 'Input z', val: z.toFixed(3), color: '#8b949e', sub: 'raw logit' },
+        { label: `${actDef.name}`, val: a.toFixed(4), color: actDef.color, sub: `a = f(z)` },
+        { label: lossDef.name, val: L.toFixed(4), color: lossDef.color, sub: `L(a, y=${y})` },
+        { label: 'Gradient', val: dL_dz.toFixed(4), color: Math.abs(dL_dz) < 0.01 ? '#f85149' : '#3fb950', sub: '∂L/∂z' },
+    ];
+
+    // Draw forward arrows
+    for (let i = 0; i < 3; i++) {
+        const x1 = startX + (i + 1) * boxW + i * gap;
+        const x2 = x1 + gap;
+        const ay = topY + boxH / 2;
+        ctx.strokeStyle = '#58a6ff'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x1, ay); ctx.lineTo(x2, ay); ctx.stroke();
+        // Arrowhead
+        ctx.fillStyle = '#58a6ff'; ctx.beginPath();
+        ctx.moveTo(x2, ay); ctx.lineTo(x2 - 7, ay - 4); ctx.lineTo(x2 - 7, ay + 4); ctx.fill();
+    }
+
+    // Draw boxes
+    boxes.forEach((b, i) => {
+        const x = startX + i * (boxW + gap);
+        const by = topY;
+
+        ctx.fillStyle = b.color + '15';
+        ctx.strokeStyle = b.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.roundRect(x, by, boxW, boxH, 8); ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = b.color;
+        ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(b.label, x + boxW/2, by + 18);
+
+        ctx.fillStyle = '#e6edf3';
+        ctx.font = 'bold 16px monospace';
+        ctx.fillText(b.val, x + boxW/2, by + 42);
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(b.sub, x + boxW/2, by + 60);
+    });
+
+    // Forward label
+    ctx.fillStyle = '#58a6ff'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('FORWARD →', W/2, topY - 8);
+
+    // Backward arrows
+    const backY = topY + boxH + 40;
+    ctx.fillStyle = '#f0883e'; ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('← BACKWARD (chain rule)', W/2, backY - 8);
+
+    // Gradient flow boxes
+    const gradBoxes = [
+        { label: '∂L/∂z', val: dL_dz.toFixed(4), sub: `= ${dL_da.toFixed(3)} × ${da_dz.toFixed(3)}` },
+        { label: "f'(z)", val: da_dz.toFixed(4), sub: `activation gradient` },
+        { label: '∂L/∂a', val: dL_da.toFixed(4), sub: `loss gradient` },
+    ];
+
+    const gbW = Math.min(120, (W - 60) / 4);
+    const gbGap = Math.min(25, (W - 3 * gbW) / 4);
+    const gbStartX = (W - 3 * gbW - 2 * gbGap) / 2;
+
+    // Backward arrows
+    for (let i = 0; i < 2; i++) {
+        const x1 = gbStartX + (i + 1) * gbW + i * gbGap;
+        const x2 = x1 + gbGap;
+        const ay = backY + 30;
+        ctx.strokeStyle = '#f0883e'; ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(x2, ay); ctx.lineTo(x1, ay); ctx.stroke();
+        ctx.fillStyle = '#f0883e'; ctx.beginPath();
+        ctx.moveTo(x1, ay); ctx.lineTo(x1 + 7, ay - 4); ctx.lineTo(x1 + 7, ay + 4); ctx.fill();
+    }
+
+    // Multiplication sign
+    ctx.fillStyle = '#f0883e'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+    for (let i = 0; i < 2; i++) {
+        const x = gbStartX + (i + 1) * gbW + i * gbGap + gbGap/2;
+        ctx.fillText('×', x, backY + 34);
+    }
+
+    gradBoxes.forEach((b, i) => {
+        const x = gbStartX + i * (gbW + gbGap);
+        const by = backY + 8;
+        const bH = 50;
+
+        const isSmall = i === 0 && Math.abs(dL_dz) < 0.01;
+        const col = i === 0 ? (isSmall ? '#f85149' : '#3fb950') : '#f0883e';
+
+        ctx.fillStyle = col + '15';
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.roundRect(x, by, gbW, bH, 6); ctx.fill(); ctx.stroke();
+
+        ctx.fillStyle = col;
+        ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'center';
+        ctx.fillText(b.label, x + gbW/2, by + 15);
+
+        ctx.fillStyle = '#e6edf3';
+        ctx.font = 'bold 13px monospace';
+        ctx.fillText(b.val, x + gbW/2, by + 33);
+
+        ctx.fillStyle = '#8b949e';
+        ctx.font = '9px sans-serif';
+        ctx.fillText(b.sub, x + gbW/2, by + 46);
+    });
+
+    // Gradient health bar
+    const barY = backY + 80;
+    const barW = W - 80;
+    const barX = 40;
+    const absGrad = Math.min(Math.abs(dL_dz), 5);
+    const barFill = (absGrad / 5) * barW;
+
+    ctx.fillStyle = '#1c2230';
+    ctx.beginPath(); ctx.roundRect(barX, barY, barW, 16, 8); ctx.fill();
+
+    const gradColor = absGrad < 0.01 ? '#f85149' : absGrad < 0.1 ? '#f0883e' : absGrad < 2 ? '#3fb950' : '#e3b341';
+    ctx.fillStyle = gradColor;
+    ctx.beginPath(); ctx.roundRect(barX, barY, Math.max(4, barFill), 16, 8); ctx.fill();
+
+    ctx.fillStyle = '#e6edf3'; ctx.font = 'bold 10px sans-serif'; ctx.textAlign = 'left';
+    const gradLabel = absGrad < 0.01 ? 'VANISHING' : absGrad < 0.1 ? 'WEAK' : absGrad < 2 ? 'HEALTHY' : 'STRONG';
+    ctx.fillText(`Gradient Strength: ${gradLabel} (|∂L/∂z| = ${Math.abs(dL_dz).toFixed(4)})`, barX, barY + 34);
+
+    // Stats
+    $('#pipe-stats').innerHTML = `
+        <div class="stat-card"><div class="lbl">Logit z</div><div class="val c-blue">${z.toFixed(3)}</div></div>
+        <div class="stat-card"><div class="lbl">Activation a</div><div class="val" style="color:${actDef.color}">${a.toFixed(4)}</div></div>
+        <div class="stat-card"><div class="lbl">Loss L</div><div class="val" style="color:${lossDef.color}">${L.toFixed(4)}</div></div>
+        <div class="stat-card"><div class="lbl">∂L/∂a</div><div class="val c-orange">${dL_da.toFixed(4)}</div></div>
+        <div class="stat-card"><div class="lbl">f'(z)</div><div class="val" style="color:${actDef.color}">${da_dz.toFixed(4)}</div></div>
+        <div class="stat-card"><div class="lbl">∂L/∂z (chain rule)</div><div class="val" style="color:${Math.abs(dL_dz)<0.01?'var(--red)':'var(--green)'}">${dL_dz.toFixed(4)}</div></div>
+    `;
+
+    // Description
+    let desc = `<strong>z=${z.toFixed(2)}, y=${y}:</strong> `;
+
+    // Warn about activation-loss compatibility
+    const unbounded = actKey === 'relu' || actKey === 'leaky' || actKey === 'gelu' || actKey === 'swish';
+    const tanhAct = actKey === 'tanh';
+    if ((unbounded || tanhAct) && lossKey === 'bce') {
+        desc += `⚠️ <strong>${actDef.name} + BCE is unusual</strong> — BCE expects output in (0,1), but ${actDef.name} output is ${tanhAct ? '(-1,1)' : 'unbounded'}. In practice, Sigmoid is paired with BCE. Showing clamped values. `;
+    } else if (Math.abs(dL_dz) < 0.01) {
+        desc += `⚠️ <strong>Vanishing gradient!</strong> The gradient ∂L/∂z ≈ 0, so this neuron learns very slowly. `;
+    } else if (Math.abs(dL_dz) > 3) {
+        desc += `⚡ <strong>Large gradient</strong> — fast learning but risk of instability. `;
+    } else {
+        desc += `✓ Healthy gradient — the neuron will update effectively. `;
+    }
+
+    if (actKey === 'relu' && z < 0) desc += `ReLU outputs 0 for z<0 (dead neuron, gradient=0). Try Leaky ReLU to fix this.`;
+    else if (actKey === 'leaky' && z < 0) desc += `Leaky ReLU passes α×z = ${(a).toFixed(4)} — small but non-zero, avoiding the dead neuron problem.`;
+    else if ((actKey === 'sigmoid' || actKey === 'tanh') && Math.abs(z) > 3) desc += `${actDef.name} is saturated at this z — gradient is near zero (vanishing gradient problem).`;
+
+    $('#pipe-desc').innerHTML = desc;
+}
+
+$('#pipe-act').addEventListener('change', drawPipeline);
+$('#pipe-loss').addEventListener('change', drawPipeline);
+$('#pipe-y').addEventListener('change', drawPipeline);
+$('#pipe-z').addEventListener('input', drawPipeline);
+drawPipeline();
+
+window.addEventListener('resize', () => {
+    const p = document.querySelector('.main-tab.active')?.dataset.panel;
+    if (p === 'activations') drawActivations();
+    if (p === 'losses') drawLosses();
+    if (p === 'pipeline') drawPipeline();
+});
+</script>
+</body>
+</html>

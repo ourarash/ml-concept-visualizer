@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #23 by Michelle (@michellelu11): Add CNN padding & stride visualizer. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>CNN Padding &amp; Stride Visualizer</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Space+Grotesk:wght@400;500;700&display=swap');
+
+  :root {
+    --bg:       #0b0e14;
+    --surface:  #131720;
+    --panel:    #1a2030;
+    --border:   #2a3550;
+    --accent:   #4af0c4;
+    --accent2:  #ff6b6b;
+    --accent3:  #ffd166;
+    --accent4:  #6ea8fe;
+    --text:     #e2e8f0;
+    --muted:    #64748b;
+    --kernel-c: rgba(255,107,107,0.18);
+    --kernel-border: #ff6b6b;
+    --pad-c:    rgba(100,116,139,0.22);
+    --output-c: rgba(74,240,196,0.22);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Space Grotesk', sans-serif;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Header ── */
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 32px;
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: var(--surface);
+  }
+  header .icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--accent4) 100%);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  header h1 {
+    font-size: 1.25rem; font-weight: 700; letter-spacing: -0.02em;
+  }
+  header p { font-size: .8rem; color: var(--muted); margin-top: 2px; }
+  .back-link {
+    margin-left: auto;
+    font-size: .8rem; color: var(--accent4);
+    text-decoration: none;
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    transition: border-color .2s;
+  }
+  .back-link:hover { border-color: var(--accent4); }
+
+  /* ── Layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    gap: 0;
+    min-height: calc(100vh - 69px);
+  }
+
+  /* ── Sidebar ── */
+  .sidebar {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 24px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 28px;
+    overflow-y: auto;
+  }
+  .control-group label {
+    display: block;
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 10px;
+  }
+  .control-group .val {
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .slider {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+  }
+  .slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 16px; height: 16px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: transform .15s;
+  }
+  .slider::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+  .pill-group {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .pill {
+    padding: 5px 14px;
+    border-radius: 20px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .8rem;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .pill:hover { border-color: var(--accent4); color: var(--accent4); }
+  .pill.active { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+
+  /* ── Formula box ── */
+  .formula-box {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .8rem;
+    line-height: 1.8;
+  }
+  .formula-box .eq { color: var(--muted); }
+  .formula-box .hl { color: var(--accent); font-weight: 700; }
+  .formula-box .lbl { color: var(--accent3); }
+  .formula-box .val2 { color: var(--accent2); }
+
+  /* ── Playback ── */
+  .play-controls {
+    display: flex; gap: 8px; flex-wrap: wrap;
+  }
+  .btn {
+    flex: 1;
+    padding: 9px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--panel);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .82rem;
+    cursor: pointer;
+    transition: all .15s;
+    min-width: 60px;
+    text-align: center;
+  }
+  .btn:hover { border-color: var(--accent); color: var(--accent); }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #000; font-weight: 700; }
+  .btn.primary:hover { opacity: .88; }
+
+  .speed-row { display: flex; align-items: center; gap: 10px; font-size: .8rem; color: var(--muted); }
+  .speed-row input { flex: 1; }
+
+  /* ── Step counter ── */
+  .step-info {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: .8rem;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--muted);
+  }
+  .step-info span { color: var(--accent3); font-weight: 700; }
+
+  /* ── Legend ── */
+  .legend { display: flex; flex-direction: column; gap: 7px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: .78rem; }
+  .legend-swatch {
+    width: 18px; height: 18px; border-radius: 4px; flex-shrink: 0;
+  }
+
+  /* ── Main canvas area ── */
+  .main {
+    padding: 28px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    overflow-y: auto;
+  }
+
+  .grids-row {
+    display: flex;
+    gap: 32px;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .grid-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .grid-card h3 {
+    font-size: .8rem;
+    font-weight: 600;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .grid-card .dim-badge {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .82rem;
+    color: var(--accent3);
+    margin-left: 8px;
+  }
+
+  .grid-wrap { position: relative; }
+
+  table.grid {
+    border-collapse: collapse;
+  }
+  table.grid td {
+    width: 38px; height: 38px;
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: .72rem;
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    transition: background .12s, color .12s, transform .1s;
+    position: relative;
+    cursor: default;
+    user-select: none;
+  }
+
+  /* Cell states */
+  td.cell-pad  { background: var(--pad-c); color: var(--muted); }
+  td.cell-data { background: #1a2030; color: var(--text); }
+  td.cell-kernel {
+    background: var(--kernel-c) !important;
+    outline: 2px solid var(--kernel-border);
+    outline-offset: -2px;
+    color: #fff !important;
+    z-index: 2;
+  }
+  td.cell-active {
+    background: rgba(255,209,102,.22) !important;
+    outline: 2px solid var(--accent3);
+    outline-offset: -2px;
+    color: var(--accent3) !important;
+    transform: scale(1.06);
+    font-weight: 700;
+  }
+
+  /* Output cell states */
+  td.out-empty  { background: #111622; color: var(--muted); }
+  td.out-filled { background: rgba(74,240,196,.16); color: var(--accent); }
+  td.out-current {
+    background: rgba(74,240,196,.38) !important;
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+    color: #fff !important;
+    font-weight: 700;
+    animation: pulse .5s ease-in-out;
+  }
+
+  @keyframes pulse {
+    0%   { transform: scale(1); }
+    40%  { transform: scale(1.12); }
+    100% { transform: scale(1); }
+  }
+
+  /* ── Explanation panel ── */
+  .explain-panel {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 24px;
+  }
+  .explain-panel h3 {
+    font-size: .8rem;
+    font-weight: 600;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 12px;
+  }
+  .explain-body {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    font-size: .85rem;
+    line-height: 1.65;
+  }
+  .explain-body .card {
+    background: var(--panel);
+    border-radius: 10px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+  }
+  .explain-body .card strong { color: var(--accent3); display: block; margin-bottom: 4px; }
+  .explain-body .card p { color: #94a3b8; font-size: .82rem; }
+
+  /* ── Responsive ── */
+  @media (max-width: 900px) {
+    .layout { grid-template-columns: 1fr; }
+    .sidebar { border-right: none; border-bottom: 1px solid var(--border); }
+    .grids-row { gap: 20px; }
+    .explain-body { grid-template-columns: 1fr; }
+    table.grid td { width: 30px; height: 30px; font-size: .65rem; }
+  }
+  @media (max-width: 600px) {
+    .main { padding: 16px; }
+    table.grid td { width: 26px; height: 26px; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="icon">🧠</div>
+  <div>
+    <h1>CNN Padding &amp; Stride Visualizer</h1>
+    <p>See exactly how padding and stride affect convolution output size — step by step</p>
+  </div>
+  <a class="back-link" href="../index.html">← All Visualizations</a>
+</header>
+
+<div class="layout">
+
+  <!-- ──────────────── SIDEBAR ──────────────── -->
+  <aside class="sidebar">
+
+    <!-- Input size -->
+    <div class="control-group">
+      <label>Input Size <span class="val" id="lblN"></span></label>
+      <input type="range" class="slider" id="slN" min="4" max="10" value="6" />
+    </div>
+
+    <!-- Kernel size -->
+    <div class="control-group">
+      <label>Kernel Size <span class="val" id="lblK"></span></label>
+      <div class="pill-group" id="pillsK">
+        <button class="pill" data-v="2">2×2</button>
+        <button class="pill active" data-v="3">3×3</button>
+        <button class="pill" data-v="4">4×4</button>
+        <button class="pill" data-v="5">5×5</button>
+      </div>
+    </div>
+
+    <!-- Padding -->
+    <div class="control-group">
+      <label>Padding <span class="val" id="lblP"></span></label>
+      <div class="pill-group" id="pillsP">
+        <button class="pill active" data-v="0">P=0<br><small style="color:var(--muted);font-size:.65rem">Valid</small></button>
+        <button class="pill" data-v="1">P=1<br><small style="color:var(--muted);font-size:.65rem">Same*</small></button>
+        <button class="pill" data-v="2">P=2<br><small style="color:var(--muted);font-size:.65rem">Full*</small></button>
+      </div>
+    </div>
+
+    <!-- Stride -->
+    <div class="control-group">
+      <label>Stride <span class="val" id="lblS"></span></label>
+      <div class="pill-group" id="pillsS">
+        <button class="pill active" data-v="1">S=1</button>
+        <button class="pill" data-v="2">S=2</button>
+        <button class="pill" data-v="3">S=3</button>
+      </div>
+    </div>
+
+    <!-- Formula -->
+    <div class="control-group">
+      <label>Output Size Formula</label>
+      <div class="formula-box">
+        <div><span class="lbl">out</span> <span class="eq">= ⌊</span><span class="lbl">(N</span><span class="eq"> + 2P − K) / S</span><span class="eq">⌋</span><span class="eq"> + 1</span></div>
+        <div id="formulaLive" style="margin-top:8px;color:var(--accent3)"></div>
+        <div id="formulaResult" style="margin-top:4px;font-weight:700;color:var(--accent)"></div>
+      </div>
+    </div>
+
+    <!-- Playback -->
+    <div class="control-group">
+      <label>Animation</label>
+      <div class="play-controls">
+        <button class="btn primary" id="btnPlay">▶ Play</button>
+        <button class="btn" id="btnPrev">◀</button>
+        <button class="btn" id="btnNext">▶</button>
+        <button class="btn" id="btnReset">↺</button>
+      </div>
+      <div class="speed-row" style="margin-top:10px">
+        <span>Speed</span>
+        <input type="range" class="slider" id="slSpeed" min="100" max="900" value="500" />
+        <span id="lblSpeed"></span>
+      </div>
+      <div class="step-info" style="margin-top:10px" id="stepInfo">
+        Step <span id="spStep">0</span> / <span id="spTotal">0</span>
+        &nbsp;·&nbsp; Row <span id="spRow">-</span>, Col <span id="spCol">-</span>
+      </div>
+    </div>
+
+    <!-- Legend -->
+    <div class="control-group">
+      <label>Legend</label>
+      <div class="legend">
+        <div class="legend-item">
+          <div class="legend-swatch" style="background:rgba(26,32,48,1);border:1px solid #2a3550"></div>
+          <span>Input data cell</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch" style="background:var(--pad-c);border:1px solid var(--border)"></div>
+          <span>Zero-padding cell</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch" style="background:var(--kernel-c);border:2px solid var(--kernel-border)"></div>
+          <span>Kernel window</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch" style="background:rgba(255,209,102,.22);border:2px solid var(--accent3)"></div>
+          <span>Active center cell</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch" style="background:rgba(74,240,196,.38);border:2px solid var(--accent)"></div>
+          <span>Current output cell</span>
+        </div>
+        <div class="legend-item">
+          <div class="legend-swatch" style="background:rgba(74,240,196,.16);border:1px solid var(--border)"></div>
+          <span>Filled output cell</span>
+        </div>
+      </div>
+    </div>
+
+  </aside>
+
+  <!-- ──────────────── MAIN ──────────────── -->
+  <main class="main">
+
+    <div class="grids-row">
+      <!-- Input + padding grid -->
+      <div class="grid-card">
+        <h3>Input (with padding) <span class="dim-badge" id="dimInput"></span></h3>
+        <div class="grid-wrap">
+          <table class="grid" id="inputGrid"></table>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="align-self:center;font-size:2rem;color:var(--muted);margin-top:30px">⊛</div>
+
+      <!-- Kernel -->
+      <div class="grid-card">
+        <h3>Kernel (fixed random) <span class="dim-badge" id="dimKernel"></span></h3>
+        <div class="grid-wrap">
+          <table class="grid" id="kernelGrid"></table>
+        </div>
+      </div>
+
+      <!-- Arrow -->
+      <div style="align-self:center;font-size:2rem;color:var(--muted);margin-top:30px">=</div>
+
+      <!-- Output grid -->
+      <div class="grid-card">
+        <h3>Output feature map <span class="dim-badge" id="dimOutput"></span></h3>
+        <div class="grid-wrap">
+          <table class="grid" id="outputGrid"></table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Explanation -->
+    <div class="explain-panel">
+      <h3>Concept Reference</h3>
+      <div class="explain-body">
+        <div class="card">
+          <strong>🔲 Padding</strong>
+          <p>Adds <em>P</em> rows/cols of zeros around the input. <br>
+          <b>P=0 (Valid)</b>: no padding — output shrinks.<br>
+          <b>P=(K-1)/2</b>: same padding — output = input size (when S=1).<br>
+          Padding preserves spatial dimensions and avoids losing edge information.</p>
+        </div>
+        <div class="card">
+          <strong>↔ Stride</strong>
+          <p>Controls how many cells the kernel slides per step.<br>
+          <b>S=1</b>: dense convolution — overlap every position.<br>
+          <b>S=2</b>: skip every other position — output size halves ≈.<br>
+          Larger stride = smaller output + faster computation.</p>
+        </div>
+        <div class="card">
+          <strong>📐 Output Size Formula</strong>
+          <p>⌊(N + 2P − K) / S⌋ + 1<br><br>
+          <b>N</b>=input, <b>P</b>=padding, <b>K</b>=kernel, <b>S</b>=stride.<br>
+          Result must be a positive integer — invalid combos are rejected.</p>
+        </div>
+        <div class="card">
+          <strong>⚡ Why it matters</strong>
+          <p>Every CNN layer changes feature map dimensions. Choosing P and S correctly lets you:<br>
+          ① preserve resolution (encoder) ② downsample efficiently ③ avoid dimension mismatch errors in code.</p>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<script>
+// ════════════════════════════════════════════
+//   State
+// ════════════════════════════════════════════
+let N=6, K=3, P=0, S=1;
+let inputData=[], kernelData=[];
+let outputSize=0, steps=[], stepIdx=0;
+let playing=false, timer=null, speed=500;
+
+// ════════════════════════════════════════════
+//   Init helpers
+// ════════════════════════════════════════════
+function randInt(lo,hi){ return Math.floor(Math.random()*(hi-lo+1))+lo; }
+
+function buildInputData(){
+  inputData=[];
+  for(let r=0;r<N;r++){
+    let row=[];
+    for(let c=0;c<N;c++) row.push(randInt(0,9));
+    inputData.push(row);
+  }
+}
+
+function buildKernelData(){
+  kernelData=[];
+  for(let r=0;r<K;r++){
+    let row=[];
+    for(let c=0;c<K;c++) row.push(randInt(-2,2)||1);
+    kernelData.push(row);
+  }
+}
+
+// ════════════════════════════════════════════
+//   Output size & steps
+// ════════════════════════════════════════════
+function calcOut(){ return Math.floor((N+2*P-K)/S)+1; }
+
+function buildSteps(){
+  steps=[];
+  const out=calcOut();
+  if(out<1) return;
+  for(let or=0;or<out;or++){
+    for(let oc=0;oc<out;oc++){
+      const pr = or*S; // top-left row in padded input
+      const pc = oc*S;
+      steps.push({or,oc,pr,pc});
+    }
+  }
+}
+
+// ════════════════════════════════════════════
+//   Render grids
+// ════════════════════════════════════════════
+function makeTd(val, cls){
+  const td=document.createElement('td');
+  td.textContent=val;
+  td.className=cls;
+  return td;
+}
+
+function renderInputGrid(step){
+  const NP=N+2*P;
+  const tbl=document.getElementById('inputGrid');
+  tbl.innerHTML='';
+  const {pr,pc}=step||{pr:-999,pc:-999};
+  for(let r=0;r<NP;r++){
+    const tr=document.createElement('tr');
+    for(let c=0;c<NP;c++){
+      const isPad=(r<P||r>=N+P||c<P||c>=N+P);
+      const inKernel=step&&(r>=pr&&r<pr+K&&c>=pc&&c<pc+K);
+      const isCenter=step&&(r===pr+Math.floor(K/2)&&c===pc+Math.floor(K/2));
+      let val=isPad?'0':inputData[r-P][c-P];
+      let cls=isPad?'cell-pad':'cell-data';
+      if(inKernel) cls='cell-kernel';
+      if(isCenter) cls='cell-active';
+      tr.appendChild(makeTd(val,cls));
+    }
+    tbl.appendChild(tr);
+  }
+  document.getElementById('dimInput').textContent=`${NP}×${NP}`;
+}
+
+function renderKernelGrid(){
+  const tbl=document.getElementById('kernelGrid');
+  tbl.innerHTML='';
+  for(let r=0;r<K;r++){
+    const tr=document.createElement('tr');
+    for(let c=0;c<K;c++){
+      const v=kernelData[r][c];
+      const td=makeTd(v,'cell-kernel');
+      td.style.fontWeight='700';
+      tr.appendChild(td);
+    }
+    tbl.appendChild(tr);
+  }
+  document.getElementById('dimKernel').textContent=`${K}×${K}`;
+}
+
+function renderOutputGrid(filledUpTo, currentStep){
+  const out=calcOut();
+  const tbl=document.getElementById('outputGrid');
+  tbl.innerHTML='';
+
+  // Compute filled values (dot products)
+  const vals=new Array(out).fill(0).map(()=>new Array(out).fill(null));
+  for(let i=0;i<filledUpTo;i++){
+    const {or,oc,pr,pc}=steps[i];
+    let sum=0;
+    for(let kr=0;kr<K;kr++){
+      for(let kc=0;kc<K;kc++){
+        const ir=pr+kr, ic=pc+kc;
+        const NP=N+2*P;
+        const isPad=(ir<P||ir>=N+P||ic<P||ic>=N+P);
+        const inputVal=isPad?0:inputData[ir-P][ic-P];
+        sum+=inputVal*kernelData[kr][kc];
+      }
+    }
+    vals[or][oc]=sum;
+  }
+
+  for(let r=0;r<out;r++){
+    const tr=document.createElement('tr');
+    for(let c=0;c<out;c++){
+      const isCurrent=currentStep&&currentStep.or===r&&currentStep.oc===c;
+      const isFilled=vals[r][c]!==null;
+      let cls = isCurrent?'out-current':(isFilled?'out-filled':'out-empty');
+      const v=isFilled?vals[r][c]:'·';
+      const td=makeTd(v,cls);
+      tr.appendChild(td);
+    }
+    tbl.appendChild(tr);
+  }
+  document.getElementById('dimOutput').textContent=`${out}×${out}`;
+}
+
+// ════════════════════════════════════════════
+//   Formula display
+// ════════════════════════════════════════════
+function updateFormula(){
+  const out=calcOut();
+  const valid=out>=1;
+  document.getElementById('formulaLive').textContent=
+    `= ⌊(${N} + 2×${P} − ${K}) / ${S}⌋ + 1`;
+  document.getElementById('formulaResult').textContent=
+    valid?`= ${out} × ${out} output`:'⚠ Invalid combination';
+}
+
+function updateLabels(){
+  document.getElementById('lblN').textContent=`${N}×${N}`;
+  document.getElementById('lblK').textContent=`${K}×${K}`;
+  document.getElementById('lblP').textContent=`${P}`;
+  document.getElementById('lblS').textContent=`${S}`;
+}
+
+// ════════════════════════════════════════════
+//   Step info
+// ════════════════════════════════════════════
+function updateStepInfo(){
+  const out=calcOut();
+  document.getElementById('spStep').textContent=stepIdx;
+  document.getElementById('spTotal').textContent=steps.length;
+  if(stepIdx>0){
+    const {or,oc}=steps[stepIdx-1];
+    document.getElementById('spRow').textContent=or;
+    document.getElementById('spCol').textContent=oc;
+  } else {
+    document.getElementById('spRow').textContent='-';
+    document.getElementById('spCol').textContent='-';
+  }
+}
+
+// ════════════════════════════════════════════
+//   Main render
+// ════════════════════════════════════════════
+function render(){
+  const cur=stepIdx>0?steps[stepIdx-1]:null;
+  renderInputGrid(cur);
+  renderKernelGrid();
+  renderOutputGrid(stepIdx, cur);
+  updateFormula();
+  updateLabels();
+  updateStepInfo();
+}
+
+// ════════════════════════════════════════════
+//   Rebuild (new params)
+// ════════════════════════════════════════════
+function rebuild(keepData){
+  stopPlay();
+  if(!keepData) buildInputData();
+  buildKernelData();
+  outputSize=calcOut();
+  buildSteps();
+  stepIdx=0;
+  render();
+}
+
+// ════════════════════════════════════════════
+//   Animation
+// ════════════════════════════════════════════
+function stopPlay(){
+  playing=false;
+  clearInterval(timer);
+  document.getElementById('btnPlay').textContent='▶ Play';
+}
+
+function startPlay(){
+  if(stepIdx>=steps.length) stepIdx=0;
+  playing=true;
+  document.getElementById('btnPlay').textContent='⏸ Pause';
+  timer=setInterval(()=>{
+    if(stepIdx<steps.length){
+      stepIdx++;
+      render();
+    } else {
+      stopPlay();
+    }
+  }, speed);
+}
+
+// ════════════════════════════════════════════
+//   Controls wiring
+// ════════════════════════════════════════════
+// Slider N
+document.getElementById('slN').addEventListener('input',e=>{
+  N=+e.target.value; rebuild(false);
+});
+
+// Pill groups
+function bindPills(containerId, setter){
+  document.getElementById(containerId).querySelectorAll('.pill').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      document.getElementById(containerId).querySelectorAll('.pill').forEach(b=>b.classList.remove('active'));
+      btn.classList.add('active');
+      setter(+btn.dataset.v);
+      rebuild(true);
+    });
+  });
+}
+bindPills('pillsK', v=>K=v);
+bindPills('pillsP', v=>P=v);
+bindPills('pillsS', v=>S=v);
+
+// Playback buttons
+document.getElementById('btnPlay').addEventListener('click',()=>{
+  if(playing) stopPlay();
+  else startPlay();
+});
+document.getElementById('btnPrev').addEventListener('click',()=>{
+  stopPlay();
+  if(stepIdx>0){ stepIdx--; render(); }
+});
+document.getElementById('btnNext').addEventListener('click',()=>{
+  stopPlay();
+  if(stepIdx<steps.length){ stepIdx++; render(); }
+});
+document.getElementById('btnReset').addEventListener('click',()=>{
+  stopPlay(); stepIdx=0; render();
+});
+
+// Speed
+document.getElementById('slSpeed').addEventListener('input',e=>{
+  speed=1000-+e.target.value; // invert so right=fast
+  document.getElementById('lblSpeed').textContent=
+    speed<300?'Fast':speed<600?'Med':'Slow';
+  if(playing){ clearInterval(timer); startPlay(); }
+});
+
+// ════════════════════════════════════════════
+//   Boot
+// ════════════════════════════════════════════
+document.getElementById('lblSpeed').textContent='Med';
+buildInputData();
+buildKernelData();
+buildSteps();
+stepIdx=0;
+render();
+</script>
+</body>
+</html>

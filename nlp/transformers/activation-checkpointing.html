@@ -1,0 +1,858 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #32 by Jeremy Cai (@jeremycai99): Activation Checkpointing + FlashAttention + GRPO. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Activation Checkpointing — Memory vs Recompute</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { color-scheme: light; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@500;700&display=swap');
+        body { font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif; background: #f8fafc; color: #0f172a; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .layer-box { transition: all 0.25s ease; }
+        .layer-active { box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.4); transform: translateY(-2px); }
+        .layer-recomp { animation: shake 0.4s ease; }
+        @keyframes shake { 0%, 100% { transform: translateX(0); } 25% { transform: translateX(-2px); } 75% { transform: translateX(2px); } }
+        .act-saved { background: linear-gradient(135deg, #34d399 0%, #10b981 100%); border-color: #047857; }
+        .act-discarded { background: #f1f5f9; border-color: #cbd5e1; opacity: 0.4; }
+        .act-checkpoint { background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-color: #b45309; box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.3); }
+        .act-recomputing { background: linear-gradient(135deg, #60a5fa 0%, #3b82f6 100%); border-color: #1e40af; }
+        .preset-btn.active { background: #2563eb; color: white; }
+        details > summary { list-style: none; cursor: pointer; }
+        details > summary::-webkit-details-marker { display: none; }
+        details[open] > summary .chev { transform: rotate(90deg); }
+        .chev { transition: transform 0.18s ease; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 min-h-screen">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <header class="mb-6 pb-4 border-b border-slate-200">
+            <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
+                <a href="../../index.html" class="hover:text-blue-600">Home</a>
+                <span>›</span>
+                <span>Training</span>
+                <span>›</span>
+                <span class="text-slate-700">Activation Checkpointing</span>
+            </div>
+            <h1 class="text-3xl font-black text-slate-900 tracking-tight">Activation Checkpointing</h1>
+            <p class="text-slate-600 mt-2 text-sm sm:text-base">
+                Backpropagation needs the forward activation at every layer to compute gradients. For an
+                <em>L</em>-layer network, naïvely storing all activations costs <strong>O(L)</strong> memory.
+                <strong>Checkpointing</strong> saves only every K-th activation and <em>recomputes</em> the others on demand
+                during the backward pass — trading roughly <strong>√L extra forward work</strong> for <strong>O(√L) memory</strong>.
+                This is what lets practitioners fit a 70B-parameter transformer on a single GPU.
+            </p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Sidebar -->
+            <aside class="lg:col-span-4 space-y-4">
+                <!-- Network controls -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Network</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between items-baseline">
+                                <label class="text-xs font-bold text-slate-700">Layers (L)</label>
+                                <span id="lVal" class="mono text-xs font-bold text-blue-700">12</span>
+                            </div>
+                            <input id="lIn" type="range" min="4" max="20" step="1" value="12" class="w-full">
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-baseline">
+                                <label class="text-xs font-bold text-slate-700">Activation size per layer (MB)</label>
+                                <span id="aVal" class="mono text-xs font-bold text-blue-700">1</span>
+                            </div>
+                            <input id="aIn" type="range" min="1" max="16" step="1" value="1" class="w-full">
+                            <p class="text-[10px] text-slate-500 mt-0.5">Sets the per-layer memory cost</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Strategy presets -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Checkpoint strategy</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button class="preset-btn px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 transition" data-k="1">
+                            Save all (K=1)
+                            <div class="text-[9px] font-normal opacity-80">no recompute</div>
+                        </button>
+                        <button class="preset-btn px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 active transition" data-k="sqrt">
+                            Every √L
+                            <div class="text-[9px] font-normal opacity-80">balanced</div>
+                        </button>
+                        <button class="preset-btn px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 transition" data-k="2">
+                            Every 2
+                            <div class="text-[9px] font-normal opacity-80">light recompute</div>
+                        </button>
+                        <button class="preset-btn px-3 py-2 rounded-lg text-xs font-bold border border-slate-200 transition" data-k="endpoints">
+                            Endpoints only
+                            <div class="text-[9px] font-normal opacity-80">extreme</div>
+                        </button>
+                    </div>
+                    <div class="mt-3 text-[11px] text-slate-600">
+                        Checkpoints kept: <span id="kpDisp" class="font-mono font-bold text-amber-700">—</span>
+                    </div>
+                </div>
+
+                <!-- Live stats -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Live stats</h3>
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-slate-500 tracking-widest">Phase</div>
+                            <div id="phaseVal" class="text-sm font-black text-slate-800 leading-tight pt-1">Idle</div>
+                        </div>
+                        <div class="bg-blue-50 border border-blue-100 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-blue-600 tracking-widest">Current layer</div>
+                            <div id="layerVal" class="text-2xl font-black text-blue-700 leading-tight mono">—</div>
+                        </div>
+                        <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-emerald-600 tracking-widest">Live mem (MB)</div>
+                            <div id="liveMem" class="text-2xl font-black text-emerald-700 leading-tight mono">0</div>
+                        </div>
+                        <div class="bg-amber-50 border border-amber-100 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-amber-600 tracking-widest">Peak mem (MB)</div>
+                            <div id="peakMem" class="text-2xl font-black text-amber-700 leading-tight mono">0</div>
+                        </div>
+                        <div class="bg-rose-50 border border-rose-100 rounded-lg p-2.5 text-center col-span-2">
+                            <div class="text-[9px] font-black uppercase text-rose-600 tracking-widest">Total forward layer-passes</div>
+                            <div class="flex items-center justify-center gap-3 pt-1">
+                                <span class="text-xl font-black text-rose-700 mono" id="fwdCount">0</span>
+                                <span class="text-[10px] text-rose-600">vs <span id="fwdBaseline" class="mono font-bold">0</span> baseline</span>
+                                <span class="text-xs font-bold text-rose-700">(<span id="fwdOverhead" class="mono">+0%</span>)</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Playback -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Playback</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="playBtn" class="col-span-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 shadow-sm">
+                            <span id="playIcon">▶</span><span id="playText">Play full step</span>
+                        </button>
+                        <button id="stepBtn" class="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs border border-slate-300 transition">Step ▶</button>
+                        <button id="resetBtn" class="py-1.5 px-3 text-slate-500 hover:text-rose-600 transition text-[11px] uppercase tracking-widest font-black">↺ Reset</button>
+                    </div>
+                </div>
+
+                <!-- Status -->
+                <div id="statusBox" class="p-3 rounded-lg bg-blue-50 border border-blue-100 text-blue-900 text-xs leading-relaxed">
+                    Pick a strategy and press <strong>Play</strong> to walk through one training step.
+                </div>
+            </aside>
+
+            <!-- Visualization -->
+            <section class="lg:col-span-8 space-y-5">
+                <!-- Network panel -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex items-center justify-between mb-2">
+                        <h2 class="text-sm font-black text-slate-800 tracking-tight">Network — forward & backward pass</h2>
+                        <div class="flex flex-wrap gap-2 text-[10px]">
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm act-checkpoint"></span><span class="text-slate-600 font-bold">Checkpoint (kept)</span></span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm act-saved"></span><span class="text-slate-600 font-bold">Activation saved</span></span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm act-recomputing"></span><span class="text-slate-600 font-bold">Re-computing</span></span>
+                            <span class="flex items-center gap-1"><span class="inline-block w-3 h-3 rounded-sm act-discarded"></span><span class="text-slate-600 font-bold">Discarded</span></span>
+                        </div>
+                    </div>
+                    <div class="relative w-full">
+                        <svg id="netSvg" viewBox="0 0 880 240" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <marker id="ackFwd" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#3b82f6"/>
+                                </marker>
+                                <marker id="ackFwdActive" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#10b981"/>
+                                </marker>
+                                <marker id="ackBwd" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#a855f7"/>
+                                </marker>
+                                <marker id="ackRecomp" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#f59e0b"/>
+                                </marker>
+                            </defs>
+                            <g id="netLayer"></g>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- Memory timeline (live recording) -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex items-end justify-between mb-2 gap-2">
+                        <div>
+                            <h3 class="text-sm font-black text-slate-800 tracking-tight">Memory over time (live)</h3>
+                            <p class="text-[11px] text-slate-500">Records as you step. Forward fills memory, backward drains it; checkpoint strategies show the characteristic sawtooth from recompute.</p>
+                        </div>
+                        <div class="text-right flex gap-3">
+                            <div>
+                                <span class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Live</span>
+                                <div id="liveDisp" class="text-xl font-black text-emerald-600 mono">0</div>
+                            </div>
+                            <div>
+                                <span class="text-[10px] uppercase tracking-widest text-slate-500 font-bold">Peak</span>
+                                <div id="peakDisp" class="text-xl font-black text-amber-600 mono">0</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="relative w-full">
+                        <svg id="memSvg" viewBox="0 0 880 220" class="w-full h-auto" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                </div>
+
+                <!-- Pareto chart -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex flex-wrap items-end justify-between mb-3 gap-2">
+                        <div>
+                            <h3 class="text-sm font-black text-slate-800 tracking-tight">Pareto: peak memory vs total forward work</h3>
+                            <p class="text-[11px] text-slate-500">Each dot = one strategy. Lower-left = better.</p>
+                        </div>
+                    </div>
+                    <div class="relative w-full" style="aspect-ratio: 16/8;">
+                        <svg id="paretoSvg" viewBox="0 0 800 400" class="w-full h-full" preserveAspectRatio="xMidYMid meet"></svg>
+                    </div>
+                </div>
+
+                <!-- Pedagogy -->
+                <details class="bg-white rounded-xl border border-slate-200 shadow-sm p-4" open>
+                    <summary class="font-black text-slate-800 text-sm tracking-tight flex items-center gap-2">
+                        <span class="chev text-slate-400">▶</span> Why this matters
+                    </summary>
+                    <div class="mt-3 space-y-3 text-[13px] text-slate-700 leading-relaxed">
+                        <p><strong>Naive backprop is O(L) memory.</strong> The chain rule needs the forward activation
+                            <em>a<sub>l</sub></em> to compute the gradient at layer <em>l</em>. Saving every layer's activation
+                            grows linearly with depth, and modern transformers can have hundreds of layers.</p>
+                        <p><strong>Checkpoint every K layers.</strong> Save activations only at positions <em>0, K, 2K, …, L</em>.
+                            During the backward pass, when we need <em>a<sub>l</sub></em> for <em>l</em> not on a checkpoint, we
+                            re-execute the forward pass starting from the nearest earlier checkpoint.</p>
+                        <p class="bg-amber-50 border border-amber-100 rounded-lg p-3 text-amber-900 text-[12px]">
+                            <strong>The √L sweet spot.</strong> Setting <em>K = √L</em> gives <strong>O(√L)</strong> memory and
+                            ~<strong>33% extra forward work</strong> overall. For a 100-layer network: peak memory drops 10×,
+                            you do one full extra forward pass spread across the backward — usually a great trade on a memory-bound
+                            accelerator. (Chen et al. 2016, "Training Deep Nets with Sublinear Memory Cost")
+                        </p>
+                        <p><strong>The systems angle.</strong> A100/H100 GPUs are typically memory-bound on attention training.
+                            Activation checkpointing is the single biggest knob between "fits on one GPU" and "needs sharded
+                            optimizer states across a pod" — pair it with mixed precision and you can train models several times
+                            larger than the naive memory budget allows.</p>
+                    </div>
+                </details>
+            </section>
+        </div>
+    </div>
+
+<script>
+(() => {
+    'use strict';
+
+    const state = {
+        L: 12,
+        actMB: 1,
+        kMode: 'sqrt',
+        phase: 'idle',
+        layerCursor: 0,
+        recompFrom: null,
+        savedAt: new Set(),
+        liveSet: new Set(),
+        peakMem: 0,
+        fwdCount: 0,
+        playing: false,
+        timer: null,
+        speedMs: 500,
+        // Memory timeline: array of { mem, phase, layer }
+        memHistory: [],
+        // Recompute trail: layers visited during current recomp (for ghost arrows)
+        recompTrail: [],
+    };
+
+    // ===== Strategy → checkpoint set =====
+    function checkpoints() {
+        const L = state.L;
+        const ks = new Set();
+        ks.add(0); // input is always "kept" (it's the original input)
+        if (state.kMode === '1') {
+            for (let i = 0; i <= L; i++) ks.add(i);
+        } else if (state.kMode === '2') {
+            for (let i = 0; i <= L; i += 2) ks.add(i);
+        } else if (state.kMode === 'sqrt') {
+            const k = Math.max(1, Math.round(Math.sqrt(L)));
+            for (let i = 0; i <= L; i += k) ks.add(i);
+        } else { // endpoints
+            ks.add(0); ks.add(L);
+        }
+        ks.add(L); // output is always needed
+        return ks;
+    }
+
+    // ===== SVG helpers =====
+    function svgEl(tag, attrs) {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        for (const k in attrs) el.setAttribute(k, attrs[k]);
+        return el;
+    }
+    function svgText(text, attrs) { const t = svgEl('text', attrs); t.textContent = text; return t; }
+
+    // ===== Network SVG =====
+    function drawNetwork() {
+        const svg = document.getElementById('netSvg');
+        const layer = document.getElementById('netLayer');
+        layer.innerHTML = '';
+        const cps = checkpoints();
+        const VW = 880, VH = 240;
+        const padL = 30, padR = 30;
+        const N = state.L + 1;  // node count
+        const slotW = (VW - padL - padR) / Math.max(N, 1);
+        const boxW = Math.min(50, slotW * 0.72);
+        const boxH = 36;
+        const yLayer = 78;       // row of layer boxes
+        const yAct = yLayer + boxH + 4;  // activation indicator
+        const yIdx = yAct + 18;
+
+        // Forward arrows track (above layers)
+        const yFwdArrow = yLayer - 28;
+        // Backward arrows track (below activations)
+        const yBwdArrow = yIdx + 22;
+
+        // Phase ribbons (subtle bg bands)
+        layer.appendChild(svgEl('rect', { x: padL - 8, y: yFwdArrow - 16, width: VW - padL - padR + 16, height: 26, rx: 6, fill: '#eff6ff', opacity: 0.5 }));
+        layer.appendChild(svgEl('rect', { x: padL - 8, y: yBwdArrow - 4,  width: VW - padL - padR + 16, height: 26, rx: 6, fill: '#faf5ff', opacity: 0.5 }));
+        layer.appendChild(svgText('FORWARD →', { x: padL - 12, y: yFwdArrow - 2, 'text-anchor': 'end', 'font-size': '9', 'font-weight': '900', fill: '#1e40af', 'letter-spacing': '0.05em' }));
+        layer.appendChild(svgText('← BACKWARD', { x: padL - 12, y: yBwdArrow + 13, 'text-anchor': 'end', 'font-size': '9', 'font-weight': '900', fill: '#7e22ce', 'letter-spacing': '0.05em' }));
+
+        // Pre-compute centers
+        const cxs = [];
+        for (let l = 0; l < N; l++) cxs.push(padL + slotW * (l + 0.5));
+
+        // === Forward arrows (between layers) ===
+        for (let l = 0; l < N - 1; l++) {
+            const fromX = cxs[l] + boxW / 2 + 1;
+            const toX   = cxs[l + 1] - boxW / 2 - 1;
+            const y = yFwdArrow + 8;
+            // Active if forward phase has reached layer l+1, OR recomp pass needs this segment
+            const fwdReached = state.phase === 'forward' && state.layerCursor > l;
+            const fwdDone    = state.phase !== 'idle' && state.phase !== 'forward' && l < state.L;  // forward pass completed
+            const recompActive = state.phase === 'recomp' && l >= state.recompFrom && l < state.layerCursor;
+            const stroke = recompActive ? '#f59e0b' : (fwdReached || fwdDone ? '#10b981' : '#cbd5e1');
+            const opacity = recompActive ? 1 : (fwdReached || fwdDone ? 1 : 0.45);
+            const dash = recompActive ? '4 3' : '0';
+            const marker = recompActive ? 'ackRecomp' : (fwdReached || fwdDone ? 'ackFwdActive' : 'ackFwd');
+            layer.appendChild(svgEl('line', {
+                x1: fromX, y1: y, x2: toX, y2: y,
+                stroke, 'stroke-width': 2, opacity, 'stroke-dasharray': dash,
+                'marker-end': `url(#${marker})`
+            }));
+        }
+
+        // === Backward arrows (between layers) ===
+        for (let l = N - 1; l > 0; l--) {
+            const fromX = cxs[l] - boxW / 2 - 1;
+            const toX   = cxs[l - 1] + boxW / 2 + 1;
+            const y = yBwdArrow + 8;
+            // Active if backward phase has reached layer l-1
+            const bwdReached = state.phase === 'backward' && state.layerCursor < l;
+            const bwdDone    = state.phase === 'done';
+            const stroke = (bwdReached || bwdDone) ? '#a855f7' : '#cbd5e1';
+            const opacity = (bwdReached || bwdDone) ? 1 : 0.45;
+            layer.appendChild(svgEl('line', {
+                x1: fromX, y1: y, x2: toX, y2: y,
+                stroke, 'stroke-width': 2, opacity,
+                'marker-end': 'url(#ackBwd)'
+            }));
+        }
+
+        // === Recompute "ghost" trail (above forward arrows) ===
+        if (state.phase === 'recomp' && state.recompFrom != null) {
+            const rx0 = cxs[state.recompFrom];
+            const rx1 = cxs[state.layerCursor];
+            const ay = yFwdArrow - 22;
+            layer.appendChild(svgEl('path', {
+                d: `M ${rx0} ${ay} Q ${(rx0 + rx1) / 2} ${ay - 12} ${rx1} ${ay}`,
+                fill: 'none', stroke: '#f59e0b', 'stroke-width': 2, 'stroke-dasharray': '4 3'
+            }));
+            layer.appendChild(svgText('replay', {
+                x: (rx0 + rx1) / 2, y: ay - 16,
+                'text-anchor': 'middle', 'font-size': '9', 'font-weight': '700', fill: '#b45309', 'font-style': 'italic'
+            }));
+        }
+
+        // === Layer boxes ===
+        for (let l = 0; l < N; l++) {
+            const cx = cxs[l];
+            const isCheckpoint = cps.has(l);
+            const isLive = state.liveSet.has(l);
+            const isCursor = l === state.layerCursor && state.phase !== 'idle' && state.phase !== 'done';
+            const isInput = l === 0, isOutput = l === state.L;
+
+            // Box (the layer/operation)
+            const box = svgEl('rect', {
+                x: cx - boxW / 2, y: yLayer, width: boxW, height: boxH, rx: 6,
+                fill: isCursor ? '#fbbf24' : (isInput || isOutput ? '#e0f2fe' : '#ffffff'),
+                stroke: isCursor ? '#d97706' : '#94a3b8',
+                'stroke-width': isCursor ? 2.4 : 1.2
+            });
+            if (isCursor) box.setAttribute('filter', 'drop-shadow(0 0 6px rgba(245, 158, 11, 0.65))');
+            layer.appendChild(box);
+            const lbl = svgText(isInput ? 'in' : (isOutput ? 'out' : `L${l}`), {
+                x: cx, y: yLayer + boxH / 2 + 4,
+                'text-anchor': 'middle', 'font-size': '11', 'font-weight': '800',
+                fill: isCursor ? '#7c2d12' : '#334155'
+            });
+            layer.appendChild(lbl);
+
+            // Activation indicator (below box)
+            const slotW2 = boxW;
+            let aFill, aStroke;
+            const recomputing = (state.phase === 'recomp' && state.liveSet.has(l) && l > state.recompFrom);
+            if (recomputing) { aFill = 'url(#actRecomp)'; aStroke = '#1e40af'; }
+            else if (isCheckpoint && isLive) { aFill = '#f59e0b'; aStroke = '#b45309'; }
+            else if (isLive) { aFill = '#34d399'; aStroke = '#059669'; }
+            else { aFill = '#f1f5f9'; aStroke = '#cbd5e1'; }
+            const slot = svgEl('rect', {
+                x: cx - slotW2 / 2, y: yAct, width: slotW2, height: 12, rx: 3,
+                fill: aFill === 'url(#actRecomp)' ? '#3b82f6' : aFill,
+                stroke: aStroke, 'stroke-width': 1
+            });
+            layer.appendChild(slot);
+            // Tiny "key" icon for checkpoints
+            if (isCheckpoint && (isLive || state.phase === 'idle')) {
+                layer.appendChild(svgText('★', {
+                    x: cx + slotW2 / 2 - 5, y: yAct + 11,
+                    'text-anchor': 'end', 'font-size': '10', fill: '#7c2d12', 'font-weight': '900'
+                }));
+            }
+
+            // Layer index label
+            layer.appendChild(svgText(l, {
+                x: cx, y: yIdx + 8,
+                'text-anchor': 'middle', 'font-size': '9', fill: '#94a3b8',
+                'font-family': 'JetBrains Mono, monospace'
+            }));
+
+            // Cursor pointer (small triangle above)
+            if (isCursor) {
+                const arrow = svgEl('polygon', {
+                    points: `${cx},${yLayer - 4} ${cx - 5},${yLayer - 12} ${cx + 5},${yLayer - 12}`,
+                    fill: '#d97706'
+                });
+                layer.appendChild(arrow);
+            }
+
+            // For backward phase: show "needs activation" indicator on cursor layer
+            if (state.phase === 'backward' && l === state.layerCursor && l > 0) {
+                if (state.liveSet.has(l)) {
+                    layer.appendChild(svgText('✓ a present', {
+                        x: cx, y: yBwdArrow + 38,
+                        'text-anchor': 'middle', 'font-size': '9', 'font-weight': '700', fill: '#059669'
+                    }));
+                } else {
+                    layer.appendChild(svgText('✗ a missing → recompute', {
+                        x: cx, y: yBwdArrow + 38,
+                        'text-anchor': 'middle', 'font-size': '9', 'font-weight': '700', fill: '#b91c1c'
+                    }));
+                }
+            }
+        }
+
+        // Legend bottom-right
+        const lyL = VH - 16;
+        const legends = [
+            { color: '#f59e0b', label: 'Checkpoint' },
+            { color: '#34d399', label: 'Saved' },
+            { color: '#3b82f6', label: 'Recomputed' },
+            { color: '#f1f5f9', label: 'Discarded', stroke: '#cbd5e1' },
+        ];
+        let lx = VW - padR;
+        for (let i = legends.length - 1; i >= 0; i--) {
+            const lg = legends[i];
+            const tx = svgText(lg.label, {
+                x: lx, y: lyL,
+                'text-anchor': 'end', 'font-size': '9', 'font-weight': '700', fill: '#475569'
+            });
+            layer.appendChild(tx);
+            lx -= (lg.label.length * 5 + 14);
+            layer.appendChild(svgEl('rect', { x: lx, y: lyL - 8, width: 10, height: 10, rx: 2,
+                fill: lg.color, stroke: lg.stroke || lg.color, 'stroke-width': 1 }));
+            lx -= 8;
+        }
+
+        // Stats refresh (sidebar)
+        refreshSidebar();
+        drawMemTimeline();
+    }
+
+    function refreshSidebar() {
+        const cps = checkpoints();
+        const liveMem = state.liveSet.size * state.actMB;
+        document.getElementById('liveMem').textContent = liveMem;
+        document.getElementById('peakMem').textContent = state.peakMem;
+        document.getElementById('layerVal').textContent = state.layerCursor;
+        document.getElementById('phaseVal').textContent = ({
+            idle: 'Idle', forward: 'Forward →', backward: '← Backward',
+            recomp: '↻ Recompute', done: 'Done'
+        })[state.phase];
+        document.getElementById('fwdCount').textContent = state.fwdCount;
+        document.getElementById('fwdBaseline').textContent = state.L;
+        const overhead = state.L > 0 ? Math.round((state.fwdCount - state.L) / state.L * 100) : 0;
+        document.getElementById('fwdOverhead').textContent = `+${overhead}%`;
+        document.getElementById('kpDisp').textContent = `{${[...cps].sort((a, b) => a - b).join(', ')}}`;
+    }
+
+    // ===== Memory timeline (live) =====
+    function drawMemTimeline() {
+        const svg = document.getElementById('memSvg');
+        svg.innerHTML = '';
+        const W = 880, H = 220;
+        const pad = { l: 60, r: 90, t: 16, b: 36 };
+
+        const N = state.memHistory.length;
+        const xMaxSlots = Math.max(N, 16);
+        const yMax = (state.L + 1) * state.actMB;
+
+        const sx = (i) => pad.l + (i / Math.max(xMaxSlots - 1, 1)) * (W - pad.l - pad.r);
+        const sy = (m) => H - pad.b - (m / Math.max(yMax, 1)) * (H - pad.t - pad.b);
+
+        // Axes
+        svg.appendChild(svgEl('line', { x1: pad.l, x2: W - pad.r, y1: H - pad.b, y2: H - pad.b, stroke: '#cbd5e1' }));
+        svg.appendChild(svgEl('line', { x1: pad.l, x2: pad.l, y1: pad.t, y2: H - pad.b, stroke: '#cbd5e1' }));
+
+        // Y ticks
+        for (let t = 0; t <= 4; t++) {
+            const yy = H - pad.b - (t / 4) * (H - pad.t - pad.b);
+            const v = Math.round((t / 4) * yMax);
+            svg.appendChild(svgEl('line', { x1: pad.l, x2: W - pad.r, y1: yy, y2: yy, stroke: '#f1f5f9' }));
+            svg.appendChild(svgText(`${v} MB`, { x: pad.l - 6, y: yy + 3, 'text-anchor': 'end', 'font-size': '9', fill: '#64748b', 'font-family': 'JetBrains Mono, monospace' }));
+        }
+        // X label
+        svg.appendChild(svgText('step →', { x: W - pad.r, y: H - pad.b + 16, 'text-anchor': 'end', 'font-size': '10', fill: '#64748b', 'font-style': 'italic' }));
+
+        // Phase color bands at the bottom strip
+        for (let i = 0; i < N; i++) {
+            const x0 = sx(i);
+            const x1 = sx(Math.min(N, i + 1));
+            const phaseColor = ({
+                forward: '#dbeafe', backward: '#f3e8ff', recomp: '#fef3c7', done: '#dcfce7'
+            })[state.memHistory[i].phase] || '#f8fafc';
+            svg.appendChild(svgEl('rect', { x: x0, y: H - pad.b - 4, width: x1 - x0 + 1, height: 4, fill: phaseColor }));
+        }
+
+        if (N >= 2) {
+            // Area under curve
+            const pts = [];
+            for (let i = 0; i < N; i++) pts.push([sx(i), sy(state.memHistory[i].mem)]);
+            const areaPath = pts.map((p, i) => (i === 0 ? `M ${p[0]} ${H - pad.b}` : '') + ` L ${p[0]} ${p[1]}`).join('') + ` L ${pts[pts.length-1][0]} ${H - pad.b} Z`;
+            svg.appendChild(svgEl('path', { d: areaPath, fill: '#10b981', opacity: 0.18 }));
+            // Line
+            const linePath = pts.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ');
+            svg.appendChild(svgEl('path', { d: linePath, fill: 'none', stroke: '#10b981', 'stroke-width': 2.5 }));
+
+            // Peak marker
+            let peakIdx = 0; for (let i = 1; i < N; i++) if (state.memHistory[i].mem > state.memHistory[peakIdx].mem) peakIdx = i;
+            const peakX = sx(peakIdx), peakY = sy(state.memHistory[peakIdx].mem);
+            svg.appendChild(svgEl('line', { x1: pad.l, x2: peakX, y1: peakY, y2: peakY, stroke: '#f59e0b', 'stroke-width': 1, 'stroke-dasharray': '3 3' }));
+            svg.appendChild(svgEl('circle', { cx: peakX, cy: peakY, r: 4, fill: '#f59e0b', stroke: '#fff', 'stroke-width': 1.5 }));
+            svg.appendChild(svgText(`peak ${state.memHistory[peakIdx].mem} MB`, { x: peakX + 6, y: peakY - 4, 'font-size': '10', 'font-weight': '700', fill: '#b45309' }));
+        }
+
+        // Naive baseline (would be flat at peakMaxNaive = actMB * L during forward, slowly decaying during backward)
+        const naivePeak = (state.L + 1) * state.actMB;
+        const naiveY = sy(naivePeak);
+        svg.appendChild(svgEl('line', { x1: pad.l, x2: W - pad.r, y1: naiveY, y2: naiveY, stroke: '#fb7185', 'stroke-width': 1.5, 'stroke-dasharray': '5 4' }));
+        svg.appendChild(svgText(`naive baseline (K=1) ≈ ${naivePeak} MB`, { x: W - pad.r - 4, y: naiveY - 4, 'text-anchor': 'end', 'font-size': '9', fill: '#fb7185', 'font-weight': '700' }));
+
+        // Side legend (phase color key)
+        const lx = W - pad.r + 10;
+        const items = [
+            { color: '#dbeafe', label: 'forward' },
+            { color: '#f3e8ff', label: 'backward' },
+            { color: '#fef3c7', label: 'recompute' },
+        ];
+        items.forEach((it, i) => {
+            svg.appendChild(svgEl('rect', { x: lx, y: pad.t + i * 18, width: 12, height: 12, rx: 2, fill: it.color, stroke: '#cbd5e1' }));
+            svg.appendChild(svgText(it.label, { x: lx + 16, y: pad.t + i * 18 + 10, 'font-size': '10', fill: '#475569', 'font-weight': '600' }));
+        });
+
+        // Live + Peak displays
+        document.getElementById('liveDisp').textContent = `${state.liveSet.size * state.actMB} MB`;
+        document.getElementById('peakDisp').textContent = `${state.peakMem} MB`;
+    }
+
+    function recordMem() {
+        state.memHistory.push({ mem: state.liveSet.size * state.actMB, phase: state.phase, layer: state.layerCursor });
+    }
+
+    // ===== Step machine =====
+    function step() {
+        const cps = checkpoints();
+        if (state.phase === 'idle') {
+            // Begin forward
+            state.phase = 'forward';
+            state.layerCursor = 0;
+            state.fwdCount = 0;
+            state.peakMem = state.actMB; // input
+            state.liveSet = new Set([0]);
+            updateStatus(`Forward starts. Input loaded.`);
+        } else if (state.phase === 'forward') {
+            // Compute next layer
+            state.layerCursor++;
+            state.fwdCount++;
+            state.liveSet.add(state.layerCursor);
+            // Discard intermediate activations not on checkpoint list — but only if we won't immediately need them
+            // For the canonical (checkpointed) forward, discard non-checkpoints as soon as next layer is computed
+            for (let l = 0; l < state.layerCursor; l++) {
+                if (!cps.has(l) && state.liveSet.has(l)) {
+                    state.liveSet.delete(l);
+                }
+            }
+            state.peakMem = Math.max(state.peakMem, state.liveSet.size * state.actMB);
+            if (state.layerCursor === state.L) {
+                updateStatus(`Forward done. ${state.liveSet.size} activations kept (peak ${state.peakMem} MB).`);
+                state.phase = 'backward';
+                state.layerCursor = state.L;
+            } else {
+                updateStatus(`Forward layer ${state.layerCursor}.`);
+            }
+        } else if (state.phase === 'backward') {
+            // Compute backward at current layer; need its activation
+            const l = state.layerCursor;
+            if (!state.liveSet.has(l) && l > 0) {
+                // Need to recompute: find nearest earlier checkpoint
+                let from = l - 1;
+                while (from > 0 && !cps.has(from)) from--;
+                state.phase = 'recomp';
+                state.recompFrom = from;
+                state.layerCursor = from + 1;
+                updateStatus(`Need a${l}. Recomputing forward from checkpoint ${from}…`);
+            } else {
+                // Backward step uses this activation
+                if (l > 0 && !cps.has(l)) state.liveSet.delete(l);
+                if (l === 0) {
+                    state.phase = 'done';
+                    updateStatus(`Backward done. Total forward work: ${state.fwdCount} layer-passes (vs ${state.L} baseline).`);
+                } else {
+                    state.layerCursor--;
+                    updateStatus(`Backward at layer ${state.layerCursor + 1}.`);
+                }
+            }
+        } else if (state.phase === 'recomp') {
+            // Run forward one layer at a time from recompFrom
+            const target = findNextNeededInBackward();
+            state.fwdCount++;
+            state.liveSet.add(state.layerCursor);
+            state.peakMem = Math.max(state.peakMem, state.liveSet.size * state.actMB);
+            if (state.layerCursor >= target) {
+                // Resume backward
+                state.phase = 'backward';
+                state.layerCursor = target;
+                updateStatus(`Recomputed up to a${target}. Resume backward.`);
+            } else {
+                state.layerCursor++;
+                updateStatus(`Recomputing forward at layer ${state.layerCursor}…`);
+            }
+        } else if (state.phase === 'done') {
+            return; // no more steps
+        }
+        recordMem();
+        drawNetwork();
+        // Stop play if done
+        if (state.phase === 'done') stopPlayback();
+    }
+
+    function findNextNeededInBackward() {
+        // We're recomputing because backward needs activation l_back. Find what l_back is.
+        // It's the layer that triggered recomp: the saved state.recompFrom + (steps until we hit the back-target)
+        // For simplicity, compute it: backward processes from L down; the layer it stalled on is one that has no saved act.
+        // Walk backward from L to find the highest unsaved layer between recompFrom and L.
+        const cps = checkpoints();
+        for (let l = state.L; l > state.recompFrom; l--) {
+            if (!cps.has(l) && !state.liveSet.has(l)) return l;
+        }
+        return state.recompFrom + 1;
+    }
+
+    function updateStatus(msg) {
+        const box = document.getElementById('statusBox');
+        const colors = ({
+            forward: 'bg-blue-50 border-blue-100 text-blue-900',
+            backward: 'bg-purple-50 border-purple-100 text-purple-900',
+            recomp: 'bg-amber-50 border-amber-200 text-amber-900',
+            done: 'bg-emerald-50 border-emerald-200 text-emerald-900',
+            idle: 'bg-slate-100 border-slate-200 text-slate-700',
+        })[state.phase];
+        box.className = `p-3 rounded-lg border text-xs leading-relaxed ${colors}`;
+        box.innerHTML = msg;
+    }
+
+    function play() {
+        if (state.playing) return;
+        if (state.phase === 'done') reset(false);
+        state.playing = true;
+        document.getElementById('playIcon').textContent = '⏸';
+        document.getElementById('playText').textContent = 'Pause';
+        state.timer = setInterval(step, state.speedMs);
+    }
+    function stopPlayback() {
+        state.playing = false;
+        document.getElementById('playIcon').textContent = '▶';
+        document.getElementById('playText').textContent = 'Play full step';
+        clearInterval(state.timer);
+        state.timer = null;
+    }
+    function reset(redraw = true) {
+        stopPlayback();
+        state.phase = 'idle';
+        state.layerCursor = 0;
+        state.fwdCount = 0;
+        state.peakMem = 0;
+        state.liveSet = new Set();
+        state.recompFrom = null;
+        state.memHistory = [];
+        recordMem();
+        drawNetwork();
+        updateStatus('Ready. Press <strong>Play</strong> to walk through one training step.');
+        drawPareto();
+    }
+
+    // ===== Pareto chart =====
+    function strategiesData() {
+        const L = state.L;
+        const A = state.actMB;
+        const stratK = (k) => {
+            // peak mem ≈ ceil(L/k) checkpoints + recompute working set k
+            const cps = Math.floor(L / k) + 1;
+            const peak = (cps + k) * A;
+            const fwd = L + (cps - 1) * (k - 1); // baseline + recompute (rough)
+            return { peak, fwd };
+        };
+        const out = [];
+        out.push({ name: 'K=1 (full)', k: 1, ...({ peak: (L + 1) * A, fwd: L }) });
+        out.push({ name: 'K=2', k: 2, ...stratK(2) });
+        const sk = Math.max(1, Math.round(Math.sqrt(L)));
+        out.push({ name: `K=√L=${sk}`, k: sk, ...stratK(sk) });
+        out.push({ name: 'Endpoints', k: L, ...({ peak: 2 * A + 1 * A, fwd: L + (L - 1) }) });
+        return out;
+    }
+
+    function drawPareto() {
+        const svg = document.getElementById('paretoSvg');
+        svg.innerHTML = '';
+        const W = 800, H = 400;
+        const pad = { l: 60, r: 20, t: 16, b: 50 };
+
+        const data = strategiesData();
+        const maxX = Math.max(...data.map(d => d.fwd)) * 1.15;
+        const maxY = Math.max(...data.map(d => d.peak)) * 1.15;
+
+        const sx = (x) => pad.l + (x / maxX) * (W - pad.l - pad.r);
+        const sy = (y) => H - pad.b - (y / maxY) * (H - pad.t - pad.b);
+
+        // Axes
+        const ax = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        ax.setAttribute('x1', pad.l); ax.setAttribute('x2', W - pad.r);
+        ax.setAttribute('y1', H - pad.b); ax.setAttribute('y2', H - pad.b);
+        ax.setAttribute('stroke', '#cbd5e1'); ax.setAttribute('stroke-width', '1');
+        svg.appendChild(ax);
+        const ay = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+        ay.setAttribute('x1', pad.l); ay.setAttribute('x2', pad.l);
+        ay.setAttribute('y1', pad.t); ay.setAttribute('y2', H - pad.b);
+        ay.setAttribute('stroke', '#cbd5e1'); ay.setAttribute('stroke-width', '1');
+        svg.appendChild(ay);
+
+        // Axis titles
+        const xt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        xt.setAttribute('x', W / 2); xt.setAttribute('y', H - 10);
+        xt.setAttribute('text-anchor', 'middle');
+        xt.setAttribute('font-size', '11'); xt.setAttribute('fill', '#475569');
+        xt.setAttribute('font-weight', '700');
+        xt.textContent = 'Total forward layer-passes (compute cost) →';
+        svg.appendChild(xt);
+        const yt = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+        yt.setAttribute('x', 18); yt.setAttribute('y', H / 2);
+        yt.setAttribute('font-size', '11'); yt.setAttribute('fill', '#475569');
+        yt.setAttribute('font-weight', '700');
+        yt.setAttribute('transform', `rotate(-90 18 ${H / 2})`);
+        yt.textContent = 'Peak activation memory (MB) →';
+        svg.appendChild(yt);
+
+        // Connecting curve
+        const curve = makePath(data.sort((a, b) => a.fwd - b.fwd).map(d => [sx(d.fwd), sy(d.peak)]));
+        const cp = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        cp.setAttribute('d', curve);
+        cp.setAttribute('fill', 'none');
+        cp.setAttribute('stroke', '#cbd5e1');
+        cp.setAttribute('stroke-width', '2');
+        cp.setAttribute('stroke-dasharray', '4 3');
+        svg.appendChild(cp);
+
+        // Dots
+        for (const d of data) {
+            const isActive =
+                (state.kMode === '1' && d.k === 1) ||
+                (state.kMode === '2' && d.k === 2) ||
+                (state.kMode === 'sqrt' && d.k === Math.round(Math.sqrt(state.L))) ||
+                (state.kMode === 'endpoints' && d.k === state.L);
+            const dot = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+            dot.setAttribute('cx', sx(d.fwd));
+            dot.setAttribute('cy', sy(d.peak));
+            dot.setAttribute('r', isActive ? 9 : 6);
+            dot.setAttribute('fill', isActive ? '#2563eb' : '#94a3b8');
+            dot.setAttribute('stroke', '#fff'); dot.setAttribute('stroke-width', '2');
+            svg.appendChild(dot);
+            const lbl = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            lbl.setAttribute('x', sx(d.fwd) + 12);
+            lbl.setAttribute('y', sy(d.peak) + 4);
+            lbl.setAttribute('font-size', '11');
+            lbl.setAttribute('fill', isActive ? '#1e40af' : '#475569');
+            lbl.setAttribute('font-weight', isActive ? '900' : '700');
+            lbl.textContent = `${d.name}  (${d.fwd} fwd, ${d.peak} MB)`;
+            svg.appendChild(lbl);
+        }
+    }
+
+    function makePath(pts) {
+        if (!pts.length) return '';
+        return pts.map((p, i) => (i === 0 ? `M ${p[0]} ${p[1]}` : `L ${p[0]} ${p[1]}`)).join(' ');
+    }
+
+    // ===== Bindings =====
+    function init() {
+        recordMem();
+        drawNetwork();
+        drawPareto();
+
+        document.getElementById('lIn').addEventListener('input', (e) => {
+            state.L = parseInt(e.target.value, 10);
+            document.getElementById('lVal').textContent = state.L;
+            reset();
+        });
+        document.getElementById('aIn').addEventListener('input', (e) => {
+            state.actMB = parseInt(e.target.value, 10);
+            document.getElementById('aVal').textContent = state.actMB;
+            reset();
+        });
+        for (const btn of document.querySelectorAll('.preset-btn')) {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.preset-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                state.kMode = btn.getAttribute('data-k');
+                reset();
+            });
+        }
+        document.getElementById('playBtn').addEventListener('click', () => state.playing ? stopPlayback() : play());
+        document.getElementById('stepBtn').addEventListener('click', () => { stopPlayback(); step(); });
+        document.getElementById('resetBtn').addEventListener('click', () => reset(true));
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT') return;
+            if (e.code === 'Space') { e.preventDefault(); state.playing ? stopPlayback() : play(); }
+            if (e.code === 'ArrowRight') { stopPlayback(); step(); }
+            if (e.code === 'KeyR') { reset(); }
+        });
+    }
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+})();
+</script>
+</body>
+</html>

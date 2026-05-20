@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #32 by Jeremy Cai (@jeremycai99): Activation Checkpointing + FlashAttention + GRPO. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GRPO — Group Relative Policy Optimization (DeepSeek-R1)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root { color-scheme: light; }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&family=JetBrains+Mono:wght@500;700&display=swap');
+        body { font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif; background: #f8fafc; color: #0f172a; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        .compl-card { transition: all 0.3s ease; }
+        .compl-card.entering { animation: fadeUp 0.4s ease-out; }
+        @keyframes fadeUp { 0% { opacity: 0; transform: translateY(8px); } 100% { opacity: 1; transform: translateY(0); } }
+        .step-btn.active { background: #2563eb; color: white; border-color: #1e40af; box-shadow: 0 4px 14px rgba(37,99,235,0.3); }
+        details > summary { list-style: none; cursor: pointer; }
+        details > summary::-webkit-details-marker { display: none; }
+        details[open] > summary .chev { transform: rotate(90deg); }
+        .chev { transition: transform 0.18s ease; }
+        input[type="range"] { accent-color: #2563eb; }
+        .ph-row { transition: opacity 0.2s ease, background 0.2s ease; }
+    </style>
+</head>
+<body class="min-h-screen">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        <header class="mb-6 pb-4 border-b border-slate-200">
+            <div class="flex items-center gap-2 text-xs text-slate-500 mb-2">
+                <a href="../../index.html" class="hover:text-blue-600">Home</a>
+                <span>›</span>
+                <span>NLP &amp; Transformers</span>
+                <span>›</span>
+                <span class="text-slate-700">GRPO</span>
+            </div>
+            <h1 class="text-3xl font-black text-slate-900 tracking-tight">GRPO — Group Relative Policy Optimization</h1>
+            <p class="text-slate-600 mt-2 text-sm sm:text-base">
+                The RL algorithm behind DeepSeek-R1. Instead of training a separate <strong>value network</strong> like PPO does,
+                GRPO samples a <strong>group of G completions</strong> for each prompt and uses the group's mean reward as the
+                baseline. Each completion's <strong>advantage</strong> is just <em>(reward − group mean) / group std</em>.
+                Half the parameters of PPO at training time, comparable quality, and the trick that made R1's reasoning trace possible.
+            </p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+            <!-- Sidebar -->
+            <aside class="lg:col-span-4 space-y-4">
+                <!-- Configuration -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Configuration</h3>
+                    <div class="space-y-3">
+                        <div>
+                            <div class="flex justify-between items-baseline">
+                                <label class="text-xs font-bold text-slate-700">Group size G</label>
+                                <span id="gVal" class="mono text-xs font-bold text-blue-700">8</span>
+                            </div>
+                            <input id="gIn" type="range" min="4" max="16" step="2" value="8" class="w-full">
+                            <p class="text-[10px] text-slate-500 mt-0.5">Number of completions sampled per prompt</p>
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-baseline">
+                                <label class="text-xs font-bold text-slate-700">Reward profile</label>
+                            </div>
+                            <select id="profileIn" class="w-full text-xs border border-slate-300 rounded-lg p-2 bg-white">
+                                <option value="mixed">Mixed quality (typical)</option>
+                                <option value="skewed">One great, rest mediocre</option>
+                                <option value="bimodal">Bimodal (some right, some wrong)</option>
+                                <option value="flat">Flat (all similar)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-baseline">
+                                <label class="text-xs font-bold text-slate-700">KL coefficient β</label>
+                                <span id="betaVal" class="mono text-xs font-bold text-blue-700">0.04</span>
+                            </div>
+                            <input id="betaIn" type="range" min="0" max="20" step="1" value="4" class="w-full">
+                            <p class="text-[10px] text-slate-500 mt-0.5">KL penalty against reference policy (anchors training)</p>
+                        </div>
+                        <div>
+                            <div class="flex justify-between items-baseline">
+                                <label class="text-xs font-bold text-slate-700">Clip range ε</label>
+                                <span id="clipVal" class="mono text-xs font-bold text-blue-700">0.20</span>
+                            </div>
+                            <input id="clipIn" type="range" min="5" max="40" step="5" value="20" class="w-full">
+                            <p class="text-[10px] text-slate-500 mt-0.5">Per-PPO trust region clip on the importance ratio</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Phase stats -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Group statistics</h3>
+                    <div class="grid grid-cols-2 gap-2.5">
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-slate-500 tracking-widest">Mean μ</div>
+                            <div id="meanVal" class="text-xl font-black text-slate-800 leading-tight mono">—</div>
+                        </div>
+                        <div class="bg-slate-50 border border-slate-200 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-slate-500 tracking-widest">Std σ</div>
+                            <div id="stdVal" class="text-xl font-black text-slate-800 leading-tight mono">—</div>
+                        </div>
+                        <div class="bg-emerald-50 border border-emerald-100 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-emerald-600 tracking-widest">Best reward</div>
+                            <div id="maxVal" class="text-xl font-black text-emerald-700 leading-tight mono">—</div>
+                        </div>
+                        <div class="bg-rose-50 border border-rose-100 rounded-lg p-2.5 text-center">
+                            <div class="text-[9px] font-black uppercase text-rose-600 tracking-widest">Worst reward</div>
+                            <div id="minVal" class="text-xl font-black text-rose-700 leading-tight mono">—</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Step controls -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h3 class="text-xs font-black uppercase tracking-widest text-slate-400 mb-3">Step through</h3>
+                    <div class="grid grid-cols-2 gap-2">
+                        <button id="playBtn" class="col-span-2 py-2 px-4 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm transition flex items-center justify-center gap-2 shadow-sm">
+                            <span id="playIcon">▶</span><span id="playText">Play</span>
+                        </button>
+                        <button id="stepBtn" class="py-1.5 px-3 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg font-medium text-xs border border-slate-300 transition">Step ▶</button>
+                        <button id="resetBtn" class="py-1.5 px-3 text-slate-500 hover:text-rose-600 transition text-[11px] uppercase tracking-widest font-black">↺ Reset</button>
+                    </div>
+                </div>
+
+                <!-- Status -->
+                <div id="statusBox" class="p-3 rounded-lg bg-blue-50 border border-blue-100 text-blue-900 text-xs leading-relaxed">
+                    Press <strong>Step</strong> to walk through one GRPO update.
+                </div>
+            </aside>
+
+            <!-- Main viz -->
+            <section class="lg:col-span-8 space-y-5">
+                <!-- The GRPO step -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <div class="flex items-center justify-between mb-3 flex-wrap gap-2">
+                        <h2 class="text-sm font-black text-slate-800 tracking-tight">One GRPO update</h2>
+                        <span id="phaseBadge" class="text-[10px] uppercase tracking-widest font-black text-blue-700 bg-blue-50 px-2 py-0.5 rounded-full">Idle</span>
+                    </div>
+                    <div class="relative w-full">
+                        <svg id="grpoSvg" viewBox="0 0 880 460" class="w-full h-auto" preserveAspectRatio="xMidYMid meet">
+                            <defs>
+                                <marker id="grpoArrUp" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#10b981"/>
+                                </marker>
+                                <marker id="grpoArrDn" markerWidth="9" markerHeight="7" refX="8" refY="3.5" orient="auto">
+                                    <polygon points="0 0, 9 3.5, 0 7" fill="#ef4444"/>
+                                </marker>
+                            </defs>
+                            <g id="grpoLayer"></g>
+                        </svg>
+                    </div>
+                </div>
+
+                <!-- PPO vs GRPO comparison -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h2 class="text-sm font-black text-slate-800 tracking-tight mb-3">PPO vs GRPO — what changed</h2>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div class="border-2 border-slate-200 rounded-xl p-3">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-sm font-black text-slate-800">PPO (InstructGPT, ChatGPT)</div>
+                                <span class="text-[10px] mono font-bold text-rose-600 bg-rose-50 px-2 py-0.5 rounded">~2× params</span>
+                            </div>
+                            <ul class="text-[12px] text-slate-700 space-y-1.5 leading-snug">
+                                <li>• <strong>Policy</strong> π<sub>θ</sub> — the LLM</li>
+                                <li>• <strong>Reference</strong> π<sub>ref</sub> — frozen pre-RLHF copy (KL anchor)</li>
+                                <li>• <strong>Reward model</strong> r<sub>φ</sub> — scores completions</li>
+                                <li>• <strong>Value/critic</strong> V<sub>ψ</sub> — predicts expected reward (~same size as policy)</li>
+                                <li>• Advantage estimated via GAE on critic outputs</li>
+                            </ul>
+                        </div>
+                        <div class="border-2 border-emerald-300 rounded-xl p-3 bg-emerald-50/40">
+                            <div class="flex items-center justify-between mb-2">
+                                <div class="text-sm font-black text-emerald-800">GRPO (DeepSeek-R1)</div>
+                                <span class="text-[10px] mono font-bold text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded">no critic</span>
+                            </div>
+                            <ul class="text-[12px] text-slate-700 space-y-1.5 leading-snug">
+                                <li>• <strong>Policy</strong> π<sub>θ</sub> — the LLM</li>
+                                <li>• <strong>Reference</strong> π<sub>ref</sub> — KL anchor (same as PPO)</li>
+                                <li>• <strong>Reward model</strong> r<sub>φ</sub> — or rule-based reward</li>
+                                <li class="text-emerald-700"><strong>• No value/critic.</strong> Sample G completions, baseline = group mean</li>
+                                <li>• Advantage = <em>(r<sub>i</sub> − μ) / σ</em> within the group</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Loss formula -->
+                <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-4">
+                    <h2 class="text-sm font-black text-slate-800 tracking-tight mb-2">GRPO loss</h2>
+                    <div class="bg-slate-900 text-emerald-300 rounded-lg p-3 mono text-[11px] leading-relaxed overflow-x-auto">
+<pre>L_GRPO = -<span class="text-amber-300">1/G · Σᵢ</span> [ <span class="text-blue-300">min</span>( <span class="text-rose-300">ratioᵢ · Aᵢ</span> ,  <span class="text-rose-300">clip(ratioᵢ, 1−ε, 1+ε) · Aᵢ</span> ) ]
+                                    + <span class="text-amber-300">β · D_KL</span>( π<sub>θ</sub> ‖ π<sub>ref</sub> )
+
+where:
+  ratioᵢ = π<sub>θ</sub>(oᵢ|s) / π<sub>θ_old</sub>(oᵢ|s)        <span class="text-slate-500"># importance weight</span>
+  <span class="text-emerald-200">Aᵢ     = (rᵢ − μ) / σ</span>                       <span class="text-slate-500"># group-relative advantage  ← the trick</span>
+  μ      = mean(r₁ … r_G)
+  σ      = std(r₁ … r_G)</pre>
+                    </div>
+                </div>
+
+                <!-- Pedagogy -->
+                <details class="bg-white rounded-xl border border-slate-200 shadow-sm p-4" open>
+                    <summary class="font-black text-slate-800 text-sm tracking-tight flex items-center gap-2">
+                        <span class="chev text-slate-400">▶</span> Why this matters
+                    </summary>
+                    <div class="mt-3 space-y-3 text-[13px] text-slate-700 leading-relaxed">
+                        <p><strong>The critic is a luxury you can't afford.</strong> A PPO value network is roughly the size of the policy
+                            (often a copy of the LLM). For a 70B-param policy, you need ~140B params resident on the GPUs during training.
+                            GRPO drops the critic entirely.</p>
+                        <p><strong>Group baseline = sample-mean Monte Carlo estimate.</strong> The whole purpose of the critic is to estimate
+                            <em>E[r | s]</em> — the expected reward for a state. If you sample G completions and compute their mean,
+                            you have an unbiased estimate <em>without</em> a learned value function. The variance is higher, but so what?
+                            You're already paying for G completions per prompt to do the policy update.</p>
+                        <p class="bg-emerald-50 border border-emerald-100 rounded-lg p-3 text-emerald-900 text-[12px]">
+                            <strong>Why this enabled R1.</strong> DeepSeek showed that with GRPO + a simple rule-based reward
+                            (e.g., "is this final math answer correct?"), an LLM can be RL-trained <em>without any SFT initialization</em>
+                            and develop emergent reasoning chains. The "aha moment" graphs in the R1-Zero paper show the model spontaneously
+                            learning to backtrack and reflect — pure RL with no human reasoning demonstrations. The lower training cost
+                            from GRPO is what made the experiment economically viable.
+                        </p>
+                        <p><strong>Tradeoffs.</strong> GRPO needs G completions per prompt — typically G=64 for DeepSeek — which costs
+                            G× more inference at training. PPO does 1 completion per prompt + value head update. So GRPO trades critic
+                            parameters for inference compute. For modern accelerators with under-utilized FLOPs at small batch sizes,
+                            this trade tips heavily in GRPO's favor.</p>
+                    </div>
+                </details>
+            </section>
+        </div>
+    </div>
+
+<script>
+(() => {
+    'use strict';
+
+    const state = {
+        G: 8,
+        profile: 'mixed',
+        beta: 0.04,
+        eps: 0.20,
+        phase: 'idle',  // 'idle' | 'sample' | 'reward' | 'baseline' | 'advantage' | 'update' | 'done'
+        rewards: [],
+        completions: [],
+        playing: false,
+        timer: null,
+        speedMs: 900,
+    };
+
+    // Sample G completions with rewards based on profile
+    function generateGroup() {
+        state.completions = [];
+        state.rewards = [];
+        const labels = ['"Let me think step by step…"', '"The answer is 42."', '"I think it\'s about…"',
+                        '"42"', '"Hmm, maybe 41?"', '"Let me reconsider…"', '"definitely 42!"', '"42, after re-checking"',
+                        '"… so the answer is 42."', '"actually 43?"', '"two times 21 = 42"', '"6×7 = 42"',
+                        '"thinking… 42"', '"7 dozen = 84? no… 42"', '"checking work: 42"', '"42 ✓"'];
+        for (let i = 0; i < state.G; i++) {
+            let r;
+            switch (state.profile) {
+                case 'skewed':  r = (i === 0) ? 0.95 : (Math.random() * 0.3 + 0.1); break;
+                case 'bimodal': r = (i % 2 === 0) ? (Math.random() * 0.3 + 0.65) : (Math.random() * 0.3); break;
+                case 'flat':    r = 0.5 + (Math.random() - 0.5) * 0.08; break;
+                default:        r = Math.random() * 0.85 + 0.05;
+            }
+            state.rewards.push(r);
+            state.completions.push(labels[i % labels.length]);
+        }
+    }
+
+    function meanStd() {
+        if (state.rewards.length === 0) return { mean: 0, std: 0, max: 0, min: 0 };
+        const mean = state.rewards.reduce((a, b) => a + b, 0) / state.rewards.length;
+        const variance = state.rewards.reduce((a, b) => a + (b - mean) ** 2, 0) / state.rewards.length;
+        const std = Math.sqrt(variance);
+        return { mean, std, max: Math.max(...state.rewards), min: Math.min(...state.rewards) };
+    }
+
+    function advantages() {
+        const { mean, std } = meanStd();
+        const safe = std < 1e-6 ? 1 : std;
+        return state.rewards.map(r => (r - mean) / safe);
+    }
+
+    // ===== SVG helpers =====
+    function svgEl(tag, attrs) {
+        const el = document.createElementNS('http://www.w3.org/2000/svg', tag);
+        for (const k in attrs) el.setAttribute(k, attrs[k]);
+        return el;
+    }
+    function svgText(text, attrs) { const t = svgEl('text', attrs); t.textContent = text; return t; }
+
+    function rewardColor(r) {
+        // green for high, red for low, smooth gradient through amber
+        const t = Math.max(0, Math.min(1, r));
+        if (t > 0.66) return { fill: '#bbf7d0', stroke: '#10b981', text: '#065f46' };
+        if (t > 0.33) return { fill: '#fef3c7', stroke: '#f59e0b', text: '#92400e' };
+        return { fill: '#fee2e2', stroke: '#ef4444', text: '#991b1b' };
+    }
+
+    function draw() {
+        const layer = document.getElementById('grpoLayer');
+        layer.innerHTML = '';
+        const W = 880, H = 460;
+        const padL = 90, padR = 20;
+        const G = state.G;
+
+        // Bands
+        const yPrompt = 16, yPromptH = 36;
+        const yCompl = 76,  yComplH = 90;
+        const yBaseline = 184;  // baseline strip
+        const yAdv = 208, yAdvH = 110;
+        const yUpdate = 340, yUpdateH = 90;
+
+        // Prompt
+        layer.appendChild(svgEl('rect', { x: padL - 8, y: yPrompt, width: W - padL - padR + 16, height: yPromptH, rx: 8, fill: '#dbeafe', stroke: '#3b82f6' }));
+        layer.appendChild(svgText('PROMPT', { x: padL - 16, y: yPrompt + 14, 'text-anchor': 'end', 'font-size': '9', 'font-weight': '900', fill: '#1e40af', 'letter-spacing': '0.05em' }));
+        layer.appendChild(svgText('"What is 6 × 7?"', { x: (W - padR + padL) / 2, y: yPrompt + yPromptH / 2 + 5, 'text-anchor': 'middle', 'font-size': '13', 'font-weight': '700', 'font-family': 'JetBrains Mono, monospace', fill: '#1e3a8a' }));
+
+        // Completions row
+        layer.appendChild(svgText('COMPLETIONS', { x: padL - 16, y: yCompl + 12, 'text-anchor': 'end', 'font-size': '9', 'font-weight': '900', fill: '#475569', 'letter-spacing': '0.05em' }));
+        layer.appendChild(svgText('G samples', { x: padL - 16, y: yCompl + 26, 'text-anchor': 'end', 'font-size': '8', fill: '#94a3b8', 'font-style': 'italic' }));
+        const slotW = (W - padL - padR) / G;
+
+        const showCompletions = state.phase !== 'idle';
+        const showRewards = ['reward', 'baseline', 'advantage', 'update', 'done'].includes(state.phase);
+
+        for (let i = 0; i < G; i++) {
+            const cx = padL + slotW * (i + 0.5);
+            const w = Math.min(slotW * 0.86, 100);
+            if (!showCompletions) {
+                // Faint placeholder
+                layer.appendChild(svgEl('rect', { x: cx - w / 2, y: yCompl, width: w, height: yComplH, rx: 6, fill: '#f1f5f9', stroke: '#cbd5e1', 'stroke-dasharray': '3 3' }));
+                continue;
+            }
+            const r = state.rewards[i];
+            const c = showRewards ? rewardColor(r) : { fill: '#dbeafe', stroke: '#3b82f6', text: '#1e3a8a' };
+            const rect = svgEl('rect', { x: cx - w / 2, y: yCompl, width: w, height: yComplH, rx: 6, fill: c.fill, stroke: c.stroke, 'stroke-width': 1.5 });
+            if (state.phase === 'sample') rect.classList.add('compl-card', 'entering');
+            layer.appendChild(rect);
+            // Completion label (truncate)
+            const lbl = state.completions[i].slice(0, 14) + (state.completions[i].length > 14 ? '…' : '');
+            layer.appendChild(svgText(lbl, {
+                x: cx, y: yCompl + 22, 'text-anchor': 'middle', 'font-size': '9', 'font-weight': '600',
+                'font-family': 'JetBrains Mono, monospace', fill: c.text
+            }));
+            layer.appendChild(svgText(`o${i + 1}`, {
+                x: cx, y: yCompl + 38, 'text-anchor': 'middle', 'font-size': '9', 'font-weight': '700', fill: c.text, opacity: 0.7
+            }));
+            if (showRewards) {
+                // Reward badge
+                layer.appendChild(svgEl('rect', { x: cx - 26, y: yCompl + 50, width: 52, height: 22, rx: 4, fill: c.stroke, opacity: 0.9 }));
+                layer.appendChild(svgText(`r=${r.toFixed(2)}`, {
+                    x: cx, y: yCompl + 65, 'text-anchor': 'middle', 'font-size': '11', 'font-weight': '800',
+                    'font-family': 'JetBrains Mono, monospace', fill: 'white'
+                }));
+            }
+        }
+
+        // ===== Baseline line + statistics =====
+        const showBaseline = ['baseline', 'advantage', 'update', 'done'].includes(state.phase);
+        if (showBaseline) {
+            const { mean } = meanStd();
+            // Draw mean as horizontal divider
+            layer.appendChild(svgEl('line', {
+                x1: padL - 8, x2: W - padR, y1: yBaseline, y2: yBaseline,
+                stroke: '#0ea5e9', 'stroke-width': 2, 'stroke-dasharray': '6 4'
+            }));
+            layer.appendChild(svgText(`μ = ${mean.toFixed(3)}`, {
+                x: padL - 12, y: yBaseline + 4, 'text-anchor': 'end',
+                'font-size': '11', 'font-weight': '800', fill: '#0284c7'
+            }));
+            layer.appendChild(svgText('group baseline (replaces critic)', {
+                x: W - padR, y: yBaseline - 4, 'text-anchor': 'end',
+                'font-size': '10', 'font-weight': '700', fill: '#0284c7', 'font-style': 'italic'
+            }));
+        }
+
+        // ===== Advantages chart =====
+        const showAdv = ['advantage', 'update', 'done'].includes(state.phase);
+        if (showAdv) {
+            const advs = advantages();
+            const maxAbs = Math.max(0.5, ...advs.map(a => Math.abs(a)));
+            const advYMid = yAdv + yAdvH / 2;
+
+            layer.appendChild(svgText('ADVANTAGE', { x: padL - 16, y: advYMid - 8, 'text-anchor': 'end', 'font-size': '9', 'font-weight': '900', fill: '#7c2d12', 'letter-spacing': '0.05em' }));
+            layer.appendChild(svgText('Aᵢ = (rᵢ−μ)/σ', { x: padL - 16, y: advYMid + 6, 'text-anchor': 'end', 'font-size': '8', fill: '#9a3412', 'font-style': 'italic', 'font-family': 'JetBrains Mono, monospace' }));
+
+            // Zero line
+            layer.appendChild(svgEl('line', {
+                x1: padL - 8, x2: W - padR, y1: advYMid, y2: advYMid,
+                stroke: '#cbd5e1', 'stroke-width': 1
+            }));
+
+            for (let i = 0; i < G; i++) {
+                const cx = padL + slotW * (i + 0.5);
+                const w = Math.min(slotW * 0.78, 80);
+                const a = advs[i];
+                const barH = (Math.abs(a) / maxAbs) * (yAdvH / 2 - 8);
+                const barY = a >= 0 ? advYMid - barH : advYMid;
+                const barColor = a >= 0 ? '#10b981' : '#ef4444';
+                layer.appendChild(svgEl('rect', { x: cx - w / 2, y: barY, width: w, height: barH, rx: 3, fill: barColor, opacity: 0.85 }));
+                // Numeric label
+                const lblY = a >= 0 ? barY - 4 : barY + barH + 12;
+                layer.appendChild(svgText(`${a >= 0 ? '+' : ''}${a.toFixed(2)}`, {
+                    x: cx, y: lblY, 'text-anchor': 'middle', 'font-size': '10', 'font-weight': '800',
+                    'font-family': 'JetBrains Mono, monospace', fill: barColor
+                }));
+            }
+        }
+
+        // ===== Update direction =====
+        const showUpdate = ['update', 'done'].includes(state.phase);
+        layer.appendChild(svgText('POLICY UPDATE', { x: padL - 16, y: yUpdate + 14, 'text-anchor': 'end', 'font-size': '9', 'font-weight': '900', fill: '#1e40af', 'letter-spacing': '0.05em' }));
+        layer.appendChild(svgText('upweight if A>0, downweight if A<0', { x: padL - 16, y: yUpdate + 28, 'text-anchor': 'end', 'font-size': '8', fill: '#3b82f6', 'font-style': 'italic' }));
+        if (showUpdate) {
+            const advs = advantages();
+            for (let i = 0; i < G; i++) {
+                const cx = padL + slotW * (i + 0.5);
+                const a = advs[i];
+                if (Math.abs(a) < 0.05) continue;
+                const isUp = a > 0;
+                const arrow = svgEl('path', {
+                    d: isUp
+                        ? `M ${cx} ${yUpdate + 70} L ${cx - 8} ${yUpdate + 50} L ${cx - 3} ${yUpdate + 50} L ${cx - 3} ${yUpdate + 25} L ${cx + 3} ${yUpdate + 25} L ${cx + 3} ${yUpdate + 50} L ${cx + 8} ${yUpdate + 50} Z`
+                        : `M ${cx} ${yUpdate + 25} L ${cx - 8} ${yUpdate + 45} L ${cx - 3} ${yUpdate + 45} L ${cx - 3} ${yUpdate + 70} L ${cx + 3} ${yUpdate + 70} L ${cx + 3} ${yUpdate + 45} L ${cx + 8} ${yUpdate + 45} Z`,
+                    fill: isUp ? '#10b981' : '#ef4444',
+                    opacity: 0.5 + Math.min(0.5, Math.abs(a) * 0.4)
+                });
+                layer.appendChild(arrow);
+            }
+            // KL leash label
+            const kl = (state.beta * 0.05).toFixed(3);
+            layer.appendChild(svgText(`+ β·D_KL(π‖π_ref) penalty (β = ${state.beta.toFixed(2)})  →  prevents drift from reference`, {
+                x: padL, y: yUpdate + yUpdateH - 4,
+                'font-size': '10', 'font-weight': '700', fill: '#475569', 'font-family': 'JetBrains Mono, monospace'
+            }));
+        }
+    }
+
+    // ===== Step machine =====
+    const PHASES = ['idle', 'sample', 'reward', 'baseline', 'advantage', 'update', 'done'];
+    function step() {
+        const idx = PHASES.indexOf(state.phase);
+        if (idx >= PHASES.length - 1) { stop(); return; }
+        const next = PHASES[idx + 1];
+        state.phase = next;
+        if (next === 'sample') generateGroup();
+        draw();
+        refreshSidebar();
+        if (state.phase === 'done') stop();
+    }
+
+    function play() {
+        if (state.playing) return;
+        if (state.phase === 'done') reset(false);
+        state.playing = true;
+        document.getElementById('playIcon').textContent = '⏸';
+        document.getElementById('playText').textContent = 'Pause';
+        state.timer = setInterval(step, state.speedMs);
+    }
+    function stop() {
+        state.playing = false;
+        document.getElementById('playIcon').textContent = '▶';
+        document.getElementById('playText').textContent = 'Play';
+        clearInterval(state.timer); state.timer = null;
+    }
+    function reset(redraw = true) {
+        stop();
+        state.phase = 'idle';
+        state.rewards = [];
+        state.completions = [];
+        if (redraw) { draw(); refreshSidebar(); }
+    }
+
+    function refreshSidebar() {
+        const { mean, std, max, min } = meanStd();
+        const has = state.rewards.length > 0 && ['reward','baseline','advantage','update','done'].includes(state.phase);
+        document.getElementById('meanVal').textContent = has ? mean.toFixed(3) : '—';
+        document.getElementById('stdVal').textContent  = has ? std.toFixed(3)  : '—';
+        document.getElementById('maxVal').textContent  = has ? max.toFixed(3)  : '—';
+        document.getElementById('minVal').textContent  = has ? min.toFixed(3)  : '—';
+
+        const pb = document.getElementById('phaseBadge');
+        const phaseDisp = ({
+            idle: 'Idle', sample: 'Sample G completions', reward: 'Score with reward model',
+            baseline: 'Compute group baseline μ', advantage: 'Compute advantages Aᵢ',
+            update: 'Apply policy update', done: 'Done'
+        })[state.phase];
+        pb.textContent = phaseDisp;
+        const styles = {
+            idle: 'text-slate-700 bg-slate-100', sample: 'text-blue-700 bg-blue-50',
+            reward: 'text-amber-700 bg-amber-50', baseline: 'text-cyan-700 bg-cyan-50',
+            advantage: 'text-purple-700 bg-purple-50', update: 'text-emerald-700 bg-emerald-50',
+            done: 'text-emerald-800 bg-emerald-100'
+        };
+        pb.className = `text-[10px] uppercase tracking-widest font-black px-2 py-0.5 rounded-full ${styles[state.phase]}`;
+
+        // Status box
+        const sb = document.getElementById('statusBox');
+        const sbStyles = {
+            idle:      'bg-blue-50 border-blue-100 text-blue-900',
+            sample:    'bg-blue-50 border-blue-100 text-blue-900',
+            reward:    'bg-amber-50 border-amber-100 text-amber-900',
+            baseline:  'bg-cyan-50 border-cyan-100 text-cyan-900',
+            advantage: 'bg-purple-50 border-purple-100 text-purple-900',
+            update:    'bg-emerald-50 border-emerald-100 text-emerald-900',
+            done:      'bg-emerald-50 border-emerald-200 text-emerald-900',
+        };
+        sb.className = `p-3 rounded-lg border text-xs leading-relaxed ${sbStyles[state.phase]}`;
+        sb.innerHTML = ({
+            idle: 'Press <strong>Step</strong> to walk through one GRPO update.',
+            sample: `Sampled <strong>G = ${state.G}</strong> completions from π<sub>θ_old</sub>. Each is a candidate response to the prompt.`,
+            reward: `Reward model assigned each completion a scalar reward. Group min = <strong>${min.toFixed(2)}</strong>, max = <strong>${max.toFixed(2)}</strong>.`,
+            baseline: `Group baseline μ = <strong>${mean.toFixed(3)}</strong>. <em>This is what the critic would have estimated</em> in PPO — but here it's just the sample mean.`,
+            advantage: `Advantages computed as A<sub>i</sub> = (r<sub>i</sub> − μ) / σ. Above-baseline completions get positive A, below-baseline get negative.`,
+            update: `Policy gradient pushes π<sub>θ</sub> to upweight positive-A completions and downweight negative-A. β·KL keeps π<sub>θ</sub> close to π<sub>ref</sub>.`,
+            done: `One GRPO step complete. <strong>No critic was needed.</strong> Repeat with the next prompt batch.`,
+        })[state.phase];
+    }
+
+    // ===== Bindings =====
+    function init() {
+        draw();
+        refreshSidebar();
+
+        document.getElementById('gIn').addEventListener('input', (e) => {
+            state.G = parseInt(e.target.value, 10);
+            document.getElementById('gVal').textContent = state.G;
+            reset();
+        });
+        document.getElementById('profileIn').addEventListener('change', (e) => {
+            state.profile = e.target.value;
+            reset();
+        });
+        document.getElementById('betaIn').addEventListener('input', (e) => {
+            state.beta = parseInt(e.target.value, 10) / 100;
+            document.getElementById('betaVal').textContent = state.beta.toFixed(2);
+            draw();
+        });
+        document.getElementById('clipIn').addEventListener('input', (e) => {
+            state.eps = parseInt(e.target.value, 10) / 100;
+            document.getElementById('clipVal').textContent = state.eps.toFixed(2);
+        });
+
+        document.getElementById('playBtn').addEventListener('click', () => state.playing ? stop() : play());
+        document.getElementById('stepBtn').addEventListener('click', () => { stop(); step(); });
+        document.getElementById('resetBtn').addEventListener('click', reset);
+        document.addEventListener('keydown', (e) => {
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            if (e.code === 'Space') { e.preventDefault(); state.playing ? stop() : play(); }
+            if (e.code === 'ArrowRight') { stop(); step(); }
+            if (e.code === 'KeyR') reset();
+        });
+    }
+
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
+    else init();
+})();
+</script>
+</body>
+</html>

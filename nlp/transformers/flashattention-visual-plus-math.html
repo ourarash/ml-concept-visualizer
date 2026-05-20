@@ -1,0 +1,2311 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #61 by Htet Yan (@HtetWYan): added my flash attention. -->
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>FlashAttention — Interactive Explainer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Crimson+Pro:ital,wght@1,500;1,600;1,700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0a0e1a;
+    --panel: #0f1628;
+    --panel-2: #131c33;
+    --border: #1e2d4a;
+    --text: #c8d8f0;
+    --text-bright: #ffffff;
+    --text-dim: #4a6080;
+    --accent: #00d4ff;
+    --gold: #ffc947;
+    --green: #00ff9d;
+    --red: #ff4d6d;
+    --purple: #b084ff;
+    --hbm: #1a0a2e;
+    --sram: #0a1a2e;
+    --q: #00d4ff;
+    --k: #ffc947;
+    --v: #b084ff;
+    --s: #ffc947;
+    --o: #00ff9d;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      radial-gradient(ellipse 80% 50% at 20% 0%, rgba(0,212,255,0.08), transparent 60%),
+      radial-gradient(ellipse 70% 40% at 90% 100%, rgba(0,255,157,0.06), transparent 60%),
+      var(--bg);
+    background-attachment: fixed;
+    color: var(--text);
+    font-family: 'Space Grotesk', system-ui, sans-serif;
+    overflow-x: hidden;
+  }
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.03 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    pointer-events: none;
+    opacity: 0.6;
+    mix-blend-mode: overlay;
+    z-index: 1;
+  }
+  .container {
+    max-width: 1100px;
+    margin: 0 auto;
+    padding: 32px 20px 60px;
+    position: relative;
+    z-index: 2;
+  }
+  /* ============ Header ============ */
+  .header {
+    text-align: center;
+    margin-bottom: 28px;
+  }
+  .eyebrow {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--accent);
+    letter-spacing: 4px;
+    text-transform: uppercase;
+    margin-bottom: 12px;
+  }
+  h1 {
+    font-size: clamp(28px, 5vw, 44px);
+    font-weight: 800;
+    margin: 0 0 10px;
+    background: linear-gradient(135deg, var(--accent) 0%, var(--green) 100%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: -1px;
+  }
+  .subtitle {
+    font-size: 14px;
+    color: var(--text-dim);
+    margin: 0;
+  }
+  /* ============ Mode tabs ============ */
+  .tabs {
+    display: flex;
+    gap: 8px;
+    justify-content: center;
+    margin-bottom: 24px;
+    flex-wrap: wrap;
+  }
+  .tab {
+    padding: 10px 18px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    font-weight: 700;
+    background: rgba(255,255,255,0.04);
+    border: 2px solid rgba(255,255,255,0.12);
+    color: var(--text-dim);
+    transition: all 0.2s;
+  }
+  .tab:hover { background: rgba(255,255,255,0.07); color: var(--text); }
+  .tab.active { color: var(--accent); border-color: var(--accent); background: rgba(0,212,255,0.1); }
+  .tab.active[data-mode="standard"] { color: var(--red); border-color: var(--red); background: rgba(255,77,109,0.1); }
+  .tab.active[data-mode="flash"] { color: var(--green); border-color: var(--green); background: rgba(0,255,157,0.1); }
+  .tab.active[data-mode="math"] { color: var(--purple); border-color: var(--purple); background: rgba(176,132,255,0.1); }
+  .tab.active[data-mode="compare"] { color: var(--gold); border-color: var(--gold); background: rgba(255,201,71,0.1); }
+
+  /* ============ Panel ============ */
+  .panel {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border-radius: 18px;
+    border: 1px solid var(--border);
+    padding: 28px 24px;
+    box-shadow: 0 24px 80px rgba(0,0,0,0.55);
+  }
+  .panel h2 {
+    font-size: 18px;
+    color: var(--text-bright);
+    margin: 0 0 4px;
+    font-weight: 700;
+  }
+  .panel-sub {
+    font-size: 11px;
+    color: var(--text-dim);
+    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 1px;
+  }
+  .panel-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 20px;
+  }
+  /* ============ Intro ============ */
+  .intro-text {
+    font-size: 14px;
+    color: var(--text);
+    line-height: 1.8;
+    margin: 0 0 20px;
+  }
+  .intro-text strong.gold { color: var(--gold); }
+  .intro-text strong.red { color: var(--red); }
+  .intro-text strong.accent { color: var(--accent); }
+  .intro-text strong.green { color: var(--green); }
+  .intro-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin: 20px 0;
+  }
+  @media (max-width: 640px) { .intro-grid { grid-template-columns: 1fr; } }
+  .intro-card {
+    padding: 16px;
+    border-radius: 10px;
+    border: 1px solid;
+    background: rgba(255,255,255,0.02);
+  }
+  .intro-card .label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    letter-spacing: 1px;
+  }
+  .intro-card .desc {
+    font-size: 12.5px;
+    color: var(--text-dim);
+    line-height: 1.6;
+  }
+  .cta-row {
+    text-align: center;
+    margin-top: 20px;
+  }
+  .cta {
+    padding: 13px 32px;
+    border-radius: 8px;
+    background: rgba(0,212,255,0.12);
+    border: 2px solid var(--accent);
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 2px;
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .cta:hover {
+    background: rgba(0,212,255,0.2);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 24px rgba(0,212,255,0.25);
+  }
+
+  /* ============ Matrix grid ============ */
+  .matrix-row {
+    display: flex;
+    gap: 26px;
+    justify-content: center;
+    flex-wrap: wrap;
+    align-items: flex-start;
+  }
+  .matrix-block {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    align-items: center;
+  }
+  .matrix-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+  }
+  .matrix-grid {
+    display: grid;
+    gap: 2px;
+    padding: 4px;
+    background: rgba(255,255,255,0.02);
+    border-radius: 6px;
+  }
+  .matrix-cell {
+    border-radius: 3px;
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(255,255,255,0.07);
+    transition: all 0.45s cubic-bezier(0.4, 0, 0.2, 1);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    color: var(--text-dim);
+  }
+  .matrix-grid.dimmed { opacity: 0.25; }
+
+  /* ============ Memory bar ============ */
+  .mem-bars {
+    display: flex;
+    gap: 14px;
+    flex-wrap: wrap;
+    margin-top: 18px;
+  }
+  .mem-bar {
+    flex: 1;
+    min-width: 200px;
+  }
+  .mem-bar-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+  }
+  .mem-bar-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .mem-bar-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+  }
+  .mem-bar-track {
+    height: 8px;
+    background: rgba(255,255,255,0.06);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .mem-bar-fill {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.55s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  .mem-bar-desc {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    margin-top: 4px;
+  }
+
+  /* ============ Explanation card ============ */
+  .explain-card {
+    padding: 16px 18px;
+    border-radius: 10px;
+    border: 1px solid;
+    margin-top: 18px;
+    transition: all 0.4s;
+  }
+  .explain-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 8px;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+  .explain-title {
+    font-size: 14px;
+    color: var(--text-bright);
+    font-weight: 600;
+  }
+  .explain-body {
+    font-size: 12.5px;
+    color: var(--text);
+    line-height: 1.65;
+    margin: 0;
+  }
+  .tag {
+    display: inline-block;
+    padding: 3px 9px;
+    border-radius: 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    border: 1px solid;
+  }
+
+  /* ============ Step indicator ============ */
+  .step-indicator {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .step-dot {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    font-weight: 700;
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(255,255,255,0.04);
+    border: 2px solid rgba(255,255,255,0.18);
+    color: var(--text-dim);
+    transition: all 0.3s;
+  }
+  .step-dot.done {
+    background: rgba(0,255,157,0.15);
+    border-color: var(--green);
+    color: var(--green);
+  }
+  .step-dot.active {
+    background: rgba(0,212,255,0.18);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .step-line {
+    width: 16px;
+    height: 2px;
+    background: rgba(255,255,255,0.15);
+    border-radius: 1px;
+  }
+  .step-line.done { background: rgba(0,255,157,0.5); }
+
+  /* ============ Controls ============ */
+  .controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: center;
+    margin-top: 22px;
+    flex-wrap: wrap;
+  }
+  .btn {
+    padding: 8px 18px;
+    border-radius: 7px;
+    background: rgba(0,212,255,0.1);
+    border: 1px solid rgba(0,212,255,0.35);
+    color: var(--accent);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 1px;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-weight: 600;
+  }
+  .btn:hover:not(:disabled) {
+    background: rgba(0,212,255,0.18);
+    transform: translateY(-1px);
+  }
+  .btn:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+  }
+  .btn.play {
+    background: rgba(0,255,157,0.1);
+    border-color: rgba(0,255,157,0.4);
+    color: var(--green);
+  }
+  .btn.play.playing {
+    background: rgba(255,201,71,0.12);
+    border-color: rgba(255,201,71,0.45);
+    color: var(--gold);
+  }
+  .btn.reset {
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.18);
+    color: var(--text-dim);
+  }
+  .step-counter {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: var(--text-dim);
+    margin-left: 6px;
+  }
+
+  /* ============ Tile slide animation (Flash mode) ============ */
+  .tile-stage {
+    display: flex;
+    gap: 28px;
+    justify-content: center;
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+  .memory-region {
+    padding: 16px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.015);
+    border: 1px solid rgba(255,255,255,0.08);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    align-items: center;
+    min-width: 220px;
+  }
+  .memory-region.hbm {
+    background: rgba(26,10,46,0.5);
+    border-color: rgba(255,77,109,0.25);
+  }
+  .memory-region.sram {
+    background: rgba(10,26,46,0.5);
+    border-color: rgba(0,212,255,0.35);
+    box-shadow: 0 0 24px rgba(0,212,255,0.15);
+  }
+  .memory-tag {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 5px 12px;
+    border-radius: 5px;
+    border: 1px solid;
+    font-weight: 700;
+  }
+  .memory-tag.hbm-tag { background: rgba(255,77,109,0.1); border-color: rgba(255,77,109,0.4); color: var(--red); }
+  .memory-tag.sram-tag {
+    background: rgba(0,212,255,0.1);
+    border-color: rgba(0,212,255,0.5);
+    color: var(--accent);
+    box-shadow: 0 0 16px rgba(0,212,255,0.2);
+  }
+  .arrow-stream {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding-top: 80px;
+    color: var(--accent);
+  }
+  .arrow-stream .arrow {
+    font-size: 28px;
+    line-height: 1;
+    animation: arrowPulse 1.4s ease-in-out infinite;
+  }
+  @keyframes arrowPulse {
+    0%, 100% { opacity: 0.6; transform: translateX(0); }
+    50%      { opacity: 1; transform: translateX(4px); }
+  }
+  .arrow-stream .arrow-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+  .sram-note {
+    font-size: 10.5px;
+    color: var(--text-dim);
+    text-align: center;
+    line-height: 1.5;
+    max-width: 200px;
+  }
+  .sram-note .em { color: var(--accent); }
+
+  /* ============ Math mode (light island in dark page) ============ */
+  .math-island {
+    background: #f8fafc;
+    color: #0f172a;
+    border-radius: 16px;
+    padding: 24px;
+    margin-top: 8px;
+  }
+  .math-canvas-wrap {
+    position: relative;
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #e2e8f0;
+    overflow: hidden;
+    box-shadow: 0 4px 14px rgba(15,23,42,0.06);
+  }
+  .math-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 420px;
+  }
+  .math-caption {
+    position: absolute;
+    top: 12px;
+    left: 14px;
+    background: rgba(255,255,255,0.9);
+    border: 1px solid #e2e8f0;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: #64748b;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .math-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr;
+    gap: 18px;
+  }
+  @media (max-width: 860px) { .math-grid { grid-template-columns: 1fr; } }
+  .math-side {
+    background: white;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 4px 14px rgba(15,23,42,0.06);
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .math-title {
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 19px;
+    color: #0f172a;
+    margin: 0 0 6px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid #e2e8f0;
+  }
+  .math-body {
+    color: #334155;
+    font-size: 13.5px;
+    line-height: 1.65;
+  }
+  .math-body p { margin: 0 0 10px; }
+  .math-body strong { color: #0f172a; }
+  .mvar {
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
+    font-weight: 600;
+  }
+  .eq-block {
+    background: linear-gradient(180deg, #f8fafc, #f1f5f9);
+    padding: 12px 14px;
+    border-radius: 9px;
+    font-family: 'Crimson Pro', 'Cambria Math', serif;
+    font-style: italic;
+    font-size: 17px;
+    font-weight: 600;
+    text-align: center;
+    margin: 10px 0;
+    border: 1px solid #e2e8f0;
+  }
+  .eq-block sup { font-style: normal; font-size: 0.65em; vertical-align: super; }
+  .running-state {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 14px;
+  }
+  .state-card {
+    border: 1px solid #e2e8f0;
+    border-radius: 9px;
+    padding: 10px 12px;
+    background: white;
+    position: relative;
+    overflow: hidden;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.04);
+  }
+  .state-card::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 3px;
+    background: #dc2626;
+  }
+  .state-card.b1::before { background: #dc2626; opacity: 0.55; }
+  .state-card.b2::before { background: #dc2626; }
+  .state-card.o::before { background: #db2777; }
+  .state-card .state-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    font-weight: 600;
+  }
+  .state-card .state-val {
+    font-family: 'Crimson Pro', serif;
+    font-style: italic;
+    font-weight: 700;
+    font-size: 20px;
+    margin-top: 4px;
+    color: #0f172a;
+  }
+  .state-card .state-sub {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: #64748b;
+    margin-top: 1px;
+  }
+  .stages-strip {
+    display: flex;
+    gap: 4px;
+    margin-top: 14px;
+    padding: 8px;
+    background: #f8fafc;
+    border-radius: 9px;
+    border: 1px solid #e2e8f0;
+  }
+  .stage-pill {
+    flex: 1;
+    text-align: center;
+    padding: 5px 4px;
+    font-size: 10px;
+    font-weight: 600;
+    border-radius: 5px;
+    color: #64748b;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid transparent;
+    transition: all 0.3s;
+  }
+  .stage-pill.done {
+    color: #16a34a;
+    background: #f0fdf4;
+    border-color: #bbf7d0;
+  }
+  .stage-pill.active {
+    color: white;
+    background: #4f46e5;
+    border-color: #4f46e5;
+    box-shadow: 0 2px 6px rgba(79,70,229,0.3);
+  }
+  .math-view-toggle {
+    display: inline-flex;
+    background: #f1f5f9;
+    border-radius: 8px;
+    padding: 3px;
+    border: 1px solid #e2e8f0;
+  }
+  .math-view-toggle button {
+    background: transparent;
+    border: 0;
+    padding: 6px 12px;
+    font-size: 11px;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    color: #64748b;
+    border-radius: 6px;
+    cursor: pointer;
+    letter-spacing: 0.3px;
+  }
+  .math-view-toggle button.active {
+    background: white;
+    color: #0f172a;
+    box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+  }
+  .numeric-box {
+    background: linear-gradient(180deg, #fffbeb, #fef3c7);
+    border: 1px solid #fde68a;
+    padding: 12px 14px;
+    border-radius: 9px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #78350f;
+    white-space: pre-wrap;
+  }
+  .visual-guide {
+    background: linear-gradient(180deg, #eef2ff, #e0e7ff);
+    color: #312e81;
+    padding: 12px 14px;
+    border-radius: 9px;
+    font-size: 12px;
+    border: 1px solid #c7d2fe;
+    line-height: 1.55;
+  }
+  .visual-guide strong {
+    display: block;
+    color: #4f46e5;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-bottom: 4px;
+  }
+  .math-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 14px;
+    flex-wrap: wrap;
+  }
+  .math-btn {
+    padding: 8px 14px;
+    border-radius: 7px;
+    border: 1px solid #e2e8f0;
+    background: white;
+    color: #0f172a;
+    font-family: 'Space Grotesk', sans-serif;
+    font-weight: 600;
+    font-size: 12.5px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .math-btn:hover:not(:disabled) {
+    background: #eef2ff;
+    border-color: #4f46e5;
+    color: #4f46e5;
+  }
+  .math-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+  .math-btn.primary {
+    background: #4f46e5;
+    color: white;
+    border-color: #4f46e5;
+  }
+  .math-btn.primary:hover:not(:disabled) { background: #4338ca; }
+
+  /* ============ Compare table ============ */
+  .compare-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+    margin-bottom: 18px;
+  }
+  @media (max-width: 720px) { .compare-grid { grid-template-columns: 1fr; } }
+  .compare-card {
+    padding: 18px;
+    border-radius: 12px;
+    border: 1px solid;
+  }
+  .compare-card .title {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 14px;
+  }
+  .compare-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 7px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.05);
+    gap: 8px;
+  }
+  .compare-row:last-child { border: 0; }
+  .compare-row .k {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--text-dim);
+  }
+  .compare-row .v {
+    font-size: 12px;
+    font-weight: 600;
+    text-align: right;
+  }
+  .key-insight {
+    padding: 16px;
+    border-radius: 9px;
+    background: rgba(255,201,71,0.08);
+    border: 1px solid rgba(255,201,71,0.3);
+  }
+  .key-insight .ki-title {
+    color: var(--gold);
+    font-weight: 700;
+    font-size: 13px;
+    margin-bottom: 6px;
+  }
+  .key-insight p {
+    font-size: 12px;
+    margin: 0;
+    line-height: 1.7;
+    color: var(--text);
+  }
+
+  .footer {
+    text-align: center;
+    margin-top: 24px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--text-dim);
+    letter-spacing: 2px;
+  }
+
+  /* ============ Layout with sidebar ============ */
+  .layout {
+    display: grid;
+    grid-template-columns: 1fr 280px;
+    gap: 18px;
+    align-items: start;
+  }
+  .layout.full { grid-template-columns: 1fr; }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; } }
+
+  .sidebar {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    position: sticky;
+    top: 16px;
+  }
+  @media (max-width: 900px) { .sidebar { position: static; } }
+  .sidebar-card {
+    background: linear-gradient(180deg, var(--panel) 0%, var(--panel-2) 100%);
+    border-radius: 14px;
+    border: 1px solid var(--border);
+    padding: 16px 16px 18px;
+    box-shadow: 0 12px 40px rgba(0,0,0,0.4);
+  }
+  .sidebar-card h3 {
+    margin: 0 0 12px;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-family: 'JetBrains Mono', monospace;
+    font-weight: 700;
+  }
+  .sliders { display: flex; flex-direction: column; gap: 12px; }
+  .slider-row {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--text-dim);
+  }
+  .slider-row .label-line {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+  .slider-row .label-line .name { letter-spacing: 0.5px; }
+  .slider-row .label-line b {
+    color: var(--accent);
+    font-weight: 700;
+    font-size: 13px;
+  }
+  input[type=range] {
+    width: 100%;
+    accent-color: var(--accent);
+    height: 4px;
+  }
+  .memory-metrics {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+  }
+  .metric {
+    background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06);
+    border-radius: 8px;
+    padding: 8px 10px;
+    position: relative;
+    overflow: hidden;
+  }
+  .metric::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 0; right: 0; height: 2px;
+    background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    opacity: 0.4;
+  }
+  .metric .metric-name {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9.5px;
+    color: var(--text-dim);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .metric .metric-val {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-bright);
+    margin-top: 2px;
+  }
+  .metric .metric-val.ok { color: var(--green); }
+  .memory-foot {
+    margin-top: 10px;
+    font-size: 10.5px;
+    color: var(--text-dim);
+    line-height: 1.5;
+  }
+  .memory-foot b { color: var(--green); }
+
+  /* ============ N×N blowup state ============ */
+  .matrix-block.blowup {
+    position: relative;
+  }
+  .matrix-block.blowup .matrix-label {
+    color: var(--red);
+    font-weight: 800;
+    position: relative;
+  }
+  .matrix-block.blowup .matrix-label::after {
+    content: " · N blows up";
+    color: var(--red);
+    animation: pulseRed 1.4s ease-in-out infinite;
+  }
+  @keyframes pulseRed {
+    0%, 100% { opacity: 0.6; }
+    50%      { opacity: 1; }
+  }
+  .matrix-block.blowup .matrix-grid {
+    transform: scale(1.18);
+    transform-origin: center;
+    border: 2px dashed var(--red);
+    box-shadow: 0 0 28px rgba(255,77,109,0.4),
+                inset 0 0 0 1px rgba(255,77,109,0.5);
+    animation: blowupGlow 2.2s ease-in-out infinite;
+  }
+  @keyframes blowupGlow {
+    0%, 100% {
+      box-shadow: 0 0 24px rgba(255,77,109,0.35),
+                  inset 0 0 0 1px rgba(255,77,109,0.5);
+    }
+    50% {
+      box-shadow: 0 0 40px rgba(255,77,109,0.6),
+                  inset 0 0 0 1px rgba(255,77,109,0.6);
+    }
+  }
+  .matrix-block.blowup .matrix-cell {
+    border-color: rgba(255,77,109,0.35) !important;
+  }
+  .matrix-row.has-blowup {
+    padding: 12px 0 24px;
+    gap: 40px;
+  }
+
+  /* ============ Traffic lanes ============ */
+  .traffic-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .traffic-header {
+    text-align: center;
+    margin-bottom: 4px;
+  }
+  .traffic-header h3 {
+    font-size: 16px;
+    color: var(--text-bright);
+    margin: 0 0 4px;
+    font-weight: 700;
+  }
+  .traffic-header p {
+    color: var(--text-dim);
+    font-size: 12px;
+    margin: 0;
+  }
+  .lane {
+    padding: 16px 18px 14px;
+    border-radius: 14px;
+    border: 1px solid;
+    background: rgba(255,255,255,0.015);
+  }
+  .lane.std { border-color: rgba(255,77,109,0.45); box-shadow: 0 0 24px rgba(255,77,109,0.08); }
+  .lane.flash { border-color: rgba(0,255,157,0.45); box-shadow: 0 0 24px rgba(0,255,157,0.08); }
+  .lane-head { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; gap: 12px; flex-wrap: wrap; }
+  .lane-head .lane-title {
+    font-size: 15px;
+    font-weight: 800;
+  }
+  .lane.std .lane-title { color: var(--red); }
+  .lane.flash .lane-title { color: var(--green); }
+  .lane-head .lane-sub { font-size: 11.5px; color: var(--text-dim); }
+  .lane-stages {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+  .stage-box {
+    padding: 10px 8px;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid;
+    background: rgba(255,255,255,0.02);
+    position: relative;
+  }
+  .stage-box .stage-name {
+    font-size: 12.5px;
+    color: var(--text-bright);
+    font-weight: 700;
+    margin-bottom: 4px;
+  }
+  .stage-box .stage-loc {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text);
+    display: inline-block;
+  }
+  .stage-box .stage-loc.sram { background: rgba(0,212,255,0.2); color: var(--accent); }
+  .stage-box .stage-loc.reg { background: rgba(0,255,157,0.2); color: var(--green); }
+  .lane-hbm {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .lane-hbm-label {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    color: var(--red);
+    letter-spacing: 1px;
+    font-weight: 800;
+    flex-shrink: 0;
+    width: 70px;
+  }
+  .lane-hbm-bar {
+    flex: 1;
+    height: 26px;
+    border-radius: 7px;
+    background: rgba(74,96,128,0.12);
+    border: 1px solid rgba(74,96,128,0.3);
+    display: flex;
+    position: relative;
+    overflow: hidden;
+  }
+  .lane-hbm-bar.hatched {
+    background-image: repeating-linear-gradient(45deg, transparent, transparent 8px, rgba(255,255,255,0.04) 8px, rgba(255,255,255,0.04) 14px);
+  }
+  .hbm-seg {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    font-weight: 800;
+    letter-spacing: 0.5px;
+    color: #0a0e1a;
+  }
+  .hbm-seg.shared {
+    background: rgba(74,96,128,0.7);
+    color: var(--text);
+  }
+  .hbm-seg.heavy {
+    box-shadow: inset 0 0 0 2px var(--red);
+    animation: heavyPulse 1.6s ease-in-out infinite;
+  }
+  @keyframes heavyPulse {
+    0%, 100% { filter: brightness(1); }
+    50%      { filter: brightness(1.18); }
+  }
+  .hbm-seg.write-s, .hbm-seg.read-s { background: var(--gold); }
+  .hbm-seg.write-p, .hbm-seg.read-p { background: #ffe45c; }
+  .hbm-seg.write-o { background: var(--red); color: white; }
+  .hbm-seg.flash-shared { background: rgba(74,96,128,0.5); color: var(--text); }
+  .hbm-seg.flash-write-o { background: rgba(0,255,157,0.6); color: #0a0e1a; }
+  .removed-callout {
+    text-align: center;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10.5px;
+    color: var(--red);
+    letter-spacing: 1.5px;
+    font-weight: 800;
+    margin-top: 8px;
+    animation: pulseRed 1.6s ease-in-out infinite;
+  }
+  .traffic-summary {
+    text-align: center;
+    padding: 14px;
+    border-radius: 10px;
+    background: rgba(255,201,71,0.06);
+    border: 1px solid rgba(255,201,71,0.3);
+    font-size: 13px;
+    color: var(--text);
+    line-height: 1.6;
+  }
+  .traffic-summary strong { color: var(--gold); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="eyebrow">◈ Interactive Explainer</div>
+    <h1>FlashAttention</h1>
+    <p class="subtitle">From the quadratic memory wall to tiled, fused, exact attention</p>
+  </div>
+
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-mode="intro">① Intro</button>
+    <button class="tab" data-mode="standard">② Standard Attn</button>
+    <button class="tab" data-mode="flash">③ Flash Attn</button>
+    <button class="tab" data-mode="math">④ The Math</button>
+    <button class="tab" data-mode="traffic">⑤ GPU Traffic</button>
+    <button class="tab" data-mode="compare">⑥ Compare</button>
+  </div>
+
+  <div class="layout" id="layout">
+    <div class="panel" id="panel"></div>
+    <div class="sidebar" id="sidebar"></div>
+  </div>
+
+  <div class="footer">FLASHATTENTION · DAO ET AL. 2022 · INTERACTIVE EXPLAINER</div>
+</div>
+
+<script>
+// =================================================================
+// Constants
+// =================================================================
+const SEQ_LEN = 6;
+const BLOCK_SIZE = 2;
+const NUM_BLOCKS = SEQ_LEN / BLOCK_SIZE; // 3
+
+const COLORS = {
+  accent: '#00d4ff',
+  gold:   '#ffc947',
+  green:  '#00ff9d',
+  red:    '#ff4d6d',
+  purple: '#b084ff',
+  text:   '#c8d8f0',
+  dim:    '#4a6080'
+};
+const blockColors = ['#00d4ff', '#ffc947', '#00ff9d', '#ff4d6d'];
+const blockColor = i => blockColors[i % blockColors.length];
+
+const panel = document.getElementById('panel');
+const tabs = document.getElementById('tabs');
+
+// =================================================================
+// State
+// =================================================================
+let mode = 'intro';
+let step = 0;
+let playing = false;
+let playTimer = null;
+let mathView = 'conceptual';
+let mathStepStart = performance.now();
+let mathAnimRAF = null;
+let mathLastFrame = performance.now();
+let mathT = 0;
+
+// =================================================================
+// Tab switching
+// =================================================================
+tabs.addEventListener('click', e => {
+  const t = e.target.closest('.tab');
+  if (!t) return;
+  setMode(t.dataset.mode);
+});
+function setMode(m) {
+  mode = m;
+  step = 0;
+  stopPlay();
+  if (mathAnimRAF) { cancelAnimationFrame(mathAnimRAF); mathAnimRAF = null; }
+  document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.mode === m));
+  render();
+}
+
+// =================================================================
+// Play/pause
+// =================================================================
+function startPlay() {
+  playing = true;
+  const interval = mode === 'math' ? 4500 : 900;
+  const max = getMaxStep();
+  playTimer = setInterval(() => {
+    if (step >= max) {
+      stopPlay();
+      return;
+    }
+    step++;
+    if (mode === 'math') mathStepStart = performance.now();
+    render();
+  }, interval);
+}
+function stopPlay() {
+  playing = false;
+  if (playTimer) { clearInterval(playTimer); playTimer = null; }
+}
+function togglePlay() {
+  if (playing) stopPlay();
+  else startPlay();
+  render();
+}
+
+function getMaxStep() {
+  if (mode === 'standard') return 3;          // 4 steps total: 0..3
+  if (mode === 'flash') return NUM_BLOCKS * NUM_BLOCKS - 1; // 9 tiles
+  if (mode === 'math') return 5;              // 6 math steps
+  return 0;
+}
+
+// =================================================================
+// Render dispatch
+// =================================================================
+const sidebarEl = document.getElementById('sidebar');
+const layoutEl = document.getElementById('layout');
+
+// Slider state — persists across modes
+const sliderState = { N: 8192, d: 128, B: 128, speed: 1 };
+
+function render() {
+  if (mode === 'intro') renderIntro();
+  else if (mode === 'standard') renderStandard();
+  else if (mode === 'flash') renderFlash();
+  else if (mode === 'math') renderMath();
+  else if (mode === 'traffic') renderTraffic();
+  else if (mode === 'compare') renderCompare();
+  renderSidebar();
+}
+
+function renderSidebar() {
+  // Show sidebar only on visualization tabs
+  const showSidebar = mode === 'standard' || mode === 'flash' || mode === 'traffic';
+  if (!showSidebar) {
+    sidebarEl.style.display = 'none';
+    layoutEl.classList.add('full');
+    return;
+  }
+  sidebarEl.style.display = 'flex';
+  layoutEl.classList.remove('full');
+  sidebarEl.innerHTML = `
+    <div class="sidebar-card">
+      <h3>Parameters</h3>
+      <div class="sliders">
+        <label class="slider-row">
+          <span class="label-line"><span class="name">N — sequence length</span><b id="nVal">${sliderState.N.toLocaleString()}</b></span>
+          <input type="range" id="slideN" min="512" max="32768" step="512" value="${sliderState.N}">
+        </label>
+        <label class="slider-row">
+          <span class="label-line"><span class="name">d — head dimension</span><b id="dVal">${sliderState.d}</b></span>
+          <input type="range" id="slideD" min="32" max="256" step="32" value="${sliderState.d}">
+        </label>
+        <label class="slider-row">
+          <span class="label-line"><span class="name">B — tile size</span><b id="bVal">${sliderState.B}</b></span>
+          <input type="range" id="slideB" min="32" max="256" step="32" value="${sliderState.B}">
+        </label>
+      </div>
+    </div>
+    <div class="sidebar-card">
+      <h3>Live Memory · fp16, 1 head</h3>
+      ${renderMemoryMetrics()}
+      <div class="memory-foot">
+        FlashAttention isn't mainly fewer FLOPs. It's <b>fewer HBM reads/writes</b> by never materializing S or P.
+      </div>
+    </div>
+  `;
+  wireSliders();
+}
+
+function renderMemoryMetrics() {
+  const { N, d, B } = sliderState;
+  const fp16 = 2;
+  const qkvo = 4 * N * d * fp16;
+  const attn = N * N * fp16;
+  const tile = B * B * fp16;
+  return `
+    <div class="memory-metrics">
+      <div class="metric"><div class="metric-name">Q/K/V/O</div><div class="metric-val">${fmtBytes(qkvo)}</div></div>
+      <div class="metric"><div class="metric-name">Full N×N</div><div class="metric-val">${fmtBytes(attn)}</div></div>
+      <div class="metric"><div class="metric-name">One B×B tile</div><div class="metric-val">${fmtBytes(tile)}</div></div>
+      <div class="metric"><div class="metric-name">Saved factor</div><div class="metric-val ok">${(attn/tile).toFixed(0)}× tile</div></div>
+    </div>
+  `;
+}
+
+function fmtBytes(b) {
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let i = 0, x = b;
+  while (x > 1024 && i < units.length - 1) { x /= 1024; i++; }
+  return `${x.toFixed(x < 10 ? 2 : 1)} ${units[i]}`;
+}
+
+function wireSliders() {
+  const onChange = (id, key, fmt) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('input', e => {
+      sliderState[key] = +e.target.value;
+      const labelEl = document.getElementById(key === 'N' ? 'nVal' : key === 'd' ? 'dVal' : 'bVal');
+      if (labelEl) labelEl.textContent = fmt ? fmt(sliderState[key]) : sliderState[key];
+      // Update memory metrics in place
+      const host = sidebarEl.querySelector('.sidebar-card:nth-child(2)');
+      if (host) {
+        const mm = host.querySelector('.memory-metrics');
+        if (mm) {
+          const wrapper = document.createElement('div');
+          wrapper.innerHTML = renderMemoryMetrics().trim();
+          mm.replaceWith(wrapper.firstElementChild);
+        }
+      }
+    });
+  };
+  onChange('slideN', 'N', x => x.toLocaleString());
+  onChange('slideD', 'd');
+  onChange('slideB', 'B');
+}
+
+// =================================================================
+// 1. INTRO
+// =================================================================
+function renderIntro() {
+  const cards = [
+    { label: 'HBM (VRAM)', desc: 'Huge — tens of GB. But slow: ~1.5 TB/s bandwidth. This is where the full attention matrix would live.', color: COLORS.red },
+    { label: 'SRAM (on-chip)', desc: 'Tiny — ~20 MB per SM. But fast: ~19 TB/s bandwidth. The streaming-multiprocessor scratchpad.', color: COLORS.green },
+    { label: 'Standard Attention', desc: 'O(N²) memory. Materializes S and P in HBM. The bottleneck is data movement, not FLOPs.', color: COLORS.red },
+    { label: 'FlashAttention', desc: 'O(Nd) output state — same as Q/K/V/O themselves. Tiles the computation, fuses ops, keeps score tiles in SRAM. Exact math — not an approximation.', color: COLORS.green }
+  ];
+  panel.innerHTML = `
+    <h2 style="text-align:center;font-size:20px;margin-bottom:14px">The Problem with Attention</h2>
+    <p class="intro-text" style="text-align:center;max-width:680px;margin-left:auto;margin-right:auto">
+      Standard self-attention computes an <strong class="gold">N×N score matrix</strong> — one entry per pair of tokens — and stores it entirely in <strong class="red">HBM</strong>, your GPU's slow main memory.
+      At sequence length 8192, that's <strong class="red">~134 million entries</strong> in fp16.
+      FlashAttention computes the same answer without ever materializing this matrix.
+    </p>
+    <div class="intro-grid">
+      ${cards.map(c => `
+        <div class="intro-card" style="border-color:${c.color}44;background:${c.color}0a">
+          <div class="label" style="color:${c.color}">${c.label}</div>
+          <div class="desc">${c.desc}</div>
+        </div>
+      `).join('')}
+    </div>
+    <p class="intro-text" style="text-align:center;font-size:13px;color:var(--text-dim);max-width:600px;margin:8px auto 0">
+      The next three tabs walk through it: what's slow about standard attention, how FlashAttention tiles around the problem, and the math that makes the tiling exact.
+    </p>
+    <div class="cta-row">
+      <button class="cta" onclick="setMode('standard')">Start Walkthrough →</button>
+    </div>
+  `;
+}
+
+// =================================================================
+// 2. STANDARD ATTENTION — tile-by-tile reveal of full N×N
+// =================================================================
+const STANDARD_EXPLAIN = [
+  { title: 'Compute Q, K, V projections',
+    body: 'All three N×d projection matrices are written to HBM. This part is unavoidable — Q/K/V are inputs to any attention algorithm.',
+    tag: 'WRITE Q,K,V → HBM' },
+  { title: 'Materialize the full S = QKᵀ in HBM',
+    body: 'Every (query, key) pair gets a score. The result is an N×N matrix written to HBM cell by cell. For N=1024 in fp16, this single matrix is 2 MB. For N=8192 it is 128 MB. For N=32768 it is 2 GB — for one head.',
+    tag: 'WRITE N² → HBM' },
+  { title: 'Apply softmax over full S',
+    body: 'Softmax is row-wise. The kernel reads each row of S from HBM, computes softmax, writes the row back. A second N² round-trip.',
+    tag: 'READ + WRITE N² → HBM' },
+  { title: 'Compute O = softmax(S) · V',
+    body: 'A third pass over the N×N probability matrix multiplied with V. Final output is O(Nd), but the bottleneck was already paid: many slow round-trips on the N×N matrix.',
+    tag: 'BOTTLENECK ⚠' }
+];
+
+function renderStandard() {
+  const ex = STANDARD_EXPLAIN[step];
+  // build matrices: Q,K,V always shown solid; S progressively fills; O on step 3
+  const qkvCells = fullCells(SEQ_LEN, COLORS.accent);
+  let sCells = [];
+  if (step >= 1) {
+    // tile-by-tile reveal of N×N across step 1 and step 2 (split for clarity)
+    // step 1: fill row by row
+    const totalCells = SEQ_LEN * SEQ_LEN;
+    // Step 1 fills all cells with gold (writing S); step 2 keeps them gold but darker (softmax pass); step 3 same
+    for (let r = 0; r < SEQ_LEN; r++) {
+      for (let c = 0; c < SEQ_LEN; c++) {
+        sCells.push({ row: r, col: c, color: COLORS.gold, label: step === 1 ? 'S' : (step === 2 ? 'P' : 'P') });
+      }
+    }
+  }
+  const oCells = step >= 3 ? fullCells(SEQ_LEN, COLORS.green, 'O') : [];
+
+  // HBM usage: Q+K+V is 3·N·d (we model d as N for visual simplicity = 3N²). + S adds N², doubling for softmax + final O is N²
+  // We just report a normalized "fraction of N²-equivalent slots filled."
+  const hbmFraction = step === 0 ? 0.20
+                    : step === 1 ? 0.45
+                    : step === 2 ? 0.70
+                    : 1.00;
+  const hbmPct = Math.round(hbmFraction * 100);
+
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <h2 style="color:var(--red)">Standard Self-Attention</h2>
+        <div class="panel-sub">N = ${SEQ_LEN} · full N×N matrix lives in HBM</div>
+      </div>
+      ${stepIndicatorHTML(['Q,K,V', 'S=QKᵀ', 'softmax', 'O=SV'], step)}
+    </div>
+
+    <div style="display:flex;flex-direction:column;gap:12px;align-items:center">
+      <div class="memory-tag hbm-tag">⚠ HBM — Slow, Large</div>
+      <div class="matrix-row ${step === 1 ? 'has-blowup' : ''}">
+        ${matrixBlockHTML('Q · K · V', SEQ_LEN, qkvCells, 28)}
+        ${matrixBlockHTML('S → P (N×N)', SEQ_LEN, sCells, 28, step < 1, step === 1)}
+        ${matrixBlockHTML('Output O', SEQ_LEN, oCells, 28, step < 3)}
+      </div>
+    </div>
+
+    ${memBarHTML('HBM USAGE', hbmPct, '100%', COLORS.red, 'Grows with N². The N×N matrix dominates everything else.')}
+
+    <div class="explain-card" style="background:${step === 3 ? 'rgba(255,77,109,0.08)' : 'rgba(0,212,255,0.06)'};border-color:${step === 3 ? COLORS.red : COLORS.accent}44">
+      <div class="explain-head">
+        <span class="explain-title">${ex.title}</span>
+        <span class="tag" style="background:${step === 3 ? COLORS.red : COLORS.accent}1a;border-color:${step === 3 ? COLORS.red : COLORS.accent}66;color:${step === 3 ? COLORS.red : COLORS.accent}">${ex.tag}</span>
+      </div>
+      <p class="explain-body">${ex.body}</p>
+    </div>
+
+    ${controlsHTML()}
+  `;
+}
+
+// helper: build cells covering full N×N
+function fullCells(N, color, label) {
+  const arr = [];
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      arr.push({ row: r, col: c, color, label });
+    }
+  }
+  return arr;
+}
+
+// =================================================================
+// 3. FLASH ATTENTION — tile-by-tile slides (the JSX-style one)
+// =================================================================
+function renderFlash() {
+  const totalTiles = NUM_BLOCKS * NUM_BLOCKS;
+  const tileIdx = Math.min(step, totalTiles - 1);
+  const qi = Math.floor(tileIdx / NUM_BLOCKS);
+  const kj = tileIdx % NUM_BLOCKS;
+  const c = blockColor(qi);
+
+  // Q tile cells (rows qi*BS .. (qi+1)*BS-1, all cols of Q matrix)
+  const qCells = [];
+  for (let r = qi*BLOCK_SIZE; r < (qi+1)*BLOCK_SIZE; r++)
+    for (let cc = 0; cc < SEQ_LEN; cc++)
+      qCells.push({ row: r, col: cc, color: c });
+
+  // K/V tile cells
+  const kCells = [];
+  for (let r = kj*BLOCK_SIZE; r < (kj+1)*BLOCK_SIZE; r++)
+    for (let cc = 0; cc < SEQ_LEN; cc++)
+      kCells.push({ row: r, col: cc, color: blockColor(kj) });
+
+  // Output: rows already fully computed (qi' < qi) get green;
+  // current rows are partial (color = c with ~ label)
+  const oCells = [];
+  for (let r = 0; r < qi*BLOCK_SIZE; r++)
+    for (let cc = 0; cc < SEQ_LEN; cc++)
+      oCells.push({ row: r, col: cc, color: COLORS.green });
+  for (let r = qi*BLOCK_SIZE; r < (qi+1)*BLOCK_SIZE; r++)
+    for (let cc = 0; cc < SEQ_LEN; cc++)
+      oCells.push({ row: r, col: cc, color: c, label: '~' });
+
+  // SRAM tile (BS × BS)
+  const sramCells = [];
+  for (let r = 0; r < BLOCK_SIZE; r++)
+    for (let cc = 0; cc < BLOCK_SIZE; cc++)
+      sramCells.push({ row: r, col: cc, color: c });
+
+  // Memory accounting
+  const tilesProcessed = tileIdx + 1;
+  const flashHBM = tilesProcessed * BLOCK_SIZE * BLOCK_SIZE;
+  const standardHBM = SEQ_LEN * SEQ_LEN;
+  const savedPct = Math.round((1 - flashHBM / standardHBM) * 100);
+
+  const subPhase = kj === 0
+    ? `Loading Q-block ${qi+1} into SRAM, streaming first K/V-block`
+    : `Streaming K/V-block ${kj+1} through the same Q-block`;
+
+  // step labels: Q1·K1 ... Q3·K3
+  const tileLabels = [];
+  for (let i = 0; i < totalTiles; i++)
+    tileLabels.push(`Q${Math.floor(i/NUM_BLOCKS)+1}K${(i%NUM_BLOCKS)+1}`);
+
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <h2 style="color:var(--green)">FlashAttention — tiled</h2>
+        <div class="panel-sub">N = ${SEQ_LEN} · block = ${BLOCK_SIZE} · ${NUM_BLOCKS}×${NUM_BLOCKS} = ${totalTiles} tiles</div>
+      </div>
+      ${stepIndicatorHTML(tileLabels, step, true)}
+    </div>
+
+    <div class="tile-stage">
+      <div class="memory-region hbm">
+        <div class="memory-tag hbm-tag">HBM — main memory</div>
+        <div class="matrix-row" style="gap:14px">
+          ${matrixBlockHTML('Q (tiles)', SEQ_LEN, qCells, 28)}
+          ${matrixBlockHTML('K / V (tiles)', SEQ_LEN, kCells, 28)}
+          ${matrixBlockHTML('Output O', SEQ_LEN, oCells, 28)}
+        </div>
+      </div>
+      <div class="arrow-stream" style="color:${c}">
+        <div class="arrow">⟶</div>
+        <div class="arrow-label">to SRAM</div>
+      </div>
+      <div class="memory-region sram" style="border-color:${c}66;box-shadow:0 0 24px ${c}33">
+        <div class="memory-tag sram-tag" style="color:${c};border-color:${c}66;background:${c}1a;box-shadow:0 0 14px ${c}33">SRAM — fast, small</div>
+        ${matrixBlockHTML(`Tile Q${qi+1}·K${kj+1}`, BLOCK_SIZE, sramCells, 44)}
+        <div class="sram-note">
+          Only a ${BLOCK_SIZE}×${BLOCK_SIZE} tile<br>
+          <span class="em" style="color:${c}">online softmax updates here</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="mem-bars">
+      ${memBarHTML('FLASH HBM OPS', Math.round(flashHBM/standardHBM*100), '100%', COLORS.green,
+                   `${flashHBM} cells vs ${standardHBM} standard — ${savedPct}% less so far`)}
+      ${memBarHTML('SRAM TILE', Math.round((BLOCK_SIZE*BLOCK_SIZE)/standardHBM*100), '100%', c,
+                   'Same tiny tile reused each iteration — no N² allocation')}
+    </div>
+
+    <div class="explain-card" style="background:${c}18;border-color:${c}44">
+      <div class="explain-head">
+        <span class="explain-title">${subPhase}</span>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <span class="tag" style="background:${c}1a;border-color:${c}66;color:${c}">TILE Q${qi+1} × K${kj+1}</span>
+          <span class="tag" style="background:${COLORS.green}1a;border-color:${COLORS.green}66;color:${COLORS.green}">IO-BOUND ✓</span>
+        </div>
+      </div>
+      <p class="explain-body">
+        FlashAttention loads only a small <strong style="color:${c}">block of Q (${BLOCK_SIZE} rows)</strong> into fast SRAM, then streams each K/V block through it.
+        Attention scores are computed on chip using the <strong style="color:${COLORS.accent}">online softmax trick</strong> — no N×N matrix ever exists in memory.
+        Output is accumulated incrementally and written back once per row block.
+      </p>
+    </div>
+
+    ${controlsHTML()}
+  `;
+}
+
+// =================================================================
+// 4. MATH MODE (light island, canvas-based, ported from math file)
+// =================================================================
+const MATH_DATA = {
+  Q: [1.0, 0.5],
+  K1: [[1.0, 2.0], [0.0, 1.0]],
+  S1: [2.0, 0.5],
+  A1: [7.4, 1.7],
+  L1: 9.1,
+  V1: [10.0, 20.0],
+  O1: [11.9, 15.4],
+  K2: [[1.0, 1.0], [0.0, 0.0]],
+  S2: [1.0, 0.0],
+  A2: [2.7, 1.0],
+  L2: 12.8,
+  L2_added: 3.7,
+  V2: [30.0, 40.0],
+  O_final: [18.2, 22.1]
+};
+
+const MATH_STEPS = [
+  {
+    title: 'Step 1 — Compute Scores (block 1)',
+    caption: 'STEP 1 — COMPUTE SCORES',
+    stage: 0,
+    conceptual: `
+      <p>Multiply <span class="mvar">Q</span> by <span class="mvar">K<sup>(1)T</sup></span> to get the score block <span class="mvar">S<sup>(1)</sup></span>. This is the first <em>tile</em> — only one chunk of K is loaded into SRAM.</p>
+      <div class="eq-block">S<sup>(1)</sup> = Q (K<sup>(1)</sup>)<sup>T</sup></div>
+      <p>The full N×N attention matrix is <strong>never materialized</strong>.</p>`,
+    numeric: `<div class="numeric-box">Q_row : [1.0, 0.5]
+K⁽¹⁾ᵀ : [[1.0, 2.0],
+        [0.0, 1.0]]
+
+S⁽¹⁾  = [1·1 + 0.5·0,  1·2 + 0.5·1]
+S⁽¹⁾  = [1.0, 2.5]   ← (slightly simplified)</div>`,
+    guide: 'Watch <span class="mvar">Q</span> meet <span class="mvar">K<sup>(1)T</sup></span> — the animated arrow shows the matrix product flowing into <span class="mvar">S<sup>(1)</sup></span>.'
+  },
+  {
+    title: 'Step 2A — Exponentiate',
+    caption: 'STEP 2A — EXPONENTIATE',
+    stage: 1,
+    conceptual: `
+      <p>Element-wise exponentiation of every score gives the unnormalized softmax numerator.</p>
+      <div class="eq-block">A<sup>(1)</sup> = exp(S<sup>(1)</sup>)</div>
+      <p>This is part one of softmax: the numerator. We still need a denominator to normalize.</p>`,
+    numeric: `<div class="numeric-box">S⁽¹⁾ : [2.0, 0.5]
+
+A⁽¹⁾ = [e²·⁰, e⁰·⁵]
+A⁽¹⁾ ≈ [7.4, 1.7]</div>`,
+    guide: '<span class="mvar">S<sup>(1)</sup></span> transforms in place into <span class="mvar">A<sup>(1)</sup></span> — same shape, exponentiated.'
+  },
+  {
+    title: 'Step 2B — Local denominator ℓ⁽¹⁾',
+    caption: 'STEP 2B — LOCAL DENOMINATOR',
+    stage: 2,
+    conceptual: `
+      <p>Sum each row of <span class="mvar">A<sup>(1)</sup></span> to get a <em>local</em> softmax denominator.</p>
+      <div class="eq-block">ℓ<sup>(1)</sup> = Σ A<sup>(1)</sup></div>
+      <p>This is "local" because we've only seen block 1 — block 2 will add to it later.</p>`,
+    numeric: `<div class="numeric-box">A⁽¹⁾_row : [7.4, 1.7]
+
+ℓ⁽¹⁾ = 7.4 + 1.7
+ℓ⁽¹⁾ = 9.1</div>`,
+    guide: 'Each row of <span class="mvar">A<sup>(1)</sup></span> collapses into one number — the row sum.'
+  },
+  {
+    title: 'Step 2C — Partial output O⁽¹⁾',
+    caption: 'STEP 2C — PARTIAL OUTPUT',
+    stage: 3,
+    conceptual: `
+      <p>Multiply normalized weights by <span class="mvar">V<sup>(1)</sup></span> to get a first guess at the output.</p>
+      <div class="eq-block">O<sup>(1)</sup> = ( A<sup>(1)</sup> / ℓ<sup>(1)</sup> ) V<sup>(1)</sup></div>
+      <p>This is wrong on purpose — it ignores block 2. We'll rescale it once we see more data.</p>`,
+    numeric: `<div class="numeric-box">weights = A⁽¹⁾/ℓ⁽¹⁾
+        ≈ [7.4/9.1, 1.7/9.1]
+        ≈ [0.81, 0.19]
+
+V⁽¹⁾ : [10.0, 20.0]
+O⁽¹⁾ ≈ 0.81·10 + 0.19·20 ≈ 11.9</div>`,
+    guide: 'Normalize <span class="mvar">A<sup>(1)</sup></span> by <span class="mvar">ℓ<sup>(1)</sup></span>, multiply by <span class="mvar">V<sup>(1)</sup></span>.'
+  },
+  {
+    title: 'Step 3A — Accumulate block 2',
+    caption: 'STEP 3A — ACCUMULATE BLOCK 2',
+    stage: 4,
+    conceptual: `
+      <p>Block 2 arrives. Compute <span class="mvar">S<sup>(2)</sup></span>, exponentiate to <span class="mvar">A<sup>(2)</sup></span>, <strong>add its row sums</strong> to the running denominator.</p>
+      <div class="eq-block">ℓ<sup>(2)</sup> = ℓ<sup>(1)</sup> + Σ A<sup>(2)</sup></div>
+      <p>This is the heart of online softmax: the denominator keeps accumulating.</p>`,
+    numeric: `<div class="numeric-box">A⁽²⁾_row sum : 2.7 + 1.0 = 3.7
+
+ℓ⁽¹⁾ (old) : 9.1
++ new      : 3.7
+ℓ⁽²⁾       = 12.8</div>`,
+    guide: '<span class="mvar">K<sup>(2)</sup></span> swaps in. The accumulator grows.'
+  },
+  {
+    title: 'Step 3B — Final O via rescaling',
+    caption: 'STEP 3B — FINAL CORRECTION',
+    stage: 5,
+    conceptual: `
+      <p>The old <span class="mvar">O<sup>(1)</sup></span> used the wrong denominator. Rescale it by <span class="mvar">ℓ<sup>(1)</sup>/ℓ<sup>(2)</sup></span>, then add block 2's contribution.</p>
+      <div class="eq-block" style="font-size:15px">O = (ℓ<sup>(1)</sup>/ℓ<sup>(2)</sup>) O<sup>(1)</sup> + ( A<sup>(2)</sup>/ℓ<sup>(2)</sup> ) V<sup>(2)</sup></div>
+      <p>The final <span class="mvar">O</span> is <strong>exactly</strong> what standard attention would produce — but we never stored the full <span class="mvar">A</span>.</p>`,
+    numeric: `<div class="numeric-box">rescale  : (9.1/12.8) · 11.9 ≈ 8.4
+new part : (3.7/12.8) · V⁽²⁾  ≈ 9.8
+
+O_final  = 8.4 + 9.8 ≈ 18.2</div>`,
+    guide: '<span class="mvar">O<sup>(1)</sup></span> shrinks (rescaled) and <span class="mvar">V<sup>(2)</sup></span> contributes the new piece.'
+  }
+];
+
+function renderMath() {
+  const s = MATH_STEPS[step];
+  panel.innerHTML = `
+    <div class="panel-head" style="margin-bottom:14px">
+      <div>
+        <h2 style="color:var(--purple)">The Math — Online Softmax</h2>
+        <div class="panel-sub">why tiling produces the exact same answer as standard attention</div>
+      </div>
+      <div class="math-view-toggle">
+        <button id="mathViewC" class="${mathView === 'conceptual' ? 'active' : ''}">Conceptual</button>
+        <button id="mathViewN" class="${mathView === 'numerical' ? 'active' : ''}">Numerical</button>
+      </div>
+    </div>
+
+    <div class="math-island">
+      <div class="math-grid">
+        <div>
+          <div class="math-canvas-wrap">
+            <div class="math-caption">${s.caption}</div>
+            <canvas id="mathCanvas"></canvas>
+          </div>
+          <div class="math-controls">
+            <button class="math-btn" id="mathPrev" ${step === 0 ? 'disabled' : ''}>← Previous</button>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:#64748b">Step ${step+1} of ${MATH_STEPS.length}</span>
+            <button class="math-btn ${playing ? 'primary' : ''}" id="mathPlay">${playing ? '⏸ Pause' : '▶ Play'}</button>
+            <button class="math-btn primary" id="mathNext" ${step === MATH_STEPS.length-1 ? 'disabled' : ''}>Next →</button>
+          </div>
+          ${renderRunningState(step)}
+        </div>
+        <div class="math-side">
+          <h3 class="math-title">${s.title}</h3>
+          <div class="math-body">${mathView === 'conceptual' ? s.conceptual : s.numeric}</div>
+          <div class="visual-guide"><strong>Visual guide</strong>${s.guide}</div>
+          <div class="stages-strip">
+            ${['scores','exp','ℓ⁽¹⁾','O⁽¹⁾','accum ℓ','O final'].map((label, i) => `
+              <div class="stage-pill ${i < s.stage ? 'done' : (i === s.stage ? 'active' : '')}">${label}</div>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  // Wire up math controls
+  document.getElementById('mathViewC').onclick = () => { mathView = 'conceptual'; render(); };
+  document.getElementById('mathViewN').onclick = () => { mathView = 'numerical'; render(); };
+  document.getElementById('mathPrev').onclick = () => { if (step > 0) { step--; stopPlay(); mathStepStart = performance.now(); render(); } };
+  document.getElementById('mathNext').onclick = () => { if (step < MATH_STEPS.length-1) { step++; stopPlay(); mathStepStart = performance.now(); render(); } };
+  document.getElementById('mathPlay').onclick = () => togglePlay();
+
+  initMathCanvas();
+}
+
+function renderRunningState(s) {
+  const d = MATH_DATA;
+  let l1 = '—', l2 = '—', o = '—';
+  if (s >= 2) l1 = d.L1.toFixed(1);
+  if (s >= 3) o = '≈ ' + d.O1[0].toFixed(1) + ' (partial)';
+  if (s >= 4) l2 = d.L2.toFixed(1);
+  if (s >= 5) o = '✓ ' + d.O_final[0].toFixed(1);
+  return `
+    <div class="running-state">
+      <div class="state-card b1">
+        <div class="state-label">ℓ⁽¹⁾ block 1 denom</div>
+        <div class="state-val">${l1}</div>
+        <div class="state-sub">Σ exp(S⁽¹⁾)</div>
+      </div>
+      <div class="state-card b2">
+        <div class="state-label">ℓ⁽²⁾ total denom</div>
+        <div class="state-val">${l2}</div>
+        <div class="state-sub">ℓ⁽¹⁾ + Σ exp(S⁽²⁾)</div>
+      </div>
+      <div class="state-card o">
+        <div class="state-label">O output</div>
+        <div class="state-val">${o}</div>
+        <div class="state-sub">running accumulator</div>
+      </div>
+    </div>`;
+}
+
+// ----- Math canvas (light theme) -----
+let mathCanvas, mathCtx, mathCW, mathCH;
+let mathL = {}; // layout
+
+function initMathCanvas() {
+  mathCanvas = document.getElementById('mathCanvas');
+  if (!mathCanvas) return;
+  mathCtx = mathCanvas.getContext('2d');
+  resizeMath();
+  mathStepStart = performance.now();
+  mathLastFrame = performance.now();
+  if (mathAnimRAF) cancelAnimationFrame(mathAnimRAF);
+  mathAnimRAF = requestAnimationFrame(drawMath);
+}
+window.addEventListener('resize', () => { if (mode === 'math') { resizeMath(); } });
+
+function resizeMath() {
+  if (!mathCanvas) return;
+  const r = mathCanvas.parentElement.getBoundingClientRect();
+  mathCW = r.width;
+  mathCH = 420;
+  mathCanvas.width = mathCW * devicePixelRatio;
+  mathCanvas.height = mathCH * devicePixelRatio;
+  mathCanvas.style.width = mathCW + 'px';
+  mathCanvas.style.height = mathCH + 'px';
+  mathCtx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+  computeMathLayout();
+}
+function computeMathLayout() {
+  const d_ = 50;          // Q/V/O column width
+  const N_ = 140;
+  const B_ = 70;
+  const totalW = d_ + 30 + B_ + 100 + 28 + 70 + d_;
+  const baseX = Math.max((mathCW - totalW) / 2, 16);
+  const baseY = 110;
+  mathL = {
+    Q:  { x: baseX, y: baseY, w: d_, h: N_, color: '#2563eb', label: 'Q', desc: 'N × d' },
+    K1: { x: baseX + d_ + 30, y: baseY - B_ - 26, w: B_, h: B_, color: '#059669', label: 'K⁽¹⁾ᵀ', desc: 'd × B' },
+    K2: { x: baseX + d_ + 30, y: baseY - B_ - 26, w: B_, h: B_, color: '#059669', label: 'K⁽²⁾ᵀ', desc: 'd × B' },
+    S1: { x: baseX + d_ + 30, y: baseY, w: B_, h: N_, color: '#7c3aed', label: 'S⁽¹⁾', desc: 'N × B' },
+    A1: { x: baseX + d_ + 30, y: baseY, w: B_, h: N_, color: '#d97706', label: 'A⁽¹⁾', desc: 'N × B' },
+    S2: { x: baseX + d_ + 30, y: baseY, w: B_, h: N_, color: '#7c3aed', label: 'S⁽²⁾', desc: 'N × B' },
+    A2: { x: baseX + d_ + 30, y: baseY, w: B_, h: N_, color: '#d97706', label: 'A⁽²⁾', desc: 'N × B' },
+    L1: { x: baseX + d_ + 30 + B_ + 100, y: baseY, w: 28, h: N_, color: '#dc2626', label: 'ℓ⁽¹⁾', desc: 'N × 1' },
+    L2: { x: baseX + d_ + 30 + B_ + 100, y: baseY, w: 28, h: N_, color: '#dc2626', label: 'ℓ⁽²⁾', desc: 'N × 1' },
+    V1: { x: baseX + d_ + 30 + B_ + 100 + 28 + 70, y: baseY - B_ - 26, w: d_, h: B_, color: '#0891b2', label: 'V⁽¹⁾', desc: 'B × d' },
+    V2: { x: baseX + d_ + 30 + B_ + 100 + 28 + 70, y: baseY - B_ - 26, w: d_, h: B_, color: '#0891b2', label: 'V⁽²⁾', desc: 'B × d' },
+    O1: { x: baseX + d_ + 30 + B_ + 100 + 28 + 70, y: baseY, w: d_, h: N_, color: '#db2777', label: 'O⁽¹⁾', desc: 'N × d' },
+    O_final: { x: baseX + d_ + 30 + B_ + 100 + 28 + 70, y: baseY, w: d_, h: N_, color: '#db2777', label: 'O', desc: 'N × d' }
+  };
+}
+
+function drawMath() {
+  if (!mathCanvas || mode !== 'math') return;
+  const now = performance.now();
+  const dt = (now - mathLastFrame) / 1000;
+  mathLastFrame = now;
+  mathT += dt;
+
+  mathCtx.clearRect(0, 0, mathCW, mathCH);
+  // Subtle band background
+  const g = mathCtx.createLinearGradient(0, 0, mathCW, 0);
+  g.addColorStop(0, 'rgba(59,130,246,0)');
+  g.addColorStop(0.4, 'rgba(124,58,237,0.025)');
+  g.addColorStop(0.7, 'rgba(220,38,38,0.025)');
+  g.addColorStop(1, 'rgba(219,39,119,0.025)');
+  mathCtx.fillStyle = g;
+  mathCtx.fillRect(0, 70, mathCW, 280);
+
+  const p = Math.min(1, (now - mathStepStart) / 600);
+  if (step === 0) drawMathStep1(p);
+  else if (step === 1) drawMathStep2A(p);
+  else if (step === 2) drawMathStep2B(p);
+  else if (step === 3) drawMathStep2C(p);
+  else if (step === 4) drawMathStep3A(p);
+  else if (step === 5) drawMathStep3B(p);
+
+  mathAnimRAF = requestAnimationFrame(drawMath);
+}
+
+function drawBlockMath(block, opts = {}) {
+  const alpha = opts.alpha ?? 1;
+  const scale = opts.scale ?? 1;
+  const hideLabel = opts.hideLabel ?? false;
+  const highlight = opts.highlight ?? false;
+  const labelOverride = opts.label;
+  if (alpha <= 0.01) return;
+
+  const cx = block.x + block.w/2;
+  const cy = block.y + block.h/2;
+  const w = block.w * scale;
+  const h = block.h * scale;
+  const x = cx - w/2;
+  const y = cy - h/2;
+
+  mathCtx.save();
+  mathCtx.globalAlpha = alpha;
+  // shadow
+  mathCtx.fillStyle = 'rgba(15,23,42,0.06)';
+  mathCtx.fillRect(x+3, y+3, w, h);
+  // body
+  mathCtx.fillStyle = block.color + '15';
+  mathCtx.fillRect(x, y, w, h);
+  if (highlight) {
+    mathCtx.save();
+    mathCtx.shadowColor = block.color;
+    mathCtx.shadowBlur = 12 + 5*Math.sin(mathT*4);
+    mathCtx.strokeStyle = block.color;
+    mathCtx.lineWidth = 2.2;
+    mathCtx.strokeRect(x, y, w, h);
+    mathCtx.restore();
+  } else {
+    mathCtx.strokeStyle = block.color;
+    mathCtx.lineWidth = 1.4;
+    mathCtx.strokeRect(x, y, w, h);
+  }
+
+  // cell grid (4 rows × 1 or 2 cols)
+  const rows = 4, cols = isVectorBlock(block) ? 1 : 2;
+  const rowH = h/rows, colW = w/cols;
+  mathCtx.strokeStyle = block.color + '33';
+  mathCtx.lineWidth = 1;
+  mathCtx.beginPath();
+  for (let i = 1; i < rows; i++) { mathCtx.moveTo(x, y+rowH*i); mathCtx.lineTo(x+w, y+rowH*i); }
+  if (cols > 1) for (let j = 1; j < cols; j++) { mathCtx.moveTo(x+colW*j, y); mathCtx.lineTo(x+colW*j, y+h); }
+  mathCtx.stroke();
+  // shading
+  for (let i = 0; i < rows; i++)
+    for (let j = 0; j < cols; j++) {
+      const a = 0.05 + 0.06*((i+j) % 3) + 0.015*Math.sin(mathT*1.2 + i*0.6 + j*0.7);
+      mathCtx.fillStyle = block.color;
+      mathCtx.globalAlpha = alpha * Math.max(0, a);
+      mathCtx.fillRect(x + j*colW + 1, y + i*rowH + 1, colW - 2, rowH - 2);
+    }
+  mathCtx.globalAlpha = alpha;
+
+  // Numerical values
+  if (mathView === 'numerical') {
+    const v = getMathNumeric(block);
+    if (v) {
+      mathCtx.fillStyle = block.color;
+      mathCtx.font = "bold 10.5px 'JetBrains Mono', monospace";
+      mathCtx.textAlign = 'center';
+      mathCtx.textBaseline = 'middle';
+      const valArr = Array.isArray(v[0]) ? v : [v];
+      for (let r = 0; r < rows; r++) {
+        const rowData = valArr[r] || valArr[valArr.length - 1];
+        for (let c = 0; c < cols; c++) {
+          let val = null;
+          if (Array.isArray(rowData)) val = rowData[c];
+          else if (c === 0) val = rowData;
+          if (val !== null && val !== undefined) {
+            const txt = typeof val === 'number' ? val.toFixed(1) : val;
+            mathCtx.fillText(txt, x + colW*c + colW/2, y + rowH*r + rowH/2);
+          }
+        }
+      }
+    }
+  }
+
+  // Label
+  if (!hideLabel) {
+    mathCtx.globalAlpha = alpha;
+    mathCtx.fillStyle = '#0f172a';
+    mathCtx.textAlign = 'center';
+    mathCtx.font = "italic 700 16px 'Crimson Pro', serif";
+    const labelText = labelOverride || block.label;
+    const isCompact = block.h < 75;
+    const labelY = isCompact ? y - 8 : y + h/2 + 5;
+    mathCtx.fillText(labelText, x + w/2, labelY);
+    mathCtx.font = "500 9.5px 'JetBrains Mono', monospace";
+    mathCtx.fillStyle = '#64748b';
+    let descY = y + h + 14;
+    if (block === mathL.K1 || block === mathL.K2 || block === mathL.V1 || block === mathL.V2) descY = y - 22;
+    mathCtx.fillText(block.desc, x + w/2, descY);
+  }
+  mathCtx.restore();
+}
+function isVectorBlock(b) { return b === mathL.L1 || b === mathL.L2; }
+function getMathNumeric(b) {
+  const m = mathL;
+  if (b === m.Q) return MATH_DATA.Q;
+  if (b === m.K1) return MATH_DATA.K1;
+  if (b === m.K2) return MATH_DATA.K2;
+  if (b === m.S1) return MATH_DATA.S1;
+  if (b === m.S2) return MATH_DATA.S2;
+  if (b === m.A1) return MATH_DATA.A1;
+  if (b === m.A2) return MATH_DATA.A2;
+  if (b === m.L1) return MATH_DATA.L1;
+  if (b === m.L2) return MATH_DATA.L2;
+  if (b === m.V1) return MATH_DATA.V1;
+  if (b === m.V2) return MATH_DATA.V2;
+  if (b === m.O1) return MATH_DATA.O1;
+  if (b === m.O_final) return MATH_DATA.O_final;
+  return null;
+}
+function drawMathConn(from, to, direction, opts = {}) {
+  const alpha = opts.alpha ?? 1;
+  const color = opts.color || '#94a3b8';
+  let x1, y1, x2, y2;
+  if (direction === 'horizontal') {
+    const yMid = (Math.max(from.y, to.y) + Math.min(from.y+from.h, to.y+to.h)) / 2;
+    x1 = from.x + from.w; y1 = yMid;
+    x2 = to.x; y2 = yMid;
+  } else {
+    const xMid = (Math.max(from.x, to.x) + Math.min(from.x+from.w, to.x+to.w)) / 2;
+    x1 = xMid; y1 = from.y + from.h;
+    x2 = xMid; y2 = to.y;
+  }
+  mathCtx.save();
+  mathCtx.globalAlpha = alpha;
+  mathCtx.strokeStyle = color;
+  mathCtx.lineWidth = 1.8;
+  mathCtx.setLineDash([6, 6]);
+  mathCtx.lineDashOffset = -mathT * 25;
+  mathCtx.beginPath();
+  mathCtx.moveTo(x1, y1); mathCtx.lineTo(x2, y2);
+  mathCtx.stroke();
+  mathCtx.setLineDash([]);
+  const ang = Math.atan2(y2-y1, x2-x1);
+  mathCtx.fillStyle = color;
+  mathCtx.beginPath();
+  mathCtx.moveTo(x2, y2);
+  mathCtx.lineTo(x2 - 9*Math.cos(ang-0.4), y2 - 9*Math.sin(ang-0.4));
+  mathCtx.lineTo(x2 - 9*Math.cos(ang+0.4), y2 - 9*Math.sin(ang+0.4));
+  mathCtx.closePath();
+  mathCtx.fill();
+  mathCtx.restore();
+}
+function mathAnnotation(txt, x, y, color = '#7c3aed', size = 12) {
+  mathCtx.save();
+  mathCtx.fillStyle = color;
+  mathCtx.font = `italic 700 ${size}px 'Crimson Pro', serif`;
+  mathCtx.textAlign = 'center';
+  mathCtx.textBaseline = 'middle';
+  mathCtx.fillText(txt, x, y);
+  mathCtx.restore();
+}
+function easeOut(x) { return 1 - Math.pow(1-x, 3); }
+function easeInOut(x) { return x<0.5 ? 2*x*x : 1 - Math.pow(-2*x+2, 2)/2; }
+
+// math step renderers
+function drawMathStep1(p) {
+  drawBlockMath(mathL.Q);
+  drawBlockMath(mathL.K1, { alpha: easeOut(p), highlight: p > 0.6 });
+  drawBlockMath(mathL.S1, { alpha: easeOut(Math.max(0, p*1.4-0.4)), highlight: p > 0.85 });
+  if (p > 0.3) drawMathConn(mathL.Q, mathL.S1, 'horizontal', { color: mathL.Q.color, alpha: Math.min(1, (p-0.3)*2) });
+  if (p > 0.5) drawMathConn(mathL.K1, mathL.S1, 'vertical', { color: mathL.K1.color, alpha: Math.min(1, (p-0.5)*2) });
+  mathAnnotation('matrix product', (mathL.Q.x + mathL.S1.x + mathL.S1.w)/2, mathL.S1.y + mathL.S1.h + 44, '#7c3aed', 12);
+}
+function drawMathStep2A(p) {
+  drawBlockMath(mathL.Q, { alpha: 0.55 });
+  drawBlockMath(mathL.K1, { alpha: 0.35 });
+  const m = easeInOut(p);
+  drawBlockMath(mathL.S1, { alpha: 1 - m });
+  drawBlockMath(mathL.A1, { alpha: m, highlight: p > 0.5 });
+  mathAnnotation('exp(·) element-wise', mathL.A1.x + mathL.A1.w/2, mathL.A1.y - 20, '#d97706', 12);
+}
+function drawMathStep2B(p) {
+  drawBlockMath(mathL.Q, { alpha: 0.4 });
+  drawBlockMath(mathL.A1);
+  drawBlockMath(mathL.L1, { alpha: easeOut(p), highlight: p > 0.6 });
+  if (p > 0.25) drawMathConn(mathL.A1, mathL.L1, 'horizontal', { color: '#dc2626', alpha: Math.min(1, (p-0.25)*1.6) });
+  mathAnnotation('row sums →', (mathL.A1.x + mathL.A1.w + mathL.L1.x)/2, mathL.A1.y - 20, '#dc2626', 12);
+}
+function drawMathStep2C(p) {
+  drawBlockMath(mathL.Q, { alpha: 0.35 });
+  drawBlockMath(mathL.A1, { alpha: 0.55 });
+  drawBlockMath(mathL.L1, { alpha: 0.55 });
+  drawBlockMath(mathL.V1, { alpha: easeOut(Math.min(1, p*1.5)) });
+  drawBlockMath(mathL.O1, { alpha: easeOut(Math.max(0, p*1.5 - 0.4)), highlight: p > 0.85 });
+  if (p > 0.3) drawMathConn(mathL.A1, mathL.O1, 'horizontal', { color: '#db2777', alpha: Math.min(1, (p-0.3)*2) });
+  if (p > 0.55) drawMathConn(mathL.V1, mathL.O1, 'vertical', { color: '#0891b2', alpha: Math.min(1, (p-0.55)*2.5) });
+  mathAnnotation('A⁽¹⁾ / ℓ⁽¹⁾', (mathL.L1.x + mathL.L1.w + mathL.O1.x)/2, mathL.O1.y - 22, '#db2777', 13);
+}
+function drawMathStep3A(p) {
+  drawBlockMath(mathL.Q, { alpha: 0.35 });
+  const sp = easeInOut(p);
+  drawBlockMath(mathL.K1, { alpha: Math.max(0, 1 - sp*1.6) });
+  drawBlockMath(mathL.K2, { alpha: easeOut(Math.max(0, sp*1.6 - 0.6)), highlight: p > 0.5 });
+  drawBlockMath(mathL.A2, { alpha: easeOut(Math.max(0, p*1.4 - 0.3)), highlight: p > 0.55 });
+  drawBlockMath(mathL.L1, { alpha: 0.3 });
+  drawBlockMath(mathL.L2, { alpha: easeOut(Math.max(0, p*1.6 - 0.5)), highlight: p > 0.7 });
+  if (p > 0.5) drawMathConn(mathL.A2, mathL.L2, 'horizontal', { color: '#dc2626', alpha: Math.min(1, (p-0.5)*2) });
+  mathAnnotation('+ add to ℓ⁽¹⁾', (mathL.A2.x + mathL.A2.w + mathL.L2.x)/2, mathL.A2.y - 20, '#dc2626', 12);
+  mathAnnotation('block 2', mathL.K2.x + mathL.K2.w/2, mathL.K2.y - 18, '#059669', 11);
+}
+function drawMathStep3B(p) {
+  drawBlockMath(mathL.Q, { alpha: 0.3 });
+  drawBlockMath(mathL.K2, { alpha: 0.5 });
+  drawBlockMath(mathL.A2, { alpha: 0.55 });
+  drawBlockMath(mathL.L2, { alpha: 0.7 });
+  drawBlockMath(mathL.V2, { alpha: easeOut(Math.min(1, p*1.5)) });
+  const shrink = easeInOut(p);
+  const scale = 1 - shrink*0.32;
+  drawBlockMath(mathL.O1, { alpha: Math.max(0.15, 1 - shrink*0.85), scale, hideLabel: shrink > 0.4 });
+  drawBlockMath(mathL.O_final, { alpha: easeOut(Math.max(0, p*1.4 - 0.3)), highlight: p > 0.85, label: 'O' });
+  if (p > 0.3) drawMathConn(mathL.A2, mathL.O_final, 'horizontal', { color: '#db2777', alpha: Math.min(1, (p-0.3)*2) });
+  if (p > 0.55) drawMathConn(mathL.V2, mathL.O_final, 'vertical', { color: '#0891b2', alpha: Math.min(1, (p-0.55)*2.5) });
+  // Centered annotation below action — no clipping
+  mathCtx.save();
+  mathCtx.fillStyle = '#db2777';
+  mathCtx.font = "italic 700 13px 'Crimson Pro', serif";
+  mathCtx.textAlign = 'center';
+  const annY = mathL.O_final.y + mathL.O_final.h + 36;
+  mathCtx.fillText('O  =  (ℓ⁽¹⁾/ℓ⁽²⁾) · O⁽¹⁾   +   (A⁽²⁾/ℓ⁽²⁾) · V⁽²⁾', mathCW/2, annY);
+  mathCtx.restore();
+}
+
+// =================================================================
+// 5. GPU MEMORY TRAFFIC (two-lane visualization)
+// =================================================================
+function renderTraffic() {
+  // Use slider state for accurate fractions
+  const { N, d, B } = sliderState;
+  const fp16 = 2;
+  // Bytes moved through HBM in standard attention (rough model)
+  //  read Q,K,V: 3·N·d ; write S: N² ; read S: N² ; write P: N² ; read P: N² ; write O: N·d
+  const stdReadQKV = 3 * N * d * fp16;
+  const stdWriteS = N * N * fp16;
+  const stdReadS = N * N * fp16;
+  const stdWriteP = N * N * fp16;
+  const stdReadP = N * N * fp16;
+  const stdWriteO = N * d * fp16;
+  const stdTotal = stdReadQKV + stdWriteS + stdReadS + stdWriteP + stdReadP + stdWriteO;
+  // FlashAttention HBM: read Q,K,V (tiled), write O. No S/P round trips.
+  const flashTotal = stdReadQKV + stdWriteO;
+  const savedFraction = 1 - flashTotal / stdTotal;
+  const savedPct = savedFraction >= 0.995 ? (savedFraction * 100).toFixed(1) : Math.round(savedFraction * 100).toString();
+
+  // Segment widths as fraction of stdTotal
+  const pct = b => (b / stdTotal * 100);
+
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <h2 style="color:var(--gold)">GPU Memory Traffic</h2>
+        <div class="panel-sub">where the time actually goes · N = ${N.toLocaleString()}, d = ${d}, B = ${B}, fp16</div>
+      </div>
+    </div>
+
+    <div class="traffic-wrap">
+      <div class="traffic-header">
+        <h3>standard attention vs FlashAttention — what crosses HBM</h3>
+        <p>Both lanes read Q/K/V from HBM. The red region is the extra S/P round trips standard attention pays for.</p>
+      </div>
+
+      <div class="lane std">
+        <div class="lane-head">
+          <span class="lane-title">Standard attention</span>
+          <span class="lane-sub">writes S, reads it back; writes P, reads it back; then writes O</span>
+        </div>
+        <div class="lane-stages">
+          <div class="stage-box" style="border-color:rgba(0,212,255,0.5)">
+            <div class="stage-name">read Q, K, V</div>
+            <div class="stage-loc">HBM read</div>
+          </div>
+          <div class="stage-box" style="border-color:rgba(255,201,71,0.6);background:rgba(255,201,71,0.06)">
+            <div class="stage-name">write S</div>
+            <div class="stage-loc">HBM write</div>
+          </div>
+          <div class="stage-box" style="border-color:rgba(255,228,92,0.6);background:rgba(255,228,92,0.06)">
+            <div class="stage-name">write P</div>
+            <div class="stage-loc">HBM write</div>
+          </div>
+          <div class="stage-box" style="border-color:rgba(255,77,109,0.6);background:rgba(255,77,109,0.06)">
+            <div class="stage-name">write O</div>
+            <div class="stage-loc">HBM write</div>
+          </div>
+        </div>
+        <div class="removed-callout">↓ REMOVED BY FLASHATTENTION ↓</div>
+        <div class="lane-hbm">
+          <div class="lane-hbm-label">SLOW HBM</div>
+          <div class="lane-hbm-bar hatched">
+            <div class="hbm-seg shared" style="width:${pct(stdReadQKV)}%">shared Q/K/V</div>
+            <div class="hbm-seg write-s heavy" style="width:${pct(stdWriteS)}%">write S</div>
+            <div class="hbm-seg read-s heavy" style="width:${pct(stdReadS)}%">read S</div>
+            <div class="hbm-seg write-p heavy" style="width:${pct(stdWriteP)}%">write P</div>
+            <div class="hbm-seg read-p heavy" style="width:${pct(stdReadP)}%">read P</div>
+            <div class="hbm-seg write-o" style="width:${pct(stdWriteO)}%">O</div>
+          </div>
+        </div>
+        <div style="text-align:right;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--red);font-weight:700">
+          ${fmtBytes(stdTotal)} total HBM traffic — S/P traffic dominates
+        </div>
+      </div>
+
+      <div class="lane flash">
+        <div class="lane-head">
+          <span class="lane-title">FlashAttention</span>
+          <span class="lane-sub">tiles stream from HBM, score tiles stay in SRAM, only final O is written</span>
+        </div>
+        <div class="lane-stages">
+          <div class="stage-box" style="border-color:rgba(176,132,255,0.5)">
+            <div class="stage-name">stream Q,K,V tiles</div>
+            <div class="stage-loc">HBM read</div>
+          </div>
+          <div class="stage-box" style="border-color:rgba(0,212,255,0.6);background:rgba(0,212,255,0.05)">
+            <div class="stage-name">tile scores</div>
+            <div class="stage-loc sram">SRAM</div>
+          </div>
+          <div class="stage-box" style="border-color:rgba(0,255,157,0.5);background:rgba(0,255,157,0.04)">
+            <div class="stage-name">update m, ℓ, O</div>
+            <div class="stage-loc reg">registers</div>
+          </div>
+          <div class="stage-box" style="border-color:rgba(255,77,109,0.5);background:rgba(255,77,109,0.04)">
+            <div class="stage-name">write final O</div>
+            <div class="stage-loc">HBM write</div>
+          </div>
+        </div>
+        <div class="lane-hbm">
+          <div class="lane-hbm-label" style="color:var(--green)">SLOW HBM</div>
+          <div class="lane-hbm-bar hatched">
+            <div class="hbm-seg flash-shared" style="width:${pct(stdReadQKV)}%">shared Q/K/V tile reads</div>
+            <div class="hbm-seg flash-write-o" style="width:${pct(stdWriteO)}%">write O</div>
+          </div>
+        </div>
+        <div style="text-align:right;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--green);font-weight:700">
+          ${fmtBytes(flashTotal)} total HBM traffic — ${savedPct}% less
+        </div>
+      </div>
+
+      <div class="traffic-summary">
+        <strong>Focus on the red S/P region.</strong> FlashAttention removes those N×N HBM write/read round trips — that's where the speedup comes from. The shared Q/K/V reads are not eliminated; they're just streamed in smaller tiles. Try the sliders → as N grows, the red region balloons and the green stays flat.
+      </div>
+    </div>
+  `;
+}
+
+
+function renderCompare() {
+  const std = {
+    title: 'Standard Attention', color: COLORS.red,
+    rows: [
+      ['Extra memory', 'O(N²) — the full S/P matrix in HBM'],
+      ['HBM passes',   'multiple full N×N round-trips'],
+      ['Fused ops',    'no'],
+      ['Recompute',    'none — stores P'],
+      ['Long context', '~1K–4K tokens (VRAM-bound)']
+    ]
+  };
+  const flash = {
+    title: 'FlashAttention', color: COLORS.green,
+    rows: [
+      ['Extra memory', 'O(Nd) — output state (no N×N matrix)'],
+      ['HBM passes',   'one tile-streaming pass'],
+      ['Fused ops',    'yes — QKᵀ, softmax, PV in one kernel'],
+      ['Recompute',    'recomputes P in the backward pass'],
+      ['Long context', '100K+ tokens (same hardware)']
+    ]
+  };
+  const card = c => `
+    <div class="compare-card" style="background:${c.color}0a;border-color:${c.color}44">
+      <div class="title" style="color:${c.color}">${c.title}</div>
+      ${c.rows.map(([k, v]) => `
+        <div class="compare-row"><span class="k">${k}</span><span class="v" style="color:${c.color}">${v}</span></div>
+      `).join('')}
+    </div>`;
+  panel.innerHTML = `
+    <div class="panel-head">
+      <div>
+        <h2 style="color:var(--gold)">Side by Side</h2>
+        <div class="panel-sub">same output · different schedule</div>
+      </div>
+    </div>
+    <div class="compare-grid">
+      ${card(std)}
+      ${card(flash)}
+    </div>
+    <div class="key-insight">
+      <div class="ki-title">Key insight</div>
+      <p>
+        FlashAttention is <strong style="color:var(--gold)">not an approximation</strong>. It computes mathematically exact attention.
+        The trick is using the <strong style="color:var(--accent)">online softmax algorithm</strong> to update a numerically stable softmax
+        without ever materializing the full N×N matrix — every intermediate stays in fast SRAM. The whole speedup comes from a different
+        IO schedule, not different math.
+      </p>
+    </div>
+  `;
+}
+
+// =================================================================
+// Shared HTML helpers
+// =================================================================
+function stepIndicatorHTML(labels, current, compact = false) {
+  return `<div class="step-indicator">
+    ${labels.map((l, i) => `
+      <div class="step-dot ${i < current ? 'done' : (i === current ? 'active' : '')}">${i < current ? '✓' : i+1}</div>
+      ${i < labels.length-1 ? `<div class="step-line ${i < current ? 'done' : ''}"></div>` : ''}
+    `).join('')}
+  </div>`;
+}
+
+function matrixBlockHTML(label, size, cells, cellSize, dimmed = false, blowup = false) {
+  const cellMap = new Map();
+  cells.forEach(c => cellMap.set(c.row*size + c.col, c));
+  let inner = '';
+  for (let i = 0; i < size*size; i++) {
+    const c = cellMap.get(i);
+    if (c) {
+      const lbl = c.label || '';
+      inner += `<div class="matrix-cell" style="width:${cellSize}px;height:${cellSize}px;background:${c.color}55;border-color:${c.color};box-shadow:0 0 8px ${c.color}44;color:${c.color}">${lbl}</div>`;
+    } else {
+      inner += `<div class="matrix-cell" style="width:${cellSize}px;height:${cellSize}px"></div>`;
+    }
+  }
+  return `<div class="matrix-block${blowup ? ' blowup' : ''}">
+    <div class="matrix-label">${label}</div>
+    <div class="matrix-grid${dimmed ? ' dimmed' : ''}" style="grid-template-columns:repeat(${size}, ${cellSize}px)">${inner}</div>
+  </div>`;
+}
+
+function memBarHTML(label, valuePct, totalLabel, color, desc) {
+  return `<div class="mem-bar">
+    <div class="mem-bar-head">
+      <span class="mem-bar-label">${label}</span>
+      <span class="mem-bar-val" style="color:${color}">${valuePct}% of ${totalLabel}</span>
+    </div>
+    <div class="mem-bar-track">
+      <div class="mem-bar-fill" style="width:${valuePct}%;background:${color};box-shadow:0 0 12px ${color}88"></div>
+    </div>
+    ${desc ? `<div class="mem-bar-desc">${desc}</div>` : ''}
+  </div>`;
+}
+
+function controlsHTML() {
+  const max = getMaxStep();
+  return `<div class="controls">
+    <button class="btn" id="ctrlPrev" ${step === 0 ? 'disabled' : ''}>← Prev</button>
+    <button class="btn play ${playing ? 'playing' : ''}" id="ctrlPlay">${playing ? '⏸ Pause' : '▶ Play'}</button>
+    <button class="btn" id="ctrlNext" ${step >= max ? 'disabled' : ''}>Next →</button>
+    <button class="btn reset" id="ctrlReset">↺ Reset</button>
+    <span class="step-counter">${step+1} / ${max+1}</span>
+  </div>`;
+}
+
+// Event delegation for controls
+document.addEventListener('click', e => {
+  const t = e.target;
+  if (t.id === 'ctrlPrev') { if (step > 0) { stopPlay(); step--; render(); } }
+  else if (t.id === 'ctrlNext') { const m = getMaxStep(); if (step < m) { stopPlay(); step++; render(); } }
+  else if (t.id === 'ctrlPlay') { togglePlay(); }
+  else if (t.id === 'ctrlReset') { stopPlay(); step = 0; render(); }
+});
+
+// Keyboard
+addEventListener('keydown', e => {
+  if (mode === 'intro' || mode === 'compare') return;
+  if (e.key === 'ArrowRight') { const m = getMaxStep(); if (step < m) { stopPlay(); step++; if (mode === 'math') mathStepStart = performance.now(); render(); } }
+  else if (e.key === 'ArrowLeft') { if (step > 0) { stopPlay(); step--; if (mode === 'math') mathStepStart = performance.now(); render(); } }
+  else if (e.key === ' ') { e.preventDefault(); togglePlay(); }
+});
+
+// Initial render
+render();
+</script>
+</body>
+</html>

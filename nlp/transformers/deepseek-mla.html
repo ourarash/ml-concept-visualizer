@@ -1,0 +1,1443 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #24 by Weijie Guo (@Gjasonland): Add DeepSeek MLA attention visualizer. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek V3.2 Multi-Head Latent Attention</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+    <style>
+        :root {
+            --ink: #172033;
+            --muted: #5a6475;
+            --line: #d9e2ee;
+            --panel: #ffffff;
+            --soft: #f5f7fb;
+            --blue: #2563eb;
+            --cyan: #0891b2;
+            --green: #16a34a;
+            --amber: #d97706;
+            --rose: #e11d48;
+            --violet: #7c3aed;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            min-height: 100vh;
+            margin: 0;
+            font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            color: var(--ink);
+            background: linear-gradient(180deg, #eef6ff 0%, #f7fafc 44%, #edf7f1 100%);
+        }
+
+        button, input { font: inherit; }
+
+        .app-shell {
+            min-height: 100vh;
+            display: grid;
+            grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+        }
+
+        .control-panel {
+            background: rgba(255, 255, 255, 0.92);
+            border-right: 1px solid rgba(148, 163, 184, 0.34);
+            box-shadow: 16px 0 50px rgba(30, 41, 59, 0.08);
+            padding: 24px;
+            overflow-y: auto;
+        }
+
+        .workspace {
+            min-width: 0;
+            padding: 24px;
+            display: grid;
+            grid-template-rows: auto minmax(0, 1fr);
+            gap: 18px;
+        }
+
+        .topbar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+        }
+
+        h1 {
+            margin: 0;
+            font-size: clamp(24px, 3vw, 38px);
+            line-height: 1.03;
+            letter-spacing: 0;
+            color: #0f172a;
+        }
+
+        h2 {
+            margin: 0;
+            font-size: 13px;
+            font-weight: 800;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: #334155;
+        }
+
+        .subtitle {
+            margin-top: 8px;
+            color: var(--muted);
+            font-size: 14px;
+            line-height: 1.55;
+        }
+
+        .panel-title {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            margin-bottom: 12px;
+        }
+
+        .chip {
+            display: inline-flex;
+            align-items: center;
+            min-height: 26px;
+            padding: 4px 9px;
+            border-radius: 999px;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1d4ed8;
+            font-size: 11px;
+            font-weight: 800;
+            white-space: nowrap;
+        }
+
+        .saving-chip {
+            min-height: 38px;
+            padding: 7px 14px;
+            border-width: 2px;
+            background: var(--saving-bg, #eff6ff);
+            border-color: var(--saving-border, #bfdbfe);
+            color: var(--saving-color, #1d4ed8);
+            font-size: 14px;
+            font-weight: 900;
+            box-shadow: 0 10px 24px var(--saving-shadow, rgba(29, 78, 216, 0.12));
+        }
+
+        .controls {
+            display: grid;
+            gap: 18px;
+            margin-top: 24px;
+        }
+
+        .control-block {
+            padding: 14px;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            background: #fbfdff;
+        }
+
+        .label-row {
+            display: flex;
+            justify-content: space-between;
+            gap: 14px;
+            align-items: baseline;
+            margin-bottom: 8px;
+            font-size: 13px;
+            font-weight: 800;
+        }
+
+        .value-pill {
+            font-variant-numeric: tabular-nums;
+            color: #0f766e;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            accent-color: var(--cyan);
+        }
+
+        .stepper {
+            display: grid;
+            grid-template-columns: 40px minmax(0, 1fr) 40px;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .icon-button {
+            height: 40px;
+            width: 40px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #ffffff;
+            display: inline-grid;
+            place-items: center;
+            color: #1e293b;
+            cursor: pointer;
+            transition: transform 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+        }
+
+        .icon-button:hover { transform: translateY(-1px); border-color: #38bdf8; background: #f0f9ff; }
+        .icon-button:disabled { opacity: 0.35; cursor: not-allowed; transform: none; }
+
+        .step-name {
+            min-height: 40px;
+            border-radius: 8px;
+            border: 1px solid #c7d2fe;
+            background: #eef2ff;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 8px 10px;
+            color: #3730a3;
+            font-size: 12px;
+            font-weight: 900;
+            text-align: center;
+        }
+
+        .mode-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 6px;
+        }
+
+        .mode-button {
+            min-height: 38px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #ffffff;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 800;
+            cursor: pointer;
+        }
+
+        .mode-button.active {
+            color: #ffffff;
+            border-color: #0f766e;
+            background: #0f766e;
+        }
+
+        .formula-card {
+            margin-top: 22px;
+            padding: 14px;
+            border: 1px solid #bbf7d0;
+            border-radius: 8px;
+            background: #f0fdf4;
+        }
+
+        .formula-card p {
+            margin: 8px 0 0;
+            font-size: 12px;
+            line-height: 1.55;
+            color: #166534;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: minmax(340px, 0.85fr) minmax(420px, 1.15fr);
+            grid-template-rows: auto auto;
+            gap: 18px;
+            min-height: 0;
+        }
+
+        .viz-panel {
+            position: relative;
+            border: 1px solid rgba(148, 163, 184, 0.42);
+            border-radius: 8px;
+            background: rgba(255, 255, 255, 0.88);
+            box-shadow: 0 16px 38px rgba(15, 23, 42, 0.08);
+            overflow: hidden;
+        }
+
+        .pipeline {
+            grid-column: 1 / -1;
+            min-height: 820px;
+            padding: 18px;
+        }
+
+        .tokens {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .token {
+            min-width: 58px;
+            height: 34px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0 10px;
+            border-radius: 8px;
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 800;
+            transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+        }
+
+        .token.current {
+            color: #ffffff;
+            background: var(--blue);
+            border-color: #1d4ed8;
+            transform: translateY(-2px);
+        }
+
+        .token.selected {
+            background: #dcfce7;
+            border-color: #16a34a;
+            color: #166534;
+        }
+
+        .diagram-legend,
+        .diagram-stats {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 14px;
+            align-items: center;
+            color: #334155;
+            font-size: 12px;
+            font-weight: 800;
+        }
+
+        .legend-box {
+            width: 15px;
+            height: 15px;
+            border-radius: 4px;
+            border: 2px solid var(--legend-color);
+            background: var(--legend-bg, #ffffff);
+            box-shadow: 0 8px 18px color-mix(in srgb, var(--legend-color) 18%, transparent);
+        }
+
+        .diagram-legend span,
+        .diagram-stats span {
+            display: inline-flex;
+            align-items: center;
+            gap: 7px;
+        }
+
+        .diagram-canvas {
+            position: relative;
+            width: 100%;
+            min-width: 0;
+            height: 820px;
+            margin-top: 18px;
+            border-radius: 8px;
+            background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+            border: 1px solid #dbe4ef;
+            overflow: hidden;
+        }
+
+        .diagram-scroll {
+            overflow-x: hidden;
+            padding-bottom: 4px;
+        }
+
+        .diagram-arrows {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .diagram-node {
+            position: absolute;
+            left: var(--x);
+            top: var(--y);
+            width: var(--w, 150px);
+            height: var(--h, auto);
+            min-height: var(--h, 62px);
+            transform: translate(-50%, -50%);
+            display: grid;
+            align-content: center;
+            gap: 4px;
+            padding: 11px 14px;
+            border-radius: 8px;
+            border: 2px solid #64748b;
+            background: #f8fafc;
+            color: #172033;
+            box-shadow: 0 8px 18px rgba(15, 23, 42, 0.1);
+            z-index: 2;
+            transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+        }
+
+        .diagram-node.active {
+            transform: translate(-50%, -50%) scale(1.04);
+            box-shadow: 0 0 0 4px color-mix(in srgb, var(--active-color, #2563eb) 18%, transparent), 0 14px 26px rgba(15, 23, 42, 0.16);
+        }
+
+        .diagram-node.baseline {
+            border-color: #3b82f6;
+            background: #eff6ff;
+            --active-color: #3b82f6;
+        }
+
+        .diagram-node.new {
+            border-color: #10b981;
+            background: #dcfce7;
+            --active-color: #10b981;
+        }
+
+        .diagram-node.side-node {
+            padding: 10px;
+        }
+
+        .diagram-node.side-node .diagram-title {
+            font-size: 12px;
+        }
+
+        .diagram-node.side-node .diagram-sub {
+            font-size: 11px;
+        }
+
+        .diagram-node.modified {
+            border-color: #f59e0b;
+            background: #fff7d6;
+            --active-color: #f59e0b;
+        }
+
+        .diagram-node.neutral {
+            border-color: #64748b;
+            background: #f8fafc;
+            border-radius: 999px;
+            --active-color: #64748b;
+        }
+
+        .diagram-node.projection {
+            border: 0;
+            border-radius: 0;
+            background: transparent;
+            box-shadow: none;
+            color: #172033;
+            padding: 0;
+            place-items: center;
+            text-align: center;
+        }
+
+        .diagram-node.projection::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background: linear-gradient(180deg, #dbeafe 0%, #bfdbfe 100%);
+            box-shadow: 0 10px 22px rgba(37, 99, 235, 0.16);
+        }
+
+        .diagram-node.projection.down::before {
+            clip-path: polygon(0 0, 100% 0, 78% 100%, 22% 100%);
+        }
+
+        .diagram-node.projection.up::before {
+            clip-path: polygon(22% 0, 78% 0, 100% 100%, 0 100%);
+        }
+
+        .projection-content {
+            width: 58%;
+            min-width: 160px;
+            display: grid;
+            gap: 5px;
+            justify-items: center;
+            position: relative;
+            z-index: 1;
+        }
+
+        .projection-outline {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 0;
+            overflow: visible;
+            pointer-events: none;
+        }
+
+        .projection-content .diagram-title {
+            font-size: 12px;
+        }
+
+        .projection-content .diagram-sub {
+            font-size: 11px;
+        }
+
+        #diagramCompression {
+            font-size: 10px;
+            white-space: nowrap;
+        }
+
+        .diagram-node.latent {
+            width: var(--w, 150px);
+            border-color: #0f766e;
+            background: #ecfdf5;
+            --active-color: #0f766e;
+        }
+
+        .diagram-node.mha-node {
+            border-color: #2563eb;
+            background: #eff6ff;
+            --active-color: #2563eb;
+        }
+
+        .diagram-node.mha-node .latent-stack {
+            width: 100%;
+        }
+
+        .diagram-node.mha-node .latent-row {
+            grid-template-columns: 26px minmax(0, 1fr) 34px;
+            font-size: 8px;
+        }
+
+        .mode-hidden {
+            display: none !important;
+        }
+
+        .diagram-node.dimmed {
+            opacity: 0.42;
+            filter: grayscale(0.25);
+        }
+
+        .diagram-title {
+            font-size: 13px;
+            font-weight: 900;
+            line-height: 1.15;
+        }
+
+        .diagram-sub {
+            color: var(--muted);
+            font-size: 12px;
+            line-height: 1.3;
+        }
+
+        .dim-bars {
+            display: grid;
+            gap: 4px;
+            margin-top: 3px;
+        }
+
+        .dim-line {
+            display: grid;
+            grid-template-columns: 38px minmax(0, 1fr) 38px;
+            align-items: center;
+            gap: 6px;
+            font-size: 9px;
+            font-weight: 900;
+            color: #475569;
+        }
+
+        .dim-track {
+            height: 8px;
+            border-radius: 999px;
+            background: #dbe4ef;
+            overflow: hidden;
+        }
+
+        .dim-fill {
+            height: 100%;
+            width: var(--fill, 100%);
+            border-radius: 999px;
+            background: var(--fill-color, #2563eb);
+        }
+
+        .latent-stack {
+            display: grid;
+            gap: 6px;
+            margin-top: 6px;
+        }
+
+        .latent-row {
+            display: grid;
+            grid-template-columns: 38px minmax(0, 1fr) 36px;
+            gap: 5px;
+            align-items: center;
+            font-size: 9px;
+            font-weight: 900;
+            color: #115e59;
+        }
+
+        .latent-bar {
+            height: 9px;
+            border-radius: 999px;
+            background: #ccfbf1;
+            overflow: hidden;
+        }
+
+        .latent-bar span {
+            display: block;
+            height: 100%;
+            width: var(--fill);
+            border-radius: inherit;
+            background: var(--fill-color, #0f766e);
+        }
+
+        .badge {
+            justify-self: start;
+            padding: 2px 6px;
+            border-radius: 999px;
+            background: rgba(255,255,255,0.72);
+            color: #475569;
+            font-size: 9px;
+            font-weight: 900;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+
+        .diagram-note {
+            position: absolute;
+            left: var(--x);
+            top: var(--y);
+            transform: translate(-50%, -50%);
+            width: var(--w, 190px);
+            padding: 9px 11px;
+            border-radius: 8px;
+            border: 1px solid #c7d2fe;
+            background: rgba(238, 242, 255, 0.92);
+            color: #334155;
+            font-size: 11px;
+            line-height: 1.35;
+            z-index: 1;
+        }
+
+        .diagram-stats {
+            position: absolute;
+            left: 18px;
+            right: 18px;
+            bottom: 14px;
+            justify-content: space-between;
+        }
+
+        .stat-pill {
+            padding: 4px 8px;
+            border-radius: 6px;
+            border: 1px solid #bfdbfe;
+            background: #eff6ff;
+            color: #1e3a8a;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .stat-pill.green {
+            border-color: #86efac;
+            background: #f0fdf4;
+            color: #166534;
+        }
+
+        .stat-pill.orange {
+            border-color: #fed7aa;
+            background: #fff7ed;
+            color: #9a3412;
+        }
+
+        .cache-panel {
+            padding: 18px;
+        }
+
+        .cache-stack {
+            display: grid;
+            gap: 12px;
+        }
+
+        .metric {
+            display: grid;
+            grid-template-columns: 78px minmax(0, 1fr) 58px;
+            align-items: center;
+            gap: 10px;
+            font-size: 12px;
+        }
+
+        .metric-name {
+            font-weight: 900;
+            color: #334155;
+        }
+
+        .bar-track {
+            height: 20px;
+            border-radius: 999px;
+            background: #e2e8f0;
+            overflow: hidden;
+            border: 1px solid #d2dce9;
+        }
+
+        .bar-fill {
+            height: 100%;
+            width: 0%;
+            border-radius: 999px;
+            background: linear-gradient(90deg, var(--bar-a), var(--bar-b));
+            transition: width 0.28s ease;
+        }
+
+        .metric-value {
+            text-align: right;
+            font-weight: 900;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .cache-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(62px, 1fr));
+            gap: 8px;
+            margin-top: 16px;
+        }
+
+        .cache-cell {
+            min-height: 58px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: #ffffff;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            padding: 7px;
+            font-size: 10px;
+            line-height: 1.25;
+            font-weight: 900;
+            color: #334155;
+        }
+
+        .cache-cell.latent { border-color: #0f766e; background: #ecfdf5; color: #115e59; }
+        .cache-cell.full { border-color: #d97706; background: #fff7ed; color: #9a3412; }
+        .cache-cell.rope { border-color: #e11d48; background: #fff1f2; color: #9f1239; }
+        .cache-cell.skip { opacity: 0.34; }
+
+        .score-panel {
+            padding: 18px;
+        }
+
+        .score-layout {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .heatmap {
+            display: grid;
+            grid-template-columns: 84px repeat(var(--visible-tokens), minmax(44px, 1fr));
+            gap: 6px;
+            align-items: stretch;
+        }
+
+        .heat-label,
+        .heat-cell {
+            min-height: 40px;
+            border-radius: 8px;
+            display: grid;
+            place-items: center;
+            text-align: center;
+            font-size: 11px;
+            font-weight: 900;
+        }
+
+        .heat-label {
+            background: #f1f5f9;
+            color: #475569;
+            border: 1px solid #dbe4ef;
+        }
+
+        .heat-cell {
+            border: 1px solid #cbd5e1;
+            background: #ffffff;
+            color: #0f172a;
+            transition: transform 0.18s ease, background 0.18s ease;
+        }
+
+        .heat-cell.kept {
+            color: #ffffff;
+            background: color-mix(in srgb, var(--heat-color) var(--intensity), #0f172a);
+            transform: translateY(-1px);
+        }
+
+        .heat-cell.pruned {
+            background: #f8fafc;
+            color: #94a3b8;
+            border-style: dashed;
+        }
+
+        .insight {
+            min-height: 166px;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            background: #f0f9ff;
+            padding: 14px;
+        }
+
+        .insight h3 {
+            margin: 0 0 8px;
+            font-size: 16px;
+            line-height: 1.25;
+            color: #0c4a6e;
+        }
+
+        .insight p {
+            margin: 0;
+            color: #164e63;
+            font-size: 13px;
+            line-height: 1.58;
+        }
+
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-top: 12px;
+            color: #475569;
+            font-size: 11px;
+            font-weight: 800;
+        }
+
+        .legend span {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+
+        .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 3px;
+            background: var(--dot);
+        }
+
+        @media (max-width: 1080px) {
+            .app-shell { grid-template-columns: 1fr; }
+            .control-panel { border-right: 0; border-bottom: 1px solid rgba(148, 163, 184, 0.34); }
+            .grid { grid-template-columns: 1fr; grid-template-rows: auto; }
+            .score-layout { grid-template-columns: 1fr; }
+            .diagram-note { display: none; }
+        }
+
+        @media (max-width: 680px) {
+            .workspace, .control-panel { padding: 16px; }
+            .topbar { align-items: flex-start; flex-direction: column; }
+            .diagram-canvas { min-width: 0; height: 820px; }
+            .diagram-node { padding: 10px 12px; }
+            .diagram-node.projection { padding: 0; }
+            .diagram-node.new { --w: 148px; }
+            .heatmap { grid-template-columns: 74px repeat(var(--visible-tokens), minmax(38px, 1fr)); overflow-x: auto; }
+        }
+    </style>
+</head>
+<body>
+    <div class="app-shell">
+        <aside class="control-panel">
+            <div class="chip">DeepSeek V3.2 attention core</div>
+            <h1 class="mt-3">Multi-Head Latent Attention</h1>
+            <p class="subtitle">
+                MLA compresses every token's key-value state into a shared latent cache; V3.2 can add a sparse indexer/top-k path to read only selected cached tokens.
+            </p>
+
+            <div class="controls">
+                <div class="control-block">
+                    <div class="label-row">
+                        <span>Generated tokens</span>
+                        <span class="value-pill" id="tokenValue">6</span>
+                    </div>
+                    <input id="tokenSlider" type="range" min="3" max="8" value="6">
+                </div>
+
+                <div class="control-block">
+                    <div class="label-row">
+                        <span>Attention heads</span>
+                        <span class="value-pill" id="headValue">8</span>
+                    </div>
+                    <input id="headSlider" type="range" min="2" max="16" step="2" value="8">
+                </div>
+
+                <div class="control-block">
+                    <div class="label-row">
+                        <span>Latent compression ratio</span>
+                        <span class="value-pill" id="compressionValue">25%</span>
+                    </div>
+                    <input id="compressionSlider" type="range" min="10" max="50" step="5" value="25">
+                </div>
+
+                <div class="control-block">
+                    <div class="label-row">
+                        <span>Attention mode</span>
+                    </div>
+                    <div class="mode-grid" role="group" aria-label="Attention mode">
+                        <button class="mode-button" data-mode="mha">MHA</button>
+                        <button class="mode-button active" data-mode="mla">MLA</button>
+                        <button class="mode-button" data-mode="dsa">MLA+DSA</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="formula-card">
+                <h2>Core Equations</h2>
+                <div class="text-sm mt-2 overflow-x-auto">
+                    \(c_t^{KV}=W^{DKV}h_t\)<br>
+                    \(c_t^Q=W^{DQ}h_t\)<br>
+                    \(q_{t,i}=[q^C_{t,i};q^R_{t,i}]\), \(k_{j,i}=[k^C_{j,i};k^R_j]\)
+                </div>
+                <p>
+                    The decode cache keeps \(c^{KV}\) plus the RoPE key slice. The large per-head K and V tensors are reconstructed or absorbed during attention.
+                </p>
+            </div>
+        </aside>
+
+        <main class="workspace">
+            <div class="topbar">
+                <div>
+                    <h2>Interactive decode path</h2>
+                    <p class="subtitle">Move through one autoregressive step and compare how standard MHA, MLA, and sparse MLA spend cache memory.</p>
+                </div>
+                <div class="chip saving-chip" id="savingChip">Cache reduction: 31.1x</div>
+            </div>
+
+            <section class="grid">
+                <div class="viz-panel pipeline">
+                    <div class="panel-title">
+                        <h2>Projection Pipeline</h2>
+                        <span class="chip" id="currentTokenChip">Current token: kernel</span>
+                    </div>
+
+                    <div class="diagram-legend">
+                        <span><i class="legend-box" style="--legend-color:#3b82f6;--legend-bg:#eff6ff"></i>MLA components</span>
+                        <span><i class="legend-box" style="--legend-color:#10b981;--legend-bg:#dcfce7"></i>New in V3.2</span>
+                        <span><i class="legend-box" style="--legend-color:#f59e0b;--legend-bg:#fff7d6"></i>Modified in V3.2</span>
+                    </div>
+
+                    <div class="tokens mt-4" id="tokens"></div>
+
+                    <div class="diagram-scroll">
+                        <div class="diagram-canvas">
+                            <svg class="diagram-arrows" viewBox="0 0 1000 820" preserveAspectRatio="none" aria-hidden="true">
+                                <defs>
+                                    <marker id="arrowBlue" markerWidth="6" markerHeight="6" refX="5" refY="2" orient="auto" markerUnits="strokeWidth">
+                                        <path d="M0,0 L5,2 L0,4 Z" fill="#64748b"></path>
+                                    </marker>
+                                    <marker id="arrowMla" markerWidth="6" markerHeight="6" refX="5" refY="2" orient="auto" markerUnits="strokeWidth">
+                                        <path d="M0,0 L5,2 L0,4 Z" fill="#3b82f6"></path>
+                                    </marker>
+                                    <marker id="arrowGreen" markerWidth="6" markerHeight="6" refX="5" refY="2" orient="auto" markerUnits="strokeWidth">
+                                        <path d="M0,0 L5,2 L0,4 Z" fill="#10b981"></path>
+                                    </marker>
+                                    <marker id="arrowOrange" markerWidth="6" markerHeight="6" refX="5" refY="2" orient="auto" markerUnits="strokeWidth">
+                                        <path d="M0,0 L5,2 L0,4 Z" fill="#f59e0b"></path>
+                                    </marker>
+                                </defs>
+                                <path id="arrowInputDown" d="M500 96 L500 122" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                                <path id="arrowDownLatent" d="M500 216 L500 242" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                                <path id="arrowLatentAttention" d="M500 392 L500 418" stroke="#f59e0b" stroke-width="3" marker-end="url(#arrowOrange)"></path>
+                                <path id="arrowAttentionUp" d="M500 514 L500 540" stroke="#3b82f6" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                                <path id="arrowUpOutput" d="M500 634 L500 660" stroke="#64748b" stroke-width="3" marker-end="url(#arrowBlue)"></path>
+
+                                <path id="indexerArrow" d="M380 169 C315 214, 238 275, 186 317" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"></path>
+                                <path id="indexerToTopKArrow" d="M186 317 C340 250, 660 250, 814 317" stroke="#10b981" stroke-width="2.5" fill="none" marker-end="url(#arrowGreen)"></path>
+                                <path id="topkArrow" d="M615 317 C692 317, 760 317, 814 317" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"></path>
+                                <path id="sparseGateArrow" d="M870 367 C812 410, 706 442, 620 466" stroke="#10b981" stroke-width="3" fill="none" marker-end="url(#arrowGreen)"></path>
+                                <path id="cacheArrow" d="M620 466 C690 466, 756 502, 814 549" stroke="#64748b" stroke-width="2.5" fill="none" marker-end="url(#arrowBlue)"></path>
+                                <path class="mha-flow" id="mhaArrowInputQKV" d="M500 96 L500 132" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                                <path class="mha-flow" id="mhaArrowQKVAttention" d="M500 270 L500 330" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                                <path class="mha-flow" id="mhaArrowAttentionMix" d="M500 426 L500 498" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                                <path class="mha-flow" id="mhaArrowMixOutput" d="M500 588 L500 660" stroke="#2563eb" stroke-width="3" marker-end="url(#arrowMla)"></path>
+                            </svg>
+
+                            <div class="diagram-node neutral" style="--x:50%;--y:7.3%;--w:250px;--h:72px">
+                                <span class="diagram-title">Input Tokens</span>
+                                <span class="diagram-sub">full model space h<sub>t</sub> in R<sup>d_model</sup></span>
+                                <span class="dim-line">
+                                    <b>model</b>
+                                    <i class="dim-track"><i class="dim-fill" style="--fill:100%;--fill-color:#64748b"></i></i>
+                                    <b>2048</b>
+                                </span>
+                            </div>
+
+                            <div class="diagram-node projection down" id="boxDown" style="--x:50%;--y:20.6%;--w:285px;--h:94px">
+                                <svg class="projection-outline" viewBox="0 0 285 94" preserveAspectRatio="none" aria-hidden="true">
+                                    <polygon points="0,0 285,0 222,94 63,94" fill="none" stroke="#3b82f6" stroke-width="3" vector-effect="non-scaling-stroke"></polygon>
+                                </svg>
+                                <span class="projection-content">
+                                    <span class="badge">MLA</span>
+                                    <span class="diagram-title">Down-projection</span>
+                                    <span class="diagram-sub" id="diagramCompression">2048 wide -> 512 latent</span>
+                                </span>
+                            </div>
+
+                            <div class="diagram-node new side-node" id="boxIndexer" style="--x:13%;--y:38.7%;--w:112px;--h:100px">
+                                <span class="badge">New</span>
+                                <span class="diagram-title">Indexer</span>
+                                <span class="diagram-sub">scores tokens for sparse routing</span>
+                            </div>
+
+                            <div class="diagram-node mha-node" id="boxMhaQKV" style="--x:50%;--y:24.5%;--w:260px;--h:138px">
+                                <span class="badge">MHA</span>
+                                <span class="diagram-title">Full Q / K / V Per Head</span>
+                                <span class="diagram-sub">standard tensors, no latent compression</span>
+                                <span class="latent-stack">
+                                    <span class="latent-row"><b>Q</b><i class="latent-bar"><span style="--fill:100%;--fill-color:#2563eb"></span></i><b>2048</b></span>
+                                    <span class="latent-row"><b>K</b><i class="latent-bar"><span style="--fill:100%;--fill-color:#16a34a"></span></i><b>2048</b></span>
+                                    <span class="latent-row"><b>V</b><i class="latent-bar"><span style="--fill:100%;--fill-color:#d97706"></span></i><b>2048</b></span>
+                                </span>
+                            </div>
+
+                            <div class="diagram-node latent" id="boxQKV" style="--x:50%;--y:38.7%;--w:230px;--h:150px">
+                                <span class="badge">Compressed</span>
+                                <span class="diagram-title">Q / KV Latent Space</span>
+                                <span class="diagram-sub">narrow vectors cached or expanded on demand</span>
+                                <span class="latent-stack">
+                                    <span class="latent-row"><b>cQ</b><i class="latent-bar"><span id="cQFill" style="--fill:25%;--fill-color:#2563eb"></span></i><b id="cQDim">512</b></span>
+                                    <span class="latent-row"><b>cKV</b><i class="latent-bar"><span id="cKVFill" style="--fill:25%;--fill-color:#0f766e"></span></i><b id="cKVDim">512</b></span>
+                                    <span class="latent-row"><b>kR</b><i class="latent-bar"><span style="--fill:3%;--fill-color:#e11d48"></span></i><b>64</b></span>
+                                </span>
+                            </div>
+
+                            <div class="diagram-node new side-node" id="boxTopK" style="--x:87%;--y:38.7%;--w:112px;--h:100px">
+                                <span class="badge">New</span>
+                                <span class="diagram-title">Top-k Selection</span>
+                                <span class="diagram-sub" id="diagramTopK">select k=4 tokens</span>
+                            </div>
+
+                            <div class="diagram-node modified" id="boxSparse" style="--x:50%;--y:46.1%;--w:240px;--h:96px">
+                                <span class="badge" id="attentionBadge">Modified</span>
+                                <span class="diagram-title">Attention Computation</span>
+                                <span class="diagram-sub" id="diagramSparseDetail">dense MLA over cached latents</span>
+                            </div>
+
+                            <div class="diagram-node projection up" id="boxUp" style="--x:50%;--y:71.6%;--w:285px;--h:94px">
+                                <svg class="projection-outline" viewBox="0 0 285 94" preserveAspectRatio="none" aria-hidden="true">
+                                    <polygon points="63,0 222,0 285,94 0,94" fill="none" stroke="#3b82f6" stroke-width="3" vector-effect="non-scaling-stroke"></polygon>
+                                </svg>
+                                <span class="projection-content">
+                                    <span class="badge">MLA</span>
+                                    <span class="diagram-title">Up-projection</span>
+                                    <span class="diagram-sub" id="upProjectionText">512 latent features -> model-width output</span>
+                                </span>
+                            </div>
+
+                            <div class="diagram-node mha-node" id="boxMhaMix" style="--x:50%;--y:66.2%;--w:260px;--h:90px">
+                                <span class="badge">MHA</span>
+                                <span class="diagram-title">Concat Heads + Output Mix</span>
+                                <span class="diagram-sub">join head outputs, then mix to model dimension</span>
+                            </div>
+
+                            <div class="diagram-node new side-node" id="boxCache" style="--x:87%;--y:67%;--w:112px;--h:100px">
+                                <span class="badge">Cache</span>
+                                <span class="diagram-title">KV Cache</span>
+                                <span class="diagram-sub" id="diagramCacheDetail">compressed latent + RoPE slice</span>
+                            </div>
+
+                            <div class="diagram-node neutral" style="--x:50%;--y:84.6%;--w:245px;--h:68px">
+                                <span class="diagram-title">Output</span>
+                                <span class="diagram-sub">back in residual stream R<sup>d_model</sup></span>
+                                <span class="dim-line">
+                                    <b>model</b>
+                                    <i class="dim-track"><i class="dim-fill" style="--fill:100%;--fill-color:#64748b"></i></i>
+                                    <b>2048</b>
+                                </span>
+                            </div>
+
+                            <div class="diagram-stats">
+                                <span class="stat-pill" id="diagramOps">MLA cache: 576 values/token</span>
+                                <span class="stat-pill orange" id="diagramDenseOps">Dense pairs: 36</span>
+                                <span class="stat-pill green" id="diagramSparseOps">Sparse pairs: 24</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="viz-panel cache-panel">
+                    <div class="panel-title">
+                        <h2>Cache Footprint</h2>
+                        <span class="chip" id="cachePerToken">576 values/token</span>
+                    </div>
+                    <div class="cache-stack">
+                        <div class="metric">
+                            <div class="metric-name">MHA</div>
+                            <div class="bar-track"><div class="bar-fill" id="mhaBar" style="--bar-a: #f97316; --bar-b: #e11d48"></div></div>
+                            <div class="metric-value" id="mhaValue">16.4k</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-name">MLA</div>
+                            <div class="bar-track"><div class="bar-fill" id="mlaBar" style="--bar-a: #0ea5e9; --bar-b: #10b981"></div></div>
+                            <div class="metric-value" id="mlaValue">576</div>
+                        </div>
+                        <div class="metric">
+                            <div class="metric-name">DSA read</div>
+                            <div class="bar-track"><div class="bar-fill" id="dsaBar" style="--bar-a: #8b5cf6; --bar-b: #2563eb"></div></div>
+                            <div class="metric-value" id="dsaValue">384</div>
+                        </div>
+                    </div>
+
+                    <div class="legend">
+                        <span><i class="dot" style="--dot: #d97706"></i>Full K/V</span>
+                        <span><i class="dot" style="--dot: #0f766e"></i>Latent \(c^{KV}\)</span>
+                        <span><i class="dot" style="--dot: #e11d48"></i>RoPE key</span>
+                    </div>
+
+                    <div class="cache-grid" id="cacheCells"></div>
+                </div>
+
+                <div class="viz-panel score-panel">
+                    <div class="panel-title">
+                        <h2>Attention Reconstruction</h2>
+                        <span class="chip" id="modeChip">MLA caches compressed state</span>
+                    </div>
+                    <div class="score-layout">
+                        <div>
+                            <div class="heatmap" id="heatmap"></div>
+                            <div class="legend">
+                                <span><i class="dot" style="--dot: #2563eb"></i>\(q^C_t \cdot k^C_j\)</span>
+                                <span><i class="dot" style="--dot: #e11d48"></i>\(q^R_t \cdot k^R_j\)</span>
+                                <span><i class="dot" style="--dot: #7c3aed"></i>softmax weight</span>
+                            </div>
+                        </div>
+                        <article class="insight">
+                            <h3 id="insightTitle">Why the latent cache works</h3>
+                            <p id="insightText"></p>
+                        </article>
+                    </div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <script>
+        const tokens = ["The", "MLA", "cache", "keeps", "latent", "state", "during", "decode"];
+        const phases = [
+            {
+                name: "Project query",
+                boxes: ["boxDown", "boxQKV"],
+                title: "Current-token query compression",
+                text: "The current hidden state is compressed into cQ, then expanded into per-head query content and RoPE query slices. Old queries are not cached because they are never needed again during decoding."
+            },
+            {
+                name: "Project KV latent",
+                boxes: ["boxDown", "boxQKV", "boxCache"],
+                title: "Joint KV compression",
+                text: "Instead of producing a full K and V for every head, the token writes one compact cKV vector and one small positional key slice. This is the memory-saving move at the heart of MLA."
+            },
+            {
+                name: "Cache latent KV",
+                boxes: ["boxQKV", "boxCache"],
+                title: "Cache stores compressed state",
+                text: "The cache grows with latent rank plus RoPE key dimensions, not with heads times key/value head size. More heads can reuse the same cached latent state."
+            },
+            {
+                name: "Reconstruct heads",
+                boxes: ["boxQKV", "boxSparse"],
+                title: "Heads recover what they need",
+                text: "Each head uses learned up-projections or absorbed weights to obtain content keys and values from cKV. Position information enters through the cached RoPE key slice."
+            },
+            {
+                name: "Score and mix",
+                boxes: ["boxSparse", "boxUp"],
+                title: "Attention result",
+                text: "The score is the sum of a content term and a RoPE position term. Weighted values are combined per head, then projected back through the output matrix."
+            }
+        ];
+
+        const dims = {
+            model: 2048,
+            qkNope: 128,
+            qkRope: 64,
+            vHead: 128
+        };
+
+        const state = {
+            tokenCount: 6,
+            headCount: 8,
+            phase: 2,
+            mode: "mla",
+            compressionRatio: 25
+        };
+
+        const el = {
+            tokenSlider: document.getElementById("tokenSlider"),
+            headSlider: document.getElementById("headSlider"),
+            compressionSlider: document.getElementById("compressionSlider"),
+            tokenValue: document.getElementById("tokenValue"),
+            headValue: document.getElementById("headValue"),
+            compressionValue: document.getElementById("compressionValue"),
+            tokens: document.getElementById("tokens"),
+            cacheCells: document.getElementById("cacheCells"),
+            heatmap: document.getElementById("heatmap"),
+            insightTitle: document.getElementById("insightTitle"),
+            insightText: document.getElementById("insightText"),
+            savingChip: document.getElementById("savingChip"),
+            currentTokenChip: document.getElementById("currentTokenChip"),
+            cachePerToken: document.getElementById("cachePerToken"),
+            modeChip: document.getElementById("modeChip"),
+            mhaBar: document.getElementById("mhaBar"),
+            mlaBar: document.getElementById("mlaBar"),
+            dsaBar: document.getElementById("dsaBar"),
+            mhaValue: document.getElementById("mhaValue"),
+            mlaValue: document.getElementById("mlaValue"),
+            dsaValue: document.getElementById("dsaValue"),
+            diagramCompression: document.getElementById("diagramCompression"),
+            diagramTopK: document.getElementById("diagramTopK"),
+            diagramSparseDetail: document.getElementById("diagramSparseDetail"),
+            attentionBadge: document.getElementById("attentionBadge"),
+            diagramCacheDetail: document.getElementById("diagramCacheDetail"),
+            diagramOps: document.getElementById("diagramOps"),
+            diagramDenseOps: document.getElementById("diagramDenseOps"),
+            diagramSparseOps: document.getElementById("diagramSparseOps"),
+            cQFill: document.getElementById("cQFill"),
+            cKVFill: document.getElementById("cKVFill"),
+            cQDim: document.getElementById("cQDim"),
+            cKVDim: document.getElementById("cKVDim"),
+            upProjectionText: document.getElementById("upProjectionText")
+        };
+
+        function fmt(value) {
+            if (value >= 1000) {
+                return `${(value / 1000).toFixed(value >= 10000 ? 1 : 2)}k`;
+            }
+            return String(value);
+        }
+
+        function currentTokenIndex() {
+            return state.tokenCount - 1;
+        }
+
+        function standardValuesPerToken() {
+            const keyDim = dims.qkNope + dims.qkRope;
+            return state.headCount * (keyDim + dims.vHead);
+        }
+
+        function latentRank() {
+            return Math.round((dims.model * state.compressionRatio) / 100);
+        }
+
+        function mlaValuesPerToken() {
+            return latentRank() + dims.qkRope;
+        }
+
+        function dsaReadValuesPerToken() {
+            const visible = Math.max(2, Math.ceil(state.tokenCount * 0.6));
+            return Math.ceil((mlaValuesPerToken() * visible) / state.tokenCount);
+        }
+
+        function activeTokenIndices() {
+            if (state.mode !== "dsa") {
+                return Array.from({ length: state.tokenCount }, (_, i) => i);
+            }
+            const keep = new Set([currentTokenIndex(), Math.max(0, currentTokenIndex() - 1), 0]);
+            for (let i = currentTokenIndex() - 2; i >= 0 && keep.size < Math.ceil(state.tokenCount * 0.6); i -= 2) {
+                keep.add(i);
+            }
+            return Array.from(keep).sort((a, b) => a - b);
+        }
+
+        function setActiveBoxes() {
+            document.querySelectorAll(".diagram-node").forEach((box) => box.classList.remove("active"));
+        }
+
+        function renderTokens() {
+            el.tokens.innerHTML = "";
+            const active = new Set(activeTokenIndices());
+            tokens.slice(0, state.tokenCount).forEach((token, index) => {
+                const node = document.createElement("div");
+                node.className = "token";
+                if (index === currentTokenIndex()) node.classList.add("current");
+                else if (active.has(index)) node.classList.add("selected");
+                node.textContent = token;
+                el.tokens.appendChild(node);
+            });
+            el.currentTokenChip.textContent = `Current token: ${tokens[currentTokenIndex()]}`;
+        }
+
+        function renderCacheCells() {
+            el.cacheCells.innerHTML = "";
+            const active = new Set(activeTokenIndices());
+            for (let i = 0; i < state.tokenCount; i++) {
+                const cell = document.createElement("div");
+                const isRead = active.has(i);
+                if (state.mode === "mha") {
+                    cell.className = `cache-cell full ${isRead ? "" : "skip"}`;
+                    cell.innerHTML = `T${i + 1}<br>K,V<br>${state.headCount} heads`;
+                } else {
+                    cell.className = `cache-cell latent ${isRead ? "" : "skip"}`;
+                    cell.innerHTML = `T${i + 1}<br>cKV + kR<br>${latentRank()}+${dims.qkRope}`;
+                }
+                el.cacheCells.appendChild(cell);
+            }
+        }
+
+        function renderMetrics() {
+            const mha = standardValuesPerToken();
+            const mla = mlaValuesPerToken();
+            const dsa = dsaReadValuesPerToken();
+            const max = Math.max(mha, mla, dsa);
+            el.mhaBar.style.width = `${(mha / max) * 100}%`;
+            el.mlaBar.style.width = `${(mla / max) * 100}%`;
+            el.dsaBar.style.width = `${(dsa / max) * 100}%`;
+            el.mhaValue.textContent = fmt(mha);
+            el.mlaValue.textContent = fmt(mla);
+            el.dsaValue.textContent = fmt(dsa);
+            const modeValues = state.mode === "mha" ? mha : state.mode === "dsa" ? dsa : mla;
+            el.cachePerToken.textContent = `${fmt(modeValues)} values/token`;
+            el.savingChip.textContent = `Cache reduction: ${(mha / mla).toFixed(1)}x`;
+            const compressionPressure = (state.compressionRatio - 10) / 40;
+            const hue = Math.round(152 - compressionPressure * 116);
+            el.savingChip.style.setProperty("--saving-bg", `hsl(${hue} 90% 94%)`);
+            el.savingChip.style.setProperty("--saving-border", `hsl(${hue} 76% 64%)`);
+            el.savingChip.style.setProperty("--saving-color", `hsl(${hue} 72% 30%)`);
+            el.savingChip.style.setProperty("--saving-shadow", `hsl(${hue} 76% 64% / 0.2)`);
+        }
+
+        function renderDiagram() {
+            const rank = latentRank();
+            const densePairs = state.tokenCount * state.tokenCount;
+            const selectedCount = activeTokenIndices().length;
+            const sparsePairs = state.mode === "dsa" ? state.tokenCount * selectedCount : densePairs;
+            const topK = Math.max(2, selectedCount);
+            const isMha = state.mode === "mha";
+
+            el.diagramCompression.textContent = `${dims.model} wide -> ${rank} latent (${state.compressionRatio}%)`;
+            el.cQFill.style.setProperty("--fill", `${state.compressionRatio}%`);
+            el.cKVFill.style.setProperty("--fill", `${state.compressionRatio}%`);
+            el.cQDim.textContent = rank;
+            el.cKVDim.textContent = rank;
+            el.upProjectionText.textContent = `${rank} latent features -> model-width output`;
+            el.diagramTopK.textContent = state.mode === "dsa" ? `select k=${topK} tokens` : "inactive unless MLA+DSA";
+            el.diagramSparseDetail.textContent = state.mode === "dsa"
+                ? `O(n-k) selected pairs, k=${topK}`
+                : state.mode === "mha"
+                    ? "dense attention over full K/V"
+                    : "dense MLA over cached latents";
+            el.attentionBadge.textContent = state.mode === "dsa" ? "Modified" : state.mode === "mha" ? "MHA" : "MLA";
+            el.diagramCacheDetail.textContent = state.mode === "mha"
+                ? "full K and V per head"
+                : state.mode === "dsa"
+                    ? "latent cache plus sparse indices"
+                    : "compressed latent + RoPE slice";
+            el.diagramOps.textContent = `${state.mode.toUpperCase()} cache: ${fmt(state.mode === "mha" ? standardValuesPerToken() : mlaValuesPerToken())} values/token`;
+            el.diagramDenseOps.textContent = `Dense pairs: ${densePairs}`;
+            el.diagramSparseOps.textContent = state.mode === "dsa"
+                ? `Sparse pairs: ${sparsePairs}`
+                : "Sparse path off";
+
+            const mlaOnly = ["boxDown", "boxQKV", "boxUp", "boxCache", "boxIndexer", "boxTopK"];
+            const mhaOnly = ["boxMhaQKV", "boxMhaMix"];
+            mlaOnly.forEach((id) => document.getElementById(id)?.classList.toggle("mode-hidden", isMha));
+            mhaOnly.forEach((id) => document.getElementById(id)?.classList.toggle("mode-hidden", !isMha));
+            const attention = document.getElementById("boxSparse");
+            if (attention) {
+                attention.style.setProperty("--y", isMha ? "46.1%" : "56.8%");
+            }
+
+            const sparseNodes = ["boxIndexer", "boxTopK"];
+            sparseNodes.forEach((id) => {
+                const node = document.getElementById(id);
+                if (!node) return;
+                node.classList.toggle("dimmed", state.mode !== "dsa");
+            });
+            document.getElementById("boxSparse")?.classList.toggle("modified", state.mode === "dsa");
+            document.getElementById("boxSparse")?.classList.toggle("baseline", state.mode !== "dsa");
+            document.getElementById("boxCache")?.classList.toggle("new", state.mode !== "mha");
+            document.getElementById("boxCache")?.classList.toggle("baseline", state.mode === "mha");
+
+            ["indexerArrow", "indexerToTopKArrow", "topkArrow", "sparseGateArrow"].forEach((id) => {
+                const arrow = document.getElementById(id);
+                if (arrow) arrow.style.opacity = state.mode === "dsa" ? "1" : "0";
+            });
+
+            const setArrow = (id, color, marker, opacity = "1") => {
+                const arrow = document.getElementById(id);
+                if (!arrow) return;
+                arrow.setAttribute("stroke", color);
+                arrow.setAttribute("marker-end", `url(#${marker})`);
+                arrow.style.opacity = opacity;
+            };
+
+            setArrow("arrowInputDown", "#3b82f6", "arrowMla", isMha ? "0" : "1");
+            setArrow("arrowDownLatent", "#3b82f6", "arrowMla", isMha ? "0" : "1");
+            setArrow("arrowLatentAttention", state.mode === "dsa" ? "#f59e0b" : "#3b82f6", state.mode === "dsa" ? "arrowOrange" : "arrowMla", isMha ? "0" : "1");
+            setArrow("arrowAttentionUp", "#3b82f6", "arrowMla", isMha ? "0" : "1");
+            setArrow("arrowUpOutput", "#64748b", "arrowBlue");
+            setArrow("cacheArrow", "#64748b", "arrowBlue", isMha ? "0" : "1");
+            ["mhaArrowInputQKV", "mhaArrowQKVAttention", "mhaArrowAttentionMix", "mhaArrowMixOutput"].forEach((id) => {
+                setArrow(id, "#2563eb", "arrowMla", isMha ? "1" : "0");
+            });
+        }
+
+        function renderHeatmap() {
+            const active = new Set(activeTokenIndices());
+            el.heatmap.style.setProperty("--visible-tokens", state.tokenCount);
+            el.heatmap.innerHTML = "";
+            const labels = ["token", "content", "rope", "weight"];
+
+            labels.forEach((label, row) => {
+                const labelCell = document.createElement("div");
+                labelCell.className = "heat-label";
+                labelCell.textContent = label;
+                el.heatmap.appendChild(labelCell);
+
+                for (let i = 0; i < state.tokenCount; i++) {
+                    const cell = document.createElement("div");
+                    const kept = active.has(i);
+                    const recency = (i + 1) / state.tokenCount;
+                    const values = [tokens[i], (0.18 + recency * 0.62).toFixed(2), (0.74 - Math.abs(currentTokenIndex() - i) * 0.08).toFixed(2), (0.08 + recency * 0.2).toFixed(2)];
+                    cell.className = `heat-cell ${kept ? "kept" : "pruned"}`;
+                    cell.style.setProperty("--heat-color", row === 1 ? "#2563eb" : row === 2 ? "#e11d48" : "#7c3aed");
+                    cell.style.setProperty("--intensity", `${row === 0 ? 18 : Math.round(38 + recency * 48)}%`);
+                    cell.textContent = row === 0 ? `T${i + 1}` : values[row];
+                    if (!kept && row > 0) cell.textContent = "skip";
+                    el.heatmap.appendChild(cell);
+                }
+            });
+        }
+
+        function renderCopy() {
+            const phase = phases[state.phase];
+            el.insightTitle.textContent = phase.title;
+            let modeText = phase.text;
+            if (state.mode === "mha") {
+                modeText += " In MHA mode, the diagram shows the baseline that stores full K and V tensors for every head.";
+                el.modeChip.textContent = "Baseline MHA stores full K/V";
+            } else if (state.mode === "dsa") {
+                modeText += " In MLA+DSA mode, sparse selection reduces which cached tokens are read for long-context attention.";
+                el.modeChip.textContent = "DSA sparsifies MLA cache reads";
+            } else {
+                el.modeChip.textContent = "MLA caches compressed state";
+            }
+            el.insightText.textContent = modeText;
+        }
+
+        function render() {
+            state.tokenCount = Math.min(state.tokenCount, tokens.length);
+            el.tokenValue.textContent = state.tokenCount;
+            el.headValue.textContent = state.headCount;
+            el.compressionValue.textContent = `${state.compressionRatio}%`;
+            setActiveBoxes();
+            renderTokens();
+            renderDiagram();
+            renderCacheCells();
+            renderMetrics();
+            renderHeatmap();
+            renderCopy();
+
+            document.querySelectorAll(".mode-button").forEach((button) => {
+                button.classList.toggle("active", button.dataset.mode === state.mode);
+            });
+
+            if (window.MathJax?.typesetPromise) {
+                window.MathJax.typesetPromise();
+            }
+        }
+
+        el.tokenSlider.addEventListener("input", (event) => {
+            state.tokenCount = Number(event.target.value);
+            render();
+        });
+
+        el.headSlider.addEventListener("input", (event) => {
+            state.headCount = Number(event.target.value);
+            render();
+        });
+
+        el.compressionSlider.addEventListener("input", (event) => {
+            state.compressionRatio = Number(event.target.value);
+            render();
+        });
+
+        document.querySelectorAll(".mode-button").forEach((button) => {
+            button.addEventListener("click", () => {
+                state.mode = button.dataset.mode;
+                render();
+            });
+        });
+
+        render();
+    </script>
+</body>
+</html>

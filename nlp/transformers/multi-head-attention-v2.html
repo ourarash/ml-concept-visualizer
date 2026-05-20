@@ -1,0 +1,1241 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #48 by Ashwini S (@ashwinis-24): Multi-Head Attention Interactive Visualizer. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Multi-Head Attention Visualizer</title>
+  <style>
+    :root {
+      --bg: #07111f;
+      --panel: rgba(10, 18, 32, 0.86);
+      --panel-2: rgba(17, 26, 46, 0.92);
+      --text: #eaf2ff;
+      --muted: #9fb1d1;
+      --line: rgba(155, 184, 255, 0.18);
+      --accent: #7dd3fc;
+      --accent-2: #a78bfa;
+      --good: #34d399;
+      --warn: #fbbf24;
+      --bad: #fb7185;
+      --shadow: 0 22px 70px rgba(0, 0, 0, 0.35);
+      --radius: 22px;
+      --radius-sm: 16px;
+      --head1: #7dd3fc;
+      --head2: #86efac;
+      --head3: #c4b5fd;
+      --head4: #f9c97a;
+      --chip: rgba(255,255,255,0.08);
+    }
+
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, sans-serif;
+      color: var(--text);
+      background:
+        radial-gradient(1000px 600px at 15% 10%, rgba(125,211,252,0.14), transparent 60%),
+        radial-gradient(900px 600px at 85% 20%, rgba(167,139,250,0.12), transparent 60%),
+        radial-gradient(700px 500px at 50% 90%, rgba(52,211,153,0.10), transparent 55%),
+        linear-gradient(180deg, #040816 0%, #07111f 100%);
+      overflow-x: hidden;
+    }
+
+    .wrap {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 22px 18px 34px;
+    }
+
+    .hero {
+      display: grid;
+      grid-template-columns: 1.4fr 0.9fr;
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 16px;
+    }
+
+    .card {
+      background: linear-gradient(180deg, rgba(15, 23, 42, 0.92), rgba(8, 15, 28, 0.92));
+      border: 1px solid var(--line);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(10px);
+    }
+
+    .hero-left {
+      padding: 22px 22px 18px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-left::after {
+      content: "";
+      position: absolute;
+      inset: -2px;
+      border-radius: inherit;
+      pointer-events: none;
+      background: linear-gradient(135deg, rgba(125,211,252,0.10), transparent 30%, transparent 70%, rgba(167,139,250,0.10));
+      mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+      -webkit-mask: linear-gradient(#000, #000) content-box, linear-gradient(#000, #000);
+      padding: 1px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      padding: 6px 10px;
+      font-size: 12px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 999px;
+    }
+
+    h1 {
+      margin: 14px 0 10px;
+      font-size: clamp(30px, 4vw, 52px);
+      line-height: 1.03;
+      letter-spacing: -0.04em;
+    }
+
+    .hero p {
+      margin: 0;
+      max-width: 90ch;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.65;
+    }
+
+    .formula-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 16px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 12px;
+      border-radius: 999px;
+      background: var(--chip);
+      border: 1px solid rgba(255,255,255,0.09);
+      color: #dbe8ff;
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .pill strong { color: white; }
+
+    .hero-right {
+      padding: 18px;
+      display: grid;
+      gap: 12px;
+      align-content: start;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 12px;
+    }
+
+    .stat {
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .stat .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.08em; }
+    .stat .value { margin-top: 6px; font-size: 24px; font-weight: 800; }
+    .stat .sub { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; }
+
+    .controls {
+      padding: 16px;
+      display: grid;
+      grid-template-columns: 1.1fr 1fr 1fr 1.2fr;
+      gap: 14px;
+      margin-bottom: 16px;
+      align-items: end;
+    }
+
+    .control {
+      display: grid;
+      gap: 8px;
+    }
+
+    .control label {
+      color: var(--muted);
+      font-size: 12px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    select, input[type="range"], button {
+      width: 100%;
+      border-radius: 14px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.05);
+      color: var(--text);
+      padding: 12px 14px;
+      font: inherit;
+      outline: none;
+    }
+
+    select { cursor: pointer; }
+    input[type="range"] { padding: 12px 0; accent-color: #7dd3fc; }
+
+    .btn-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    button {
+      cursor: pointer;
+      transition: transform 0.14s ease, background 0.2s ease, border-color 0.2s ease;
+      font-weight: 700;
+    }
+    button:hover { transform: translateY(-1px); border-color: rgba(125,211,252,0.45); }
+    button:active { transform: translateY(0px) scale(0.99); }
+    button.primary { background: linear-gradient(180deg, rgba(125,211,252,0.26), rgba(125,211,252,0.12)); }
+
+    .workspace {
+      display: grid;
+      grid-template-columns: 1.05fr 1.25fr 0.95fr;
+      gap: 16px;
+      margin-bottom: 16px;
+      align-items: start;
+    }
+
+    .panel {
+      padding: 18px;
+      min-height: 680px;
+    }
+
+    .panel h2 {
+      margin: 0 0 8px;
+      font-size: 22px;
+      letter-spacing: -0.03em;
+    }
+
+    .panel .desc {
+      margin: 0 0 16px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    .shape {
+      border-radius: 18px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: linear-gradient(180deg, rgba(255,255,255,0.045), rgba(255,255,255,0.02));
+      overflow: hidden;
+      position: relative;
+    }
+
+    .shape-header {
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      border-bottom: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      font-size: 13px;
+    }
+
+    .shape-body {
+      padding: 14px;
+    }
+
+    .flow {
+      display: grid;
+      gap: 12px;
+    }
+
+    .token-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .token {
+      min-width: 88px;
+      padding: 10px 12px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.09);
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+    }
+
+    .token .name { font-weight: 800; font-size: 15px; }
+    .token .shape-text { margin-top: 4px; color: var(--muted); font-size: 12px; }
+
+    .token.active {
+      transform: translateY(-2px) scale(1.02);
+      border-color: rgba(125,211,252,0.55);
+      box-shadow: 0 0 0 1px rgba(125,211,252,0.2), 0 18px 40px rgba(0,0,0,0.22);
+    }
+
+    .token.active::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: linear-gradient(90deg, rgba(125,211,252,0.18), transparent 58%);
+      pointer-events: none;
+    }
+
+    .arrow {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: rgba(255,255,255,0.35);
+      font-size: 28px;
+      letter-spacing: 0.2em;
+      user-select: none;
+      opacity: 0.65;
+    }
+
+    .matrix {
+      display: grid;
+      gap: 4px;
+      padding: 6px;
+      border-radius: 16px;
+      background: rgba(4, 8, 19, 0.7);
+      border: 1px solid rgba(255,255,255,0.08);
+      width: fit-content;
+      margin-top: 8px;
+      transition: opacity 0.25s ease, transform 0.25s ease, filter 0.25s ease;
+    }
+
+    .matrix .cell {
+      width: 18px;
+      height: 18px;
+      border-radius: 4px;
+      background: rgba(125,211,252,0.13);
+      border: 1px solid rgba(255,255,255,0.06);
+      display: inline-block;
+    }
+
+    .matrix.large .cell { width: 12px; height: 12px; }
+    .matrix.medium .cell { width: 14px; height: 14px; }
+
+    .hidden { opacity: 0.18; filter: blur(0.5px); transform: scale(0.98); }
+    .glow { box-shadow: 0 0 0 1px rgba(125,211,252,0.35), 0 0 40px rgba(125,211,252,0.08); }
+
+    .step-tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin: 0 0 14px;
+    }
+
+    .tag {
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.04);
+      color: var(--muted);
+      font-size: 12px;
+      cursor: pointer;
+      transition: 0.2s ease;
+    }
+
+    .tag.active {
+      color: #fff;
+      border-color: rgba(125,211,252,0.45);
+      background: rgba(125,211,252,0.14);
+    }
+
+    .subgrid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .summary-box {
+      padding: 14px;
+      border-radius: 18px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .summary-box h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+    }
+
+    .summary-box p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+    }
+
+    .heads {
+      display: grid;
+      gap: 10px;
+    }
+
+    .head-card {
+      border-radius: 16px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.035);
+      padding: 12px;
+      transition: transform 0.25s ease, border-color 0.25s ease, background 0.25s ease;
+    }
+
+    .head-card.active {
+      transform: translateX(3px);
+      border-color: rgba(255,255,255,0.18);
+      background: rgba(255,255,255,0.06);
+    }
+
+    .head-title {
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 8px;
+      font-size: 13px;
+    }
+
+    .head-title strong { font-size: 14px; }
+
+    .head-strip {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 10px;
+    }
+
+    .mini {
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      padding: 10px;
+      background: rgba(0,0,0,0.16);
+    }
+
+    .mini .mini-label { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+    .mini .mini-vector { display: flex; gap: 6px; flex-wrap: wrap; }
+
+    .dot {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(125,211,252,0.62);
+      border: 1px solid rgba(255,255,255,0.16);
+      box-shadow: 0 0 18px rgba(125,211,252,0.16);
+    }
+    .dot.k { background: rgba(134,239,172,0.62); box-shadow: 0 0 18px rgba(134,239,172,0.12); }
+    .dot.v { background: rgba(249,201,122,0.7); box-shadow: 0 0 18px rgba(249,201,122,0.12); }
+
+    .attention-demo {
+      display: grid;
+      gap: 12px;
+    }
+
+    .math {
+      display: grid;
+      gap: 12px;
+    }
+
+    .math-block {
+      padding: 14px;
+      border-radius: 16px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+
+    .math-block .title {
+      font-size: 12px;
+      color: var(--muted);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .formula {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      white-space: pre-wrap;
+      color: #edf5ff;
+    }
+
+    .score-row {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .score {
+      flex: 1 1 140px;
+      min-width: 140px;
+      border-radius: 14px;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(0,0,0,0.18);
+    }
+
+    .score .label {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+    }
+
+    .score .val {
+      font-size: 20px;
+      font-weight: 900;
+    }
+
+    .bar-wrap {
+      display: grid;
+      gap: 10px;
+      margin-top: 10px;
+    }
+
+    .bar-item {
+      display: grid;
+      grid-template-columns: 72px 1fr 54px;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+    }
+
+    .bar {
+      height: 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.08);
+    }
+    .bar > span {
+      display: block;
+      height: 100%;
+      width: 0%;
+      border-radius: inherit;
+      transition: width 0.7s ease;
+    }
+
+    .bar.q > span { background: linear-gradient(90deg, rgba(125,211,252,0.95), rgba(125,211,252,0.45)); }
+    .bar.k > span { background: linear-gradient(90deg, rgba(134,239,172,0.95), rgba(134,239,172,0.45)); }
+    .bar.v > span { background: linear-gradient(90deg, rgba(249,201,122,0.95), rgba(249,201,122,0.45)); }
+
+    .tiny-note {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .heatmap {
+      display: grid;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .heat-row {
+      display: grid;
+      grid-template-columns: 52px repeat(3, 1fr);
+      gap: 6px;
+      align-items: stretch;
+    }
+
+    .heat-row .hcell {
+      border-radius: 10px;
+      min-height: 38px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 13px;
+      border: 1px solid rgba(255,255,255,0.08);
+      background: rgba(255,255,255,0.03);
+    }
+
+    .heat-row .label {
+      color: var(--muted);
+      background: transparent;
+      justify-content: flex-end;
+      border: none;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      padding-right: 6px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.06);
+    }
+
+    .legend i {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      display: inline-block;
+    }
+
+    .i1 { background: var(--head1); }
+    .i2 { background: var(--head2); }
+    .i3 { background: var(--head3); }
+    .i4 { background: var(--head4); }
+
+    .footer-note {
+      margin-top: 10px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .mobile-only { display: none; }
+
+    @media (max-width: 1180px) {
+      .hero { grid-template-columns: 1fr; }
+      .workspace { grid-template-columns: 1fr; }
+      .panel { min-height: auto; }
+    }
+
+    @media (max-width: 780px) {
+      .controls { grid-template-columns: 1fr; }
+      .btn-row { grid-template-columns: 1fr; }
+      .stat-grid { grid-template-columns: 1fr 1fr; }
+      .head-strip { grid-template-columns: 1fr; }
+      .heat-row { grid-template-columns: 42px repeat(3, 1fr); }
+      .hero-left, .hero-right, .panel { padding: 16px; }
+      .mobile-only { display: inline; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+        scroll-behavior: auto !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <section class="hero">
+      <div class="card hero-left">
+        <div class="eyebrow">EE508-style visual aid • Multi-head attention</div>
+        <h1>See how one sequence becomes many heads, then comes back together.</h1>
+        <p>
+          This visualizer follows the slide convention used in class: a sequence with shape <strong>3 × 512</strong> is projected into
+          <strong>Q, K, V</strong>, split across multiple heads, processed independently, and then concatenated back to the model dimension.
+          The right-hand math panel uses a tiny toy example so you can see the score calculation without drowning in 512 numbers.
+        </p>
+        <div class="formula-row">
+          <div class="pill"><strong>X</strong> input embeddings: 3 × 512</div>
+          <div class="pill"><strong>Wq, Wk, Wv</strong> learned projections</div>
+          <div class="pill"><strong>4 heads</strong> → 128 dims per head</div>
+          <div class="pill"><strong>Attention</strong> = softmax(QKᵀ / √dₖ)V</div>
+        </div>
+      </div>
+
+      <div class="card hero-right">
+        <div class="stat-grid">
+          <div class="stat">
+            <div class="label">Sequence length</div>
+            <div class="value" id="statSeq">3</div>
+            <div class="sub">Three tokens in the slide-style example.</div>
+          </div>
+          <div class="stat">
+            <div class="label">Model width</div>
+            <div class="value" id="statDmodel">512</div>
+            <div class="sub">The full embedding dimension before head-splitting.</div>
+          </div>
+          <div class="stat">
+            <div class="label">Heads</div>
+            <div class="value" id="statHeads">4</div>
+            <div class="sub">Each head sees its own learned projection.</div>
+          </div>
+          <div class="stat">
+            <div class="label">Per-head dim</div>
+            <div class="value" id="statDhead">128</div>
+            <div class="sub">512 ÷ 4 = 128 dimensions per head.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card controls">
+      <div class="control">
+        <label for="stepSlider">Animation step</label>
+        <input id="stepSlider" type="range" min="0" max="4" step="1" value="0" />
+      </div>
+      <div class="control">
+        <label for="headSelect">Active head</label>
+        <select id="headSelect">
+          <option value="1">Head 1</option>
+          <option value="2">Head 2</option>
+          <option value="3">Head 3</option>
+          <option value="4">Head 4</option>
+        </select>
+      </div>
+      <div class="control">
+        <label for="querySelect">Query token</label>
+        <select id="querySelect">
+          <option value="0">Token 1: The</option>
+          <option value="1">Token 2: cat</option>
+          <option value="2">Token 3: sat</option>
+        </select>
+      </div>
+      <div class="control">
+        <label>Playback</label>
+        <div class="btn-row">
+          <button id="prevBtn">◀ Step</button>
+          <button id="playBtn" class="primary">▶ Play</button>
+          <button id="nextBtn">Step ▶</button>
+        </div>
+      </div>
+    </section>
+
+    <section class="workspace">
+      <div class="card panel">
+        <h2>1) From tokens to Q, K, V</h2>
+        <p class="desc">
+          The input stays as a <strong>3 × 512</strong> matrix. Multi-head attention does <em>not</em> split the input first;
+          it creates learned projections and then splits the projected space into heads.
+        </p>
+
+        <div class="step-tags">
+          <div class="tag active" data-step="0">Input</div>
+          <div class="tag" data-step="1">Project</div>
+          <div class="tag" data-step="2">Split heads</div>
+          <div class="tag" data-step="3">Attend</div>
+          <div class="tag" data-step="4">Concat</div>
+        </div>
+
+        <div class="flow">
+          <div class="shape">
+            <div class="shape-header">
+              <strong>X</strong>
+              <span id="shapeX">3 × 512</span>
+            </div>
+            <div class="shape-body">
+              <div class="token-row" id="tokenRow"></div>
+              <div class="arrow" id="inputArrow">↓</div>
+              <div class="matrix large glow" id="inputMatrix"></div>
+              <div class="footer-note">Three tokens are shown to match the slide-style example. The full vectors are high-dimensional, so this grid is symbolic.</div>
+            </div>
+          </div>
+
+          <div class="shape">
+            <div class="shape-header">
+              <strong>Linear projections</strong>
+              <span>learned during training</span>
+            </div>
+            <div class="shape-body">
+              <div class="summary-box">
+                <h3>Q, K, V come from the same X</h3>
+                <p>
+                  Each projection is a learned matrix multiplication. The model learns <code>Wq</code>, <code>Wk</code>, and <code>Wv</code>
+                  so that some directions become better for matching (Q/K) and some become better for carrying information (V).
+                </p>
+              </div>
+              <div style="height:12px"></div>
+              <div class="score-row">
+                <div class="score">
+                  <div class="label">Q shape</div>
+                  <div class="val" id="qShape">3 × 512</div>
+                </div>
+                <div class="score">
+                  <div class="label">K shape</div>
+                  <div class="val" id="kShape">3 × 512</div>
+                </div>
+                <div class="score">
+                  <div class="label">V shape</div>
+                  <div class="val" id="vShape">3 × 512</div>
+                </div>
+              </div>
+              <div style="height:12px"></div>
+              <div class="bar-wrap">
+                <div class="bar-item"><div>Wq</div><div class="bar q"><span id="barQ"></span></div><div>learned</div></div>
+                <div class="bar-item"><div>Wk</div><div class="bar k"><span id="barK"></span></div><div>learned</div></div>
+                <div class="bar-item"><div>Wv</div><div class="bar v"><span id="barV"></span></div><div>learned</div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card panel">
+        <h2>2) Heads work in parallel</h2>
+        <p class="desc">
+          In the 4-head slide example, 512 dimensions are split across heads as <strong>128 per head</strong>.
+          Each head learns to focus on different relationships, then the outputs are concatenated back.
+        </p>
+
+        <div class="heads" id="headsList"></div>
+
+        <div class="shape" style="margin-top:12px;">
+          <div class="shape-header">
+            <strong>Why multiple heads?</strong>
+            <span>different views of the same sentence</span>
+          </div>
+          <div class="shape-body">
+            <div class="summary-box">
+              <h3>One head may look for local grammar; another may look for long-range meaning</h3>
+              <p>
+                Multi-head attention gives the model several smaller attention spaces instead of one large space.
+                This makes it easier to capture different patterns at once.
+              </p>
+            </div>
+            <div class="legend" id="legend"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card panel">
+        <h2>3) Tiny attention math</h2>
+        <p class="desc">
+          This panel compresses the idea into a toy 4-dimensional example so the score path is visible:
+          <strong>QKᵀ → scaled scores → softmax → weighted sum of V</strong>.
+        </p>
+
+        <div class="attention-demo">
+          <div class="math-block">
+            <div class="title">Selected head + query token</div>
+            <div class="formula" id="formulaHeader"></div>
+          </div>
+
+          <div class="math-block">
+            <div class="title">Attention scores</div>
+            <div class="score-row">
+              <div class="score">
+                <div class="label">Raw</div>
+                <div class="val" id="rawScore">—</div>
+              </div>
+              <div class="score">
+                <div class="label">Scaled</div>
+                <div class="val" id="scaledScore">—</div>
+              </div>
+              <div class="score">
+                <div class="label">Weights</div>
+                <div class="val" id="weightsText">—</div>
+              </div>
+            </div>
+            <div class="heatmap" id="heatmap"></div>
+          </div>
+
+          <div class="math-block">
+            <div class="title">Final weighted sum</div>
+            <div class="formula" id="finalFormula"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const tokens = ["The", "cat", "sat"];
+    const colors = ["var(--head1)", "var(--head2)", "var(--head3)", "var(--head4)"];
+    const headNames = ["Head 1", "Head 2", "Head 3", "Head 4"];
+    const querySelect = document.getElementById("querySelect");
+    const headSelect = document.getElementById("headSelect");
+    const stepSlider = document.getElementById("stepSlider");
+    const tokenRow = document.getElementById("tokenRow");
+    const inputMatrix = document.getElementById("inputMatrix");
+    const headsList = document.getElementById("headsList");
+    const heatmap = document.getElementById("heatmap");
+    const legend = document.getElementById("legend");
+    const formulaHeader = document.getElementById("formulaHeader");
+    const finalFormula = document.getElementById("finalFormula");
+    const rawScore = document.getElementById("rawScore");
+    const scaledScore = document.getElementById("scaledScore");
+    const weightsText = document.getElementById("weightsText");
+    const prevBtn = document.getElementById("prevBtn");
+    const nextBtn = document.getElementById("nextBtn");
+    const playBtn = document.getElementById("playBtn");
+    const barQ = document.getElementById("barQ");
+    const barK = document.getElementById("barK");
+    const barV = document.getElementById("barV");
+    const statSeq = document.getElementById("statSeq");
+    const statHeads = document.getElementById("statHeads");
+    const statDhead = document.getElementById("statDhead");
+    const qShape = document.getElementById("qShape");
+    const kShape = document.getElementById("kShape");
+    const vShape = document.getElementById("vShape");
+
+    let playing = false;
+    let timer = null;
+    const dModel = 512;
+    const numHeads = 4;
+    const dHead = dModel / numHeads;
+    const toyDim = 4;
+    const toyScale = Math.sqrt(toyDim);
+
+    // Toy vectors for the math panel.
+    // Each head gets slightly different behavior so users can see that heads are not redundant.
+    const toyBank = {
+      1: {
+        q: {
+          0: [2.0, 1.0, 0.0, 1.0],
+          1: [1.2, 2.1, 0.2, 0.6],
+          2: [0.8, 1.0, 1.3, 0.4]
+        },
+        k: [
+          [1.0, 0.0, 1.0, 0.2],
+          [0.2, 1.6, 0.4, 0.7],
+          [1.0, 1.0, 0.1, 0.5]
+        ],
+        v: [
+          [5, 5, 5, 5],
+          [8, 8, 8, 8],
+          [10, 10, 10, 10]
+        ]
+      },
+      2: {
+        q: {
+          0: [1.0, 0.6, 1.5, 0.2],
+          1: [0.8, 1.9, 0.9, 0.3],
+          2: [1.7, 0.3, 1.0, 0.8]
+        },
+        k: [
+          [0.9, 0.2, 1.0, 0.1],
+          [0.3, 1.4, 0.7, 0.5],
+          [1.4, 0.8, 0.2, 0.4]
+        ],
+        v: [
+          [3, 3, 3, 3],
+          [6, 6, 6, 6],
+          [9, 9, 9, 9]
+        ]
+      },
+      3: {
+        q: {
+          0: [1.6, 0.9, 0.4, 0.8],
+          1: [0.7, 1.7, 1.0, 0.1],
+          2: [1.3, 1.1, 0.5, 0.9]
+        },
+        k: [
+          [1.2, 0.1, 0.7, 0.3],
+          [0.4, 1.3, 1.0, 0.2],
+          [0.8, 1.0, 0.6, 0.6]
+        ],
+        v: [
+          [2, 4, 2, 4],
+          [5, 7, 5, 7],
+          [8, 10, 8, 10]
+        ]
+      },
+      4: {
+        q: {
+          0: [1.9, 0.4, 0.8, 0.5],
+          1: [0.9, 1.1, 1.2, 0.7],
+          2: [1.5, 0.8, 0.2, 1.1]
+        },
+        k: [
+          [1.1, 0.4, 0.6, 0.6],
+          [0.5, 1.0, 0.9, 0.4],
+          [1.0, 0.7, 0.5, 0.8]
+        ],
+        v: [
+          [4, 4, 6, 6],
+          [7, 7, 9, 9],
+          [11, 11, 13, 13]
+        ]
+      }
+    };
+
+    function fmt(n) {
+      return Number(n).toFixed(2).replace(/\.00$/, "");
+    }
+
+    function softmax(arr) {
+      const m = Math.max(...arr);
+      const exps = arr.map(v => Math.exp(v - m));
+      const sum = exps.reduce((a, b) => a + b, 0);
+      return exps.map(v => v / sum);
+    }
+
+    function dot(a, b) {
+      return a.reduce((s, v, i) => s + v * b[i], 0);
+    }
+
+    function getHead() {
+      return Number(headSelect.value);
+    }
+
+    function getQueryIndex() {
+      return Number(querySelect.value);
+    }
+
+    function setStep(step) {
+      step = Math.max(0, Math.min(4, step));
+      stepSlider.value = step;
+      updateUI();
+    }
+
+    function renderTokens() {
+      tokenRow.innerHTML = tokens.map((t, i) => `
+        <div class="token ${i === getQueryIndex() ? 'active' : ''}">
+          <div class="name">${t}</div>
+          <div class="shape-text">token ${i + 1}</div>
+        </div>
+      `).join("");
+    }
+
+    function renderInputMatrix() {
+      // Symbolic 3x512 matrix (lightweight visual grid)
+      const rows = 3;
+      const cols = 8;
+      inputMatrix.innerHTML = Array.from({ length: rows }).map(() => {
+        const cells = Array.from({ length: cols }).map((_, c) => `<span class="cell" style="opacity:${0.28 + (c % 4) * 0.12}"></span>`).join("");
+        return `<div style="display:flex; gap:4px;">${cells}</div>`;
+      }).join("");
+    }
+
+    function renderHeads() {
+      headsList.innerHTML = headNames.map((name, idx) => {
+        const active = idx + 1 === getHead();
+        return `
+          <div class="head-card ${active ? 'active' : ''}">
+            <div class="head-title">
+              <strong style="color:${colors[idx]}">${name}</strong>
+              <span>3 × ${dHead}</span>
+            </div>
+            <div class="head-strip">
+              <div class="mini">
+                <div class="mini-label">Q${idx + 1}</div>
+                <div class="mini-vector">
+                  <span class="dot"></span><span class="dot"></span><span class="dot"></span>
+                </div>
+              </div>
+              <div class="mini">
+                <div class="mini-label">K${idx + 1}</div>
+                <div class="mini-vector">
+                  <span class="dot k"></span><span class="dot k"></span><span class="dot k"></span>
+                </div>
+              </div>
+              <div class="mini">
+                <div class="mini-label">V${idx + 1}</div>
+                <div class="mini-vector">
+                  <span class="dot v"></span><span class="dot v"></span><span class="dot v"></span>
+                </div>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join("");
+
+      legend.innerHTML = headNames.map((name, idx) => `
+        <span><i class="i${idx + 1}"></i>${name}: a different learned view</span>
+      `).join("");
+    }
+
+    function renderHeatmap(weights) {
+      const q = getQueryIndex();
+      const h = getHead();
+      const bank = toyBank[h];
+      const labels = tokens.map(t => `k:${t}`);
+
+      const rows = tokens.map((tok, i) => {
+        const bg = `rgba(${100 + i * 35}, ${160 + i * 18}, 255, ${0.10 + weights[i] * 0.58})`;
+        const bg2 = `rgba(125,211,252, ${0.10 + weights[i] * 0.55})`;
+        return `
+          <div class="heat-row">
+            <div class="hcell label">${tok}</div>
+            <div class="hcell" style="background:${q === 0 ? bg2 : bg}">${fmt(weights[i])}</div>
+            <div class="hcell" style="background:${q === 1 ? bg2 : bg}">${fmt(weights[i])}</div>
+            <div class="hcell" style="background:${q === 2 ? bg2 : bg}">${fmt(weights[i])}</div>
+          </div>
+        `;
+      }).join("");
+
+      heatmap.innerHTML = `
+        <div class="heat-row">
+          <div class="hcell label"></div>
+          <div class="hcell">t1</div>
+          <div class="hcell">t2</div>
+          <div class="hcell">t3</div>
+        </div>
+        ${rows}
+      `;
+    }
+
+    function updateUI() {
+      const step = Number(stepSlider.value);
+      const h = getHead();
+      const qIndex = getQueryIndex();
+      const dHeadStr = dModel / numHeads;
+
+      statSeq.textContent = tokens.length;
+      statHeads.textContent = numHeads;
+      statDhead.textContent = dHeadStr;
+      document.getElementById("statDmodel").textContent = dModel;
+      qShape.textContent = `${tokens.length} × ${dModel}`;
+      kShape.textContent = `${tokens.length} × ${dModel}`;
+      vShape.textContent = `${tokens.length} × ${dModel}`;
+      document.getElementById("shapeX").textContent = `${tokens.length} × ${dModel}`;
+
+      renderTokens();
+      renderInputMatrix();
+      renderHeads();
+
+      // Step-dependent highlighting in the left panel.
+      document.getElementById("inputMatrix").classList.toggle("hidden", step > 0);
+      document.getElementById("inputArrow").style.opacity = step === 0 ? 0.35 : 0.95;
+      barQ.style.width = step >= 1 ? "100%" : "0%";
+      barK.style.width = step >= 1 ? "100%" : "0%";
+      barV.style.width = step >= 1 ? "100%" : "0%";
+
+      // Header formula and selected toy vectors.
+      const bank = toyBank[h];
+      const q = bank.q[qIndex];
+      const k = bank.k;
+      const v = bank.v;
+
+      formulaHeader.textContent =
+`Selected head: ${h}   |   Query token: ${tokens[qIndex]}
+Real shape: Q, K, V are each 3 × 128 in each head for the slide-style 512/4 setup.
+Toy math below uses 4 dims so the scores are easy to compute by hand.`;
+
+      // Compute toy attention.
+      const raw = k.map(ki => dot(q, ki));
+      const scaled = raw.map(s => s / toyScale);
+      const weights = softmax(scaled);
+      const out = weights[0] * v[0][0] + weights[1] * v[1][0] + weights[2] * v[2][0];
+      const outVec = v[0].map((_, idx) => weights[0] * v[0][idx] + weights[1] * v[1][idx] + weights[2] * v[2][idx]);
+
+      // Present the equations clearly.
+      const qStr = `[${q.map(fmt).join(", ")}]`;
+      const kStr = k.map(row => `[${row.map(fmt).join(", ")}]`).join("\n");
+      const vStr = v.map(row => `[${row.map(x => x.toFixed(0)).join(", ")}]`).join("\n");
+
+      if (step === 0) {
+        rawScore.textContent = "—";
+        scaledScore.textContent = "—";
+        weightsText.textContent = "—";
+        finalFormula.textContent =
+`The sequence enters as embeddings: X has shape 3 × 512.
+No head-splitting yet. The model is only preparing representations.`;
+        renderHeatmap([1 / 3, 1 / 3, 1 / 3]);
+      } else if (step === 1) {
+        rawScore.textContent = "—";
+        scaledScore.textContent = "—";
+        weightsText.textContent = "—";
+        finalFormula.textContent =
+`Linear projections:
+Q = XWq
+K = XWk
+V = XWv
+
+In the full model, each of these is still 3 × 512 before splitting into heads.`;
+        renderHeatmap([0.25, 0.35, 0.40]);
+      } else if (step === 2) {
+        rawScore.textContent = "—";
+        scaledScore.textContent = "—";
+        weightsText.textContent = "—";
+        finalFormula.textContent =
+`Split Q, K, V across heads:
+512 ÷ 4 = 128 dims per head
+
+Each head gets its own 3 × 128 slice of Q, K, and V.`;
+        renderHeatmap([0.2, 0.3, 0.5]);
+      } else if (step === 3) {
+        rawScore.textContent = `[${raw.map(v => fmt(v)).join(", ")}]`;
+        scaledScore.textContent = `[${scaled.map(v => fmt(v)).join(", ")}]`;
+        weightsText.textContent = `[${weights.map(v => fmt(v)).join(", ")}]`;
+        finalFormula.textContent =
+`Toy head ${h}, token ${tokens[qIndex]}:
+Q = ${qStr}
+K = ${kStr}
+V = ${vStr}
+
+Raw scores = Q · Kᵀ
+Scaled     = raw / √4
+Softmax    = attention weights
+Output     = weights × V`;
+        renderHeatmap(weights);
+      } else {
+        rawScore.textContent = `[${raw.map(v => fmt(v)).join(", ")}]`;
+        scaledScore.textContent = `[${scaled.map(v => fmt(v)).join(", ")}]`;
+        weightsText.textContent = `[${weights.map(v => fmt(v)).join(", ")}]`;
+        finalFormula.textContent =
+`Concatenate all head outputs back into 3 × 512.
+Then apply the final output projection Wₒ to mix information from all heads.
+
+Toy output vector for this selected head:
+[${outVec.map(v => fmt(v)).join(", ")}]`;
+        renderHeatmap(weights);
+      }
+
+      // Step tags.
+      document.querySelectorAll(".tag").forEach(tag => {
+        tag.classList.toggle("active", Number(tag.dataset.step) === step);
+      });
+
+      // Head card highlight and subtle attention on active head.
+      document.querySelectorAll(".head-card").forEach((card, idx) => {
+        card.classList.toggle("active", idx + 1 === h);
+      });
+
+      // Update the right-side visual cue bars with a bit of variation.
+      const qPct = 85 + h * 2;
+      const kPct = 76 + h * 3;
+      const vPct = 68 + h * 4;
+      barQ.style.width = `${Math.min(100, qPct)}%`;
+      barK.style.width = `${Math.min(100, kPct)}%`;
+      barV.style.width = `${Math.min(100, vPct)}%`;
+
+      // Softly emphasize the active token.
+      document.querySelectorAll('.token').forEach((el, idx) => {
+        el.classList.toggle('active', idx === qIndex);
+      });
+    }
+
+    function togglePlay() {
+      playing = !playing;
+      playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+      if (playing) {
+        timer = setInterval(() => {
+          const next = (Number(stepSlider.value) + 1) % 5;
+          stepSlider.value = next;
+          updateUI();
+        }, 1800);
+      } else if (timer) {
+        clearInterval(timer);
+      }
+    }
+
+    // Event wiring.
+    stepSlider.addEventListener("input", updateUI);
+    headSelect.addEventListener("change", updateUI);
+    querySelect.addEventListener("change", updateUI);
+    prevBtn.addEventListener("click", () => setStep(Number(stepSlider.value) - 1));
+    nextBtn.addEventListener("click", () => setStep(Number(stepSlider.value) + 1));
+    playBtn.addEventListener("click", togglePlay);
+
+    document.querySelectorAll('.tag').forEach(tag => {
+      tag.addEventListener('click', () => setStep(Number(tag.dataset.step)));
+    });
+
+    // Initialize.
+    updateUI();
+  </script>
+</body>
+</html>

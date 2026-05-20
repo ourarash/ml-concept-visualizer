@@ -1,0 +1,710 @@
+<!doctype html>
+<!-- Source: Integrated from PR #44 by Nakarin Korsuwan (@green-nk): feat: add VAE generation simulation. -->
+<!-- Brief: Step-by-step VAE visualization on MNIST-style digits. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VAE on MNIST Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .stat-card {
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+            padding: 1rem;
+            border-radius: 0.5rem;
+        }
+
+        .formula-card {
+            background: #fff;
+            border: 1px dashed #d1d5db;
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            font-family: serif;
+        }
+
+        .step-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.4rem;
+            padding: 0.25rem 0.6rem;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            background: #e5e7eb;
+            color: #4b5563;
+        }
+
+        .step-pill.active {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .panel {
+            border: 2px solid #e5e7eb;
+            border-radius: 0.75rem;
+            padding: 0.75rem;
+            background: #fff;
+            transition: all 0.2s ease;
+        }
+
+        .panel.active {
+            border-color: #3b82f6;
+            box-shadow: 0 8px 18px rgba(37, 99, 235, 0.15);
+        }
+
+        canvas.digit {
+            image-rendering: pixelated;
+            background: #0f172a;
+            border-radius: 0.5rem;
+        }
+
+        canvas.latent {
+            background: #f8fafc;
+            border: 1px solid #e5e7eb;
+            border-radius: 0.5rem;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-50 text-gray-900 font-sans p-4">
+    <div class="max-w-7xl mx-auto bg-white rounded-xl shadow-lg p-6">
+        <header class="mb-6 border-b pb-4">
+            <h1 class="text-2xl font-bold text-blue-800">
+                Variational Autoencoder on MNIST: Step-by-Step Visualizer
+            </h1>
+            <p class="text-gray-600 italic">
+                Scenario: A VAE learns to compress MNIST digits into a 2D latent space and generate new digits from it.
+            </p>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- Left panel -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="space-y-4">
+                    <h2 class="font-semibold text-lg border-b pb-2 text-gray-700">Scenario</h2>
+                    <div class="stat-card text-sm text-gray-700 leading-relaxed">
+                        We feed handwritten digits (0, 1, 3, 7, 8) into a VAE.
+                        The encoder summarizes each image as a Gaussian
+                        <span class="font-mono">N(mu, sigma^2)</span> in a 2D latent space.
+                        The decoder reconstructs the digit from a sampled latent code, and we can also generate new digits
+                        by sampling from the prior <span class="font-mono">N(0, I)</span>.
+                    </div>
+                </div>
+
+                <div class="space-y-4 pt-2 border-t">
+                    <h2 class="font-semibold text-lg border-b pb-2 text-gray-700">Pipeline Formulas</h2>
+                    <div class="formula-card text-sm text-gray-700">
+                        <p class="text-xs text-gray-500 mb-1 uppercase font-bold">Encoder</p>
+                        <div class="bg-gray-50 rounded p-2 text-center">
+                            q(z|x) = N(z; mu(x), sigma^2(x))
+                        </div>
+                    </div>
+                    <div class="formula-card text-sm text-gray-700">
+                        <p class="text-xs text-gray-500 mb-1 uppercase font-bold">Reparameterization</p>
+                        <div class="bg-gray-50 rounded p-2 text-center">
+                            z = mu + sigma * epsilon, &nbsp; epsilon ~ N(0, I)
+                        </div>
+                    </div>
+                    <div class="formula-card text-sm text-gray-700">
+                        <p class="text-xs text-gray-500 mb-1 uppercase font-bold">ELBO Loss</p>
+                        <div class="bg-gray-50 rounded p-2 text-center text-xs leading-relaxed">
+                            L = Recon(x, x_hat) + KL(q(z|x) || N(0, I))
+                        </div>
+                    </div>
+                </div>
+
+                <div class="space-y-3 pt-2 border-t">
+                    <h2 class="font-semibold text-lg border-b pb-2 text-gray-700">Controls</h2>
+                    <div>
+                        <label class="text-sm font-medium block mb-1">Pick input digit</label>
+                        <div class="grid grid-cols-5 gap-1" id="digit-picker"></div>
+                    </div>
+                    <div>
+                        <div class="flex justify-between items-center mb-1">
+                            <label class="text-sm font-medium">Training maturity</label>
+                            <span id="train-val" class="text-sm font-mono font-bold text-blue-600">0.50</span>
+                        </div>
+                        <input id="train-slider" type="range" min="0" max="1" step="0.01" value="0.5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                        <p class="text-[11px] text-gray-500 mt-1">0 = early training (blurry), 1 = converged (sharper)</p>
+                    </div>
+                    <div class="grid grid-cols-2 gap-2 pt-2">
+                        <button id="next-step-btn" class="px-3 py-2 rounded bg-blue-600 text-white text-sm font-semibold hover:bg-blue-700">
+                            Next Step
+                        </button>
+                        <button id="resample-btn" class="px-3 py-2 rounded bg-purple-600 text-white text-sm font-semibold hover:bg-purple-700">
+                            Resample epsilon
+                        </button>
+                        <button id="generate-btn" class="px-3 py-2 rounded bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700">
+                            Generate new
+                        </button>
+                        <button id="reset-btn" class="px-3 py-2 rounded bg-gray-700 text-white text-sm font-semibold hover:bg-gray-800">
+                            Reset
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Main -->
+            <div class="lg:col-span-3 space-y-6">
+                <div class="flex flex-wrap items-center gap-2" id="step-pills"></div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="panel" id="panel-input">
+                        <p class="text-xs uppercase text-gray-500 font-bold mb-2">1. Input image x</p>
+                        <div class="flex flex-col items-center gap-2">
+                            <canvas id="input-canvas" class="digit" width="168" height="168"></canvas>
+                            <p id="input-label" class="text-sm font-mono text-gray-700">digit = ?</p>
+                        </div>
+                    </div>
+                    <div class="panel" id="panel-encoder">
+                        <p class="text-xs uppercase text-gray-500 font-bold mb-2">2. Encoder q(z|x)</p>
+                        <div class="text-sm font-mono text-gray-700 space-y-1">
+                            <div>mu = (<span id="mu1">0.000</span>, <span id="mu2">0.000</span>)</div>
+                            <div>log sigma^2 = (<span id="ls1">0.000</span>, <span id="ls2">0.000</span>)</div>
+                            <div>sigma = (<span id="s1">1.000</span>, <span id="s2">1.000</span>)</div>
+                        </div>
+                        <p class="text-[11px] text-gray-500 italic mt-2">
+                            Encoder maps the image into a Gaussian in 2D latent space.
+                        </p>
+                    </div>
+                    <div class="panel" id="panel-reparam">
+                        <p class="text-xs uppercase text-gray-500 font-bold mb-2">3. Reparameterization</p>
+                        <div class="text-sm font-mono text-gray-700 space-y-1">
+                            <div>epsilon = (<span id="e1">0.000</span>, <span id="e2">0.000</span>)</div>
+                            <div>z = mu + sigma * epsilon</div>
+                            <div>z = (<span id="z1">0.000</span>, <span id="z2">0.000</span>)</div>
+                        </div>
+                        <p class="text-[11px] text-gray-500 italic mt-2">
+                            Lets gradients flow through z by separating randomness into epsilon.
+                        </p>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div class="panel md:col-span-2" id="panel-latent">
+                        <p class="text-xs uppercase text-gray-500 font-bold mb-2">4. Latent space (2D)</p>
+                        <canvas id="latent-canvas" class="latent w-full" width="600" height="320"></canvas>
+                        <div class="flex flex-wrap gap-3 mt-2 text-xs text-gray-600">
+                            <span><span class="inline-block w-3 h-3 rounded-full bg-blue-500 align-middle mr-1"></span>encoder mu</span>
+                            <span><span class="inline-block w-3 h-3 rounded-full bg-purple-500 align-middle mr-1"></span>sampled z</span>
+                            <span><span class="inline-block w-3 h-3 rounded-full bg-gray-400 align-middle mr-1"></span>digit prototypes</span>
+                            <span><span class="inline-block w-3 h-3 rounded bg-blue-100 border border-blue-400 align-middle mr-1"></span>1-sigma ellipse</span>
+                        </div>
+                    </div>
+                    <div class="panel" id="panel-decoder">
+                        <p class="text-xs uppercase text-gray-500 font-bold mb-2">5. Decoder p(x|z)</p>
+                        <div class="flex flex-col items-center gap-2">
+                            <canvas id="decoded-canvas" class="digit" width="168" height="168"></canvas>
+                            <p id="decoded-label" class="text-sm font-mono text-gray-700">x_hat from z</p>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="panel" id="panel-loss">
+                    <p class="text-xs uppercase text-gray-500 font-bold mb-2">6. ELBO loss breakdown</p>
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm font-mono text-gray-700">
+                        <div class="stat-card">
+                            <p class="text-xs uppercase text-gray-500 font-bold mb-1">Reconstruction</p>
+                            <p id="recon-val" class="text-xl text-rose-600">0.000</p>
+                        </div>
+                        <div class="stat-card">
+                            <p class="text-xs uppercase text-gray-500 font-bold mb-1">KL divergence</p>
+                            <p id="kl-val" class="text-xl text-purple-600">0.000</p>
+                        </div>
+                        <div class="stat-card">
+                            <p class="text-xs uppercase text-gray-500 font-bold mb-1">Total loss L</p>
+                            <p id="total-val" class="text-xl text-blue-700">0.000</p>
+                        </div>
+                    </div>
+                    <p id="loss-detail" class="text-[12px] text-gray-600 mt-3 leading-relaxed"></p>
+                </div>
+
+                <div class="bg-blue-50 border border-blue-100 rounded-lg p-4">
+                    <h3 class="font-bold text-blue-800 text-sm mb-2">Step explanation</h3>
+                    <div id="step-explain" class="text-sm text-blue-700 leading-relaxed">
+                        Pick a digit and click <strong>Next Step</strong> to walk through the VAE pipeline.
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const GRID = 14;
+        const PIXEL = 12;
+
+        function makeDigit(rows) {
+            const arr = new Array(GRID * GRID).fill(0);
+            for (let r = 0; r < GRID; r++) {
+                for (let c = 0; c < GRID; c++) {
+                    arr[r * GRID + c] = rows[r][c];
+                }
+            }
+            return arr;
+        }
+
+        const PROTOS = {
+            0: makeDigit([
+                "..............",
+                "....######....",
+                "...##....##...",
+                "..##......##..",
+                "..##......##..",
+                "..##......##..",
+                "..##......##..",
+                "..##......##..",
+                "..##......##..",
+                "..##......##..",
+                "...##....##...",
+                "....######....",
+                "..............",
+                "..............",
+            ].map(r => r.split("").map(ch => ch === "#" ? 1 : 0))),
+            1: makeDigit([
+                "..............",
+                "......##......",
+                ".....###......",
+                "....####......",
+                "...##.##......",
+                "......##......",
+                "......##......",
+                "......##......",
+                "......##......",
+                "......##......",
+                "......##......",
+                "....######....",
+                "..............",
+                "..............",
+            ].map(r => r.split("").map(ch => ch === "#" ? 1 : 0))),
+            3: makeDigit([
+                "..............",
+                "....######....",
+                "...##....##...",
+                ".........##...",
+                ".........##...",
+                "......####....",
+                "......####....",
+                ".........##...",
+                ".........##...",
+                ".........##...",
+                "...##....##...",
+                "....######....",
+                "..............",
+                "..............",
+            ].map(r => r.split("").map(ch => ch === "#" ? 1 : 0))),
+            7: makeDigit([
+                "..............",
+                "..##########..",
+                "...........##.",
+                "..........##..",
+                ".........##...",
+                "........##....",
+                ".......##.....",
+                "......##......",
+                ".....##.......",
+                ".....##.......",
+                ".....##.......",
+                ".....##.......",
+                "..............",
+                "..............",
+            ].map(r => r.split("").map(ch => ch === "#" ? 1 : 0))),
+            8: makeDigit([
+                "..............",
+                "....######....",
+                "...##....##...",
+                "..##......##..",
+                "...##....##...",
+                "....######....",
+                "....######....",
+                "...##....##...",
+                "..##......##..",
+                "..##......##..",
+                "...##....##...",
+                "....######....",
+                "..............",
+                "..............",
+            ].map(r => r.split("").map(ch => ch === "#" ? 1 : 0))),
+        };
+
+        const digitOrder = [0, 1, 3, 7, 8];
+        const protoLatent = {
+            0: { mu: [-1.6, 1.2] },
+            1: { mu: [1.7, 1.4] },
+            3: { mu: [-1.4, -1.3] },
+            7: { mu: [1.5, -1.5] },
+            8: { mu: [0.0, 0.0] },
+        };
+
+        const STEPS = [
+            { id: "input", label: "1. Input x" },
+            { id: "encoder", label: "2. Encoder mu, log sigma^2" },
+            { id: "reparam", label: "3. Reparameterize z" },
+            { id: "latent", label: "4. Latent space" },
+            { id: "decoder", label: "5. Decode x_hat" },
+            { id: "loss", label: "6. ELBO loss" },
+        ];
+
+        let chosenDigit = 8;
+        let stepIndex = 0;
+        let epsilon = [0, 0];
+        let mu = [0, 0];
+        let logVar = [0, 0];
+        let sigma = [1, 1];
+        let z = [0, 0];
+        let mode = "encode";
+
+        const inputCanvas = document.getElementById("input-canvas");
+        const decodedCanvas = document.getElementById("decoded-canvas");
+        const latentCanvas = document.getElementById("latent-canvas");
+        const inputLabel = document.getElementById("input-label");
+        const decodedLabel = document.getElementById("decoded-label");
+        const trainSlider = document.getElementById("train-slider");
+        const trainVal = document.getElementById("train-val");
+        const stepPills = document.getElementById("step-pills");
+        const stepExplain = document.getElementById("step-explain");
+        const lossDetail = document.getElementById("loss-detail");
+        const digitPicker = document.getElementById("digit-picker");
+
+        function drawDigit(canvas, pixels) {
+            const ctx = canvas.getContext("2d");
+            ctx.fillStyle = "#0f172a";
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            for (let r = 0; r < GRID; r++) {
+                for (let c = 0; c < GRID; c++) {
+                    const v = pixels[r * GRID + c];
+                    const intensity = Math.max(0, Math.min(1, v));
+                    if (intensity > 0.02) {
+                        ctx.fillStyle = `rgba(125, 211, 252, ${intensity})`;
+                        ctx.fillRect(c * PIXEL, r * PIXEL, PIXEL, PIXEL);
+                    }
+                }
+            }
+        }
+
+        function blurPixels(pixels, level) {
+            if (level <= 0) return pixels.slice();
+            const out = pixels.slice();
+            const passes = Math.max(1, Math.round(level * 3));
+            for (let p = 0; p < passes; p++) {
+                const next = out.slice();
+                for (let r = 0; r < GRID; r++) {
+                    for (let c = 0; c < GRID; c++) {
+                        let sum = 0;
+                        let count = 0;
+                        for (let dr = -1; dr <= 1; dr++) {
+                            for (let dc = -1; dc <= 1; dc++) {
+                                const nr = r + dr;
+                                const nc = c + dc;
+                                if (nr >= 0 && nr < GRID && nc >= 0 && nc < GRID) {
+                                    sum += out[nr * GRID + nc];
+                                    count++;
+                                }
+                            }
+                        }
+                        next[r * GRID + c] = sum / count;
+                    }
+                }
+                for (let i = 0; i < out.length; i++) out[i] = next[i];
+            }
+            return out;
+        }
+
+        function decodeFromZ(zVec, training) {
+            // Inverse-distance weighted blending of digit prototypes.
+            const weights = digitOrder.map((d) => {
+                const m = protoLatent[d].mu;
+                const dx = zVec[0] - m[0];
+                const dy = zVec[1] - m[1];
+                const dist2 = dx * dx + dy * dy + 0.05;
+                return { d, w: 1 / Math.pow(dist2, 1.6) };
+            });
+            const total = weights.reduce((a, b) => a + b.w, 0);
+            const blended = new Array(GRID * GRID).fill(0);
+            for (const { d, w } of weights) {
+                const p = PROTOS[d];
+                const norm = w / total;
+                for (let i = 0; i < blended.length; i++) {
+                    blended[i] += norm * p[i];
+                }
+            }
+            const blurLevel = 1 - training;
+            const noisy = blended.map((v) => {
+                const noise = (Math.random() - 0.5) * 0.4 * blurLevel;
+                return Math.max(0, Math.min(1, v + noise));
+            });
+            return blurPixels(noisy, blurLevel);
+        }
+
+        function gauss() {
+            const u1 = Math.max(1e-6, Math.random());
+            const u2 = Math.random();
+            return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
+        }
+
+        function computeEncoder(digit, training) {
+            const proto = protoLatent[digit].mu;
+            const noiseScale = (1 - training) * 0.6;
+            const muOut = [
+                proto[0] + (Math.random() - 0.5) * noiseScale,
+                proto[1] + (Math.random() - 0.5) * noiseScale,
+            ];
+            const logV = [
+                -1.5 * training + (Math.random() - 0.5) * 0.4,
+                -1.5 * training + (Math.random() - 0.5) * 0.4,
+            ];
+            return { mu: muOut, logVar: logV };
+        }
+
+        function reconLoss(target, pred) {
+            let s = 0;
+            for (let i = 0; i < target.length; i++) {
+                const t = target[i];
+                const p = Math.max(1e-4, Math.min(1 - 1e-4, pred[i]));
+                s -= t * Math.log(p) + (1 - t) * Math.log(1 - p);
+            }
+            return s / target.length;
+        }
+
+        function klLoss(muVec, logVarVec) {
+            let s = 0;
+            for (let i = 0; i < muVec.length; i++) {
+                s += 1 + logVarVec[i] - muVec[i] * muVec[i] - Math.exp(logVarVec[i]);
+            }
+            return -0.5 * s;
+        }
+
+        function setActivePanel() {
+            const panels = ["input", "encoder", "reparam", "latent", "decoder", "loss"];
+            for (const id of panels) {
+                document.getElementById("panel-" + id).classList.remove("active");
+            }
+            const id = STEPS[stepIndex].id;
+            document.getElementById("panel-" + id).classList.add("active");
+        }
+
+        function renderPills() {
+            stepPills.innerHTML = STEPS.map((s, i) => `
+                <span class="step-pill ${i === stepIndex ? "active" : ""}">${s.label}</span>
+            `).join("");
+        }
+
+        function renderDigitPicker() {
+            digitPicker.innerHTML = digitOrder.map((d) => `
+                <button data-digit="${d}" class="px-2 py-1 rounded text-sm font-bold ${d === chosenDigit ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-700 hover:bg-gray-200"}">${d}</button>
+            `).join("");
+            digitPicker.querySelectorAll("button").forEach((btn) => {
+                btn.addEventListener("click", () => {
+                    chosenDigit = parseInt(btn.dataset.digit, 10);
+                    mode = "encode";
+                    stepIndex = 0;
+                    runEncoder();
+                });
+            });
+        }
+
+        function drawLatent() {
+            const ctx = latentCanvas.getContext("2d");
+            const W = latentCanvas.width;
+            const H = latentCanvas.height;
+            ctx.clearRect(0, 0, W, H);
+
+            const minV = -3;
+            const maxV = 3;
+            const toX = (v) => ((v - minV) / (maxV - minV)) * W;
+            const toY = (v) => H - ((v - minV) / (maxV - minV)) * H;
+
+            ctx.strokeStyle = "#e5e7eb";
+            ctx.lineWidth = 1;
+            for (let g = -3; g <= 3; g++) {
+                ctx.beginPath();
+                ctx.moveTo(toX(g), 0);
+                ctx.lineTo(toX(g), H);
+                ctx.stroke();
+                ctx.beginPath();
+                ctx.moveTo(0, toY(g));
+                ctx.lineTo(W, toY(g));
+                ctx.stroke();
+            }
+
+            ctx.strokeStyle = "#94a3b8";
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(toX(0), 0);
+            ctx.lineTo(toX(0), H);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, toY(0));
+            ctx.lineTo(W, toY(0));
+            ctx.stroke();
+
+            ctx.fillStyle = "#9ca3af";
+            ctx.font = "12px monospace";
+            for (const d of digitOrder) {
+                const p = protoLatent[d].mu;
+                ctx.beginPath();
+                ctx.arc(toX(p[0]), toY(p[1]), 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.fillStyle = "#374151";
+                ctx.fillText(String(d), toX(p[0]) + 8, toY(p[1]) - 8);
+                ctx.fillStyle = "#9ca3af";
+            }
+
+            if (mode === "encode" && stepIndex >= 1) {
+                const sx = sigma[0];
+                const sy = sigma[1];
+                ctx.strokeStyle = "rgba(59, 130, 246, 0.9)";
+                ctx.fillStyle = "rgba(59, 130, 246, 0.15)";
+                ctx.lineWidth = 1.5;
+                ctx.beginPath();
+                ctx.ellipse(toX(mu[0]), toY(mu[1]), Math.max(2, sx * (W / (maxV - minV))), Math.max(2, sy * (H / (maxV - minV))), 0, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.stroke();
+
+                ctx.fillStyle = "#2563eb";
+                ctx.beginPath();
+                ctx.arc(toX(mu[0]), toY(mu[1]), 5, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            if (stepIndex >= 2 || mode === "generate") {
+                ctx.fillStyle = "#7c3aed";
+                ctx.beginPath();
+                ctx.arc(toX(z[0]), toY(z[1]), 6, 0, Math.PI * 2);
+                ctx.fill();
+                ctx.strokeStyle = "white";
+                ctx.lineWidth = 2;
+                ctx.stroke();
+            }
+        }
+
+        function renderEncoderText() {
+            document.getElementById("mu1").textContent = mu[0].toFixed(3);
+            document.getElementById("mu2").textContent = mu[1].toFixed(3);
+            document.getElementById("ls1").textContent = logVar[0].toFixed(3);
+            document.getElementById("ls2").textContent = logVar[1].toFixed(3);
+            document.getElementById("s1").textContent = sigma[0].toFixed(3);
+            document.getElementById("s2").textContent = sigma[1].toFixed(3);
+            document.getElementById("e1").textContent = epsilon[0].toFixed(3);
+            document.getElementById("e2").textContent = epsilon[1].toFixed(3);
+            document.getElementById("z1").textContent = z[0].toFixed(3);
+            document.getElementById("z2").textContent = z[1].toFixed(3);
+        }
+
+        function runEncoder() {
+            const training = parseFloat(trainSlider.value);
+            const enc = computeEncoder(chosenDigit, training);
+            mu = enc.mu;
+            logVar = enc.logVar;
+            sigma = [Math.exp(0.5 * logVar[0]), Math.exp(0.5 * logVar[1])];
+            epsilon = [gauss(), gauss()];
+            z = [mu[0] + sigma[0] * epsilon[0], mu[1] + sigma[1] * epsilon[1]];
+            renderAll();
+        }
+
+        function renderAll() {
+            const training = parseFloat(trainSlider.value);
+            trainVal.textContent = training.toFixed(2);
+            renderPills();
+            setActivePanel();
+            renderDigitPicker();
+
+            if (mode === "encode") {
+                drawDigit(inputCanvas, PROTOS[chosenDigit]);
+                inputLabel.textContent = `digit = ${chosenDigit}`;
+            } else {
+                const ctx = inputCanvas.getContext("2d");
+                ctx.fillStyle = "#0f172a";
+                ctx.fillRect(0, 0, inputCanvas.width, inputCanvas.height);
+                ctx.fillStyle = "#64748b";
+                ctx.font = "16px monospace";
+                ctx.fillText("(no input)", 30, inputCanvas.height / 2);
+                inputLabel.textContent = "sampling z ~ N(0, I)";
+            }
+
+            renderEncoderText();
+            drawLatent();
+
+            const showDecode = mode === "generate" || stepIndex >= 4;
+            if (showDecode) {
+                const decoded = decodeFromZ(z, training);
+                drawDigit(decodedCanvas, decoded);
+                decodedLabel.textContent = mode === "generate" ? "x_hat (newly generated)" : "x_hat from z";
+
+                const recon = mode === "encode" ? reconLoss(PROTOS[chosenDigit], decoded) : 0;
+                const kl = klLoss(mu, logVar);
+                const total = recon + kl;
+                document.getElementById("recon-val").textContent = recon.toFixed(3);
+                document.getElementById("kl-val").textContent = kl.toFixed(3);
+                document.getElementById("total-val").textContent = total.toFixed(3);
+                lossDetail.textContent = mode === "encode"
+                    ? `Recon = -mean[x*log(x_hat) + (1-x)*log(1-x_hat)] over ${GRID * GRID} pixels. KL = -0.5 * sum(1 + log sigma^2 - mu^2 - sigma^2). Total L = Recon + KL.`
+                    : "In generation mode there is no input x, so we only display KL relative to the prior at the sampled z position.";
+            } else {
+                const ctx = decodedCanvas.getContext("2d");
+                ctx.fillStyle = "#0f172a";
+                ctx.fillRect(0, 0, decodedCanvas.width, decodedCanvas.height);
+                document.getElementById("recon-val").textContent = "0.000";
+                document.getElementById("kl-val").textContent = "0.000";
+                document.getElementById("total-val").textContent = "0.000";
+                lossDetail.textContent = "";
+                decodedLabel.textContent = "(decode happens in step 5)";
+            }
+
+            const explanations = mode === "encode" ? [
+                `Step 1: Take the input image x for digit ${chosenDigit}. The encoder will compress it into a low-dimensional latent code.`,
+                `Step 2: Encoder outputs mu = (${mu[0].toFixed(2)}, ${mu[1].toFixed(2)}) and log sigma^2 = (${logVar[0].toFixed(2)}, ${logVar[1].toFixed(2)}). This defines a Gaussian belief about z.`,
+                `Step 3: Reparameterize. Sample epsilon = (${epsilon[0].toFixed(2)}, ${epsilon[1].toFixed(2)}) from N(0, I), then z = mu + sigma * epsilon = (${z[0].toFixed(2)}, ${z[1].toFixed(2)}). Gradients flow through mu and sigma.`,
+                `Step 4: Visualize z in 2D latent space. Notice each digit prototype lives in its own region; encoder learned to put similar digits near each other.`,
+                `Step 5: Decoder maps z back to an image x_hat. Increasing training maturity produces sharper outputs.`,
+                `Step 6: Loss = Reconstruction (pixel-level fidelity) + KL (latent distribution stays close to N(0, I)). Optimizing this jointly is what makes the latent space smooth and generative.`,
+            ] : [
+                "Generation mode: no input x. We sample z directly from the prior N(0, I).",
+                "Encoder is unused during pure generation; mu, sigma values shown are from the previous encoded sample.",
+                `We sample z = (${z[0].toFixed(2)}, ${z[1].toFixed(2)}) from N(0, I) directly using the same shape as the encoder posterior.`,
+                "z is plotted in latent space. Position determines which digits the decoder will blend toward.",
+                "Decoder produces a brand new x_hat from z. This is how a trained VAE generates novel digits.",
+                "Reconstruction loss is undefined here because there is no target image; only KL relative to prior is shown for reference.",
+            ];
+            stepExplain.innerHTML = explanations[stepIndex];
+        }
+
+        document.getElementById("next-step-btn").addEventListener("click", () => {
+            stepIndex = (stepIndex + 1) % STEPS.length;
+            if (stepIndex === 0) {
+                mode = "encode";
+                runEncoder();
+                return;
+            }
+            renderAll();
+        });
+
+        document.getElementById("resample-btn").addEventListener("click", () => {
+            mode = "encode";
+            epsilon = [gauss(), gauss()];
+            z = [mu[0] + sigma[0] * epsilon[0], mu[1] + sigma[1] * epsilon[1]];
+            stepIndex = Math.max(stepIndex, 2);
+            renderAll();
+        });
+
+        document.getElementById("generate-btn").addEventListener("click", () => {
+            mode = "generate";
+            stepIndex = 4;
+            z = [gauss(), gauss()];
+            renderAll();
+        });
+
+        document.getElementById("reset-btn").addEventListener("click", () => {
+            mode = "encode";
+            stepIndex = 0;
+            runEncoder();
+        });
+
+        trainSlider.addEventListener("input", () => renderAll());
+
+        runEncoder();
+    </script>
+</body>
+
+</html>

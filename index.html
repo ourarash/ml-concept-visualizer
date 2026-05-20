@@ -597,6 +597,12 @@
                         </a>
                     </li>
                     <li>
+                        <a href="quantization/int8-quantization-calibration.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-purple-600">INT8 Quantization & Calibration Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Animate FP32 activations becoming integer bins while calibration range changes error and hardware efficiency</span>
+                        </a>
+                    </li>
+                    <li>
                         <a href="gpu/nvidia/cuda-snippets/cuda-streams.html" class="viz-link block p-3 rounded-lg">
                             <span class="font-semibold text-purple-600">CUDA Streams Visualizer</span>
                             <span class="text-gray-600 text-sm block mt-1">See how asynchronous transfers and kernels overlap across multiple streams</span>
@@ -620,7 +626,19 @@
                             <span class="text-gray-600 text-sm block mt-1">How accelerators communicate with the host CPU at high bandwidth</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="gpu/cpu-gpu-tpu-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-purple-600">CPU vs GPU vs TPU Architecture Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare architecture fit for branchy code, dense matmul, CNNs, and recommender workloads</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="gpu/nvidia/cuda-parallel-gradient-reduction.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-purple-600">CUDA Parallel Gradient Reduction</span>
+                            <span class="text-gray-600 text-sm block mt-1">Visualize thread blocks, reductions, and memory access patterns for gradient aggregation</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
 
@@ -693,7 +711,19 @@
                             <span class="text-gray-600 text-sm block mt-1">Dendrograms and hierarchical clustering methods</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="classical-ml-classification/dbscan-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-blue-600">DBSCAN Clustering Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore density-based clustering, core points, border points, noise, epsilon, and minPts</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="classical-ml-classification/naive-bayes-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-blue-600">Naive Bayes Classifier Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Step through class priors, likelihoods, and posterior decisions for Naive Bayes</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
 
@@ -780,7 +810,25 @@
                             <span class="text-gray-600 text-sm block mt-1">Multi-stage convolution filtering</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="cnn-architectures/padding-stride-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-green-600">CNN Padding &amp; Stride Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Adjust padding, stride, and kernel size to see convolution output geometry change</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="cnn-architectures/convolution-on-image.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-green-600">2D Convolution on Real Images</span>
+                            <span class="text-gray-600 text-sm block mt-1">Apply kernels to real image patches and inspect filtered outputs interactively</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="cnn-architectures/multi-channel-vs-3d-cnn-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-green-600">Multi-Channel CNN vs 3D CNN</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare how 2D multi-channel and 3D convolutions process spatial and channel dimensions</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
 
@@ -823,6 +871,84 @@
                             class="viz-link block p-3 rounded-lg">
                             <span class="font-semibold text-green-600">Backpropagation & Chain Rule</span>
                             <span class="text-gray-600 text-sm block mt-1">Trace forward values and backward gradients through a simple computation graph</span>
+                        </a>
+                    </li>
+                                    <li>
+                        <a href="fundamentals/knowledge-distillation.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-teal-600">Knowledge Distillation Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare teacher and student logits, soft targets, temperature, and deployment tradeoffs</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="fundamentals/weight-initialization.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-teal-600">Weight Initialization Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore how initialization affects activation variance, gradients, and quantization readiness</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="fundamentals/activation-loss-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-teal-600">Activation &amp; Loss Functions Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Inspect activation curves, gradients, and loss behavior across classification and regression tasks</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="fundamentals/bias-variance-overfitting-regularization.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-teal-600">Bias-Variance &amp; Regularization Explorer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Adjust model complexity and regularization to see bias, variance, and overfitting tradeoffs</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="fundamentals/random-forest-vs-gradient-boosting.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-teal-600">Random Forest vs Gradient Boosting</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare bagging and boosting behavior, tree ensembles, and error evolution</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="fundamentals/regression-model-zoo-outlier-sensitivity.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-teal-600">Regression Model Zoo &amp; Outlier Sensitivity</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare regression models and see how outliers affect fitted curves and errors</span>
+                        </a>
+                    </li>
+</ul>
+            </div>
+        </section>
+
+
+        <!-- Optimization & Training Dynamics -->
+        <section class="mb-12 catalog-section">
+            <div class="category-card bg-white rounded-xl shadow-md p-8 border-l-4 border-rose-500">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-12 h-12 bg-rose-100 rounded-lg flex items-center justify-center text-2xl">
+                        📉
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900">Optimization &amp; Training Dynamics</h2>
+                        <p class="text-gray-600 text-sm">Losses, optimizers, gradients, and training-time memory tradeoffs</p>
+                    </div>
+                </div>
+                <ul class="space-y-3">
+                    <li>
+                        <a href="gradient-descent/gradient-descent-explorer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-rose-600">Gradient Descent Explorer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare batch size, learning rate, convergence paths, and optimization stability</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="gradient-descent/loss-functions-explorer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-rose-600">Loss Functions Explorer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Step through chain-rule gradients and compare loss surfaces interactively</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="gradient-descent/optimizer-comparison.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-rose-600">Gradient Descent Variations Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare SGD, momentum, RMSProp, Adam, and related optimizer dynamics</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="gradient-descent/loss-landscape-skip-connections.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-rose-600">Loss Landscape: Why Skip Connections Matter</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore how residual paths affect optimization landscapes and gradient flow</span>
                         </a>
                     </li>
                 </ul>
@@ -990,7 +1116,7 @@
                         </a>
                     </li>
                     <li>
-                        <a href="nlp/transformers/flashattention_visualizer.html" class="viz-link block p-3 rounded-lg">
+                        <a href="nlp/transformers/flashattention-visualizer.html" class="viz-link block p-3 rounded-lg">
                             <span class="font-semibold text-indigo-600">FlashAttention Traffic Visualizer</span>
                             <span class="text-gray-600 text-sm block mt-1">Inspect tiled attention data movement and memory traffic across compute phases</span>
                         </a>
@@ -1073,7 +1199,133 @@
                             <span class="text-gray-600 text-sm block mt-1">Walk the timeline from N-grams and BoW through RNNs, attention, BERT, and GPT-style generation</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="nlp/tokenizer-bpe-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Tokenizer &amp; BPE Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Step through byte-pair encoding merges and see how text becomes model tokens</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/attention-patterns.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Sparse &amp; Local Attention Patterns</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare full, sparse, and local attention masks and their compute tradeoffs</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/positional-encoding-interactive.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Interactive Positional Encoding</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore sinusoidal encodings and how positions map into vector dimensions</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/deepseek-mla.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">DeepSeek Multi-Head Latent Attention</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare full KV caching with latent caching, RoPE slices, and sparse attention reads</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/llm-decoding-strategies-explorer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">LLM Decoding Strategies Explorer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare greedy, temperature, top-k, top-p, beam, contrastive, and speculative decoding</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/decoding-strategies.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Text Generation Decoding Strategies</span>
+                            <span class="text-gray-600 text-sm block mt-1">Visualize how decoding controls reshape next-token choices and sequence diversity</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/prefill-vs-decode.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Prefill vs Decode Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Contrast prompt prefill, token-by-token decode, KV cache growth, and arithmetic intensity</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/online-softmax.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Online Softmax Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Step through streaming softmax updates used by memory-efficient attention kernels</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/mixture-of-experts-routing.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Mixture of Experts Routing Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Watch tokens route through sparse experts and compare load-balancing behavior</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/mixture-of-experts.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Mixture of Experts Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore expert routing, capacity, and sparse activation in MoE models</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/mixture-of-depths.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Mixture of Depths vs MoE</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare token-skipping depth allocation against expert routing tradeoffs</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/rlhf-pipeline.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">RLHF Pipeline with InstructGPT Examples</span>
+                            <span class="text-gray-600 text-sm block mt-1">Trace instruction tuning, preference data, reward modeling, and policy optimization</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/activation-checkpointing.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Activation Checkpointing Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">See the memory-compute tradeoff from recomputing activations during backpropagation</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/flash-attention.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">FlashAttention Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare standard attention with tiled IO-aware attention execution</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/flashattention-visual-plus-math.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">FlashAttention Visual + Math</span>
+                            <span class="text-gray-600 text-sm block mt-1">Connect memory traffic diagrams with online softmax math and HBM/SRAM tiling</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/grpo.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">GRPO Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore group-relative policy optimization and reward normalization for LLM training</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/bert-vs-gpt-attention.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">BERT vs GPT Attention Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare bidirectional and causal attention patterns for encoder and decoder models</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/gqa-mqa.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">GQA &amp; MQA Visualization</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare grouped-query and multi-query attention KV sharing and memory cost</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/multi-head-attention-v2.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Multi-Head Attention Interactive Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Inspect multiple attention heads and how projections combine into contextual outputs</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/transformer-training-memory.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Transformer Training Memory Visualization</span>
+                            <span class="text-gray-600 text-sm block mt-1">Break down activation, parameter, optimizer, and gradient memory during training</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="nlp/transformers/lora-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">LoRA Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Visualize low-rank adaptation matrices and how they update frozen model weights</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
 
@@ -1114,7 +1366,25 @@
                             <span class="text-gray-600 text-sm block mt-1">Step through forward quantization noise, backward gradients, and post-training deployment</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="quantization/number-formats.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-cyan-600">Number Formats Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare numeric formats, ranges, precision, and quantization behavior</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="quantization/weight-quantization.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-cyan-600">Weight Quantization Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Inspect per-tensor and per-channel weight quantization and reconstruction error</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="quantization/pruning-llm-scaling.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-cyan-600">LLM Pruning &amp; Low-Resource Hardware</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore pruning as a deployment strategy for large models on constrained hardware</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
 
@@ -1256,7 +1526,13 @@
                             <span class="text-gray-600 text-sm block mt-1">Compare single-bank and multi-bank memory systems and their contention patterns</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="cache-optimization/cache-associativity.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-indigo-600">Cache Associativity Conflict Miss Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">See direct-mapped, set-associative, and fully associative cache conflict behavior</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
 
@@ -1333,6 +1609,90 @@
             </div>
         </section>
 
+
+        <!-- Recommender Systems -->
+        <section class="mb-12 catalog-section">
+            <div class="category-card bg-white rounded-xl shadow-md p-8 border-l-4 border-amber-500">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-12 h-12 bg-amber-100 rounded-lg flex items-center justify-center text-2xl">
+                        🎯
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900">Recommender Systems</h2>
+                        <p class="text-gray-600 text-sm">Sparse+dense recommendation models, embedding tables, and serving bottlenecks</p>
+                    </div>
+                </div>
+                <ul class="space-y-3">
+                    <li>
+                        <a href="recommender-systems/dlrm-memory-bandwidth.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-amber-600">DLRM Memory Bandwidth &amp; Compute</span>
+                            <span class="text-gray-600 text-sm block mt-1">Walk through a DLRM forward pass and watch the bottleneck flip between memory and compute</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+
+        <!-- Distributed &amp; Federated Learning -->
+        <section class="mb-12 catalog-section">
+            <div class="category-card bg-white rounded-xl shadow-md p-8 border-l-4 border-emerald-500">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-12 h-12 bg-emerald-100 rounded-lg flex items-center justify-center text-2xl">
+                        🌐
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900">Distributed &amp; Federated Learning</h2>
+                        <p class="text-gray-600 text-sm">Communication patterns, decentralized training, and privacy-preserving learning</p>
+                    </div>
+                </div>
+                <ul class="space-y-3">
+                    <li>
+                        <a href="federated-learning/federated-learning.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-emerald-600">Federated Learning Explorer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Experiment with FedAvg, secure aggregation, privacy, and decentralized training rounds</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="distributed-training/parameter-server-vs-ring-allreduce.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-emerald-600">Parameter Server vs Ring AllReduce</span>
+                            <span class="text-gray-600 text-sm block mt-1">Compare distributed training communication patterns and bottlenecks</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
+
+        <!-- Generative Models &amp; Evaluation -->
+        <section class="mb-12 catalog-section">
+            <div class="category-card bg-white rounded-xl shadow-md p-8 border-l-4 border-fuchsia-500">
+                <div class="flex items-center gap-3 mb-6">
+                    <div class="w-12 h-12 bg-fuchsia-100 rounded-lg flex items-center justify-center text-2xl">
+                        🎨
+                    </div>
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-900">Generative Models &amp; Evaluation</h2>
+                        <p class="text-gray-600 text-sm">Latent-variable generation and evaluation metrics for synthetic data</p>
+                    </div>
+                </div>
+                <ul class="space-y-3">
+                    <li>
+                        <a href="generative-modeling/fid-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-fuchsia-600">FID Evaluation Metric Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore Fréchet Inception Distance and distribution overlap for generated images</span>
+                        </a>
+                    </li>
+                    <li>
+                        <a href="generative-modeling/vae-mnist-visualizer.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-fuchsia-600">VAE Generation Simulation</span>
+                            <span class="text-gray-600 text-sm block mt-1">Interact with latent space sampling and reconstruction behavior in a VAE</span>
+                        </a>
+                    </li>
+                </ul>
+            </div>
+        </section>
+
         <!-- Performance Modeling -->
         <section class="mb-12 catalog-section">
             <div class="category-card bg-white rounded-xl shadow-md p-8">
@@ -1353,7 +1713,13 @@
                             <span class="text-gray-600 text-sm block mt-1">Visualize performance bounds and bottlenecks</span>
                         </a>
                     </li>
-                </ul>
+                                    <li>
+                        <a href="performance-modeling/pipeline-parallelism-bubbles.html" class="viz-link block p-3 rounded-lg">
+                            <span class="font-semibold text-pink-600">Pipeline Parallelism Bubble Visualizer</span>
+                            <span class="text-gray-600 text-sm block mt-1">Explore pipeline stages, microbatches, bubbles, and utilization tradeoffs</span>
+                        </a>
+                    </li>
+</ul>
             </div>
         </section>
     </main>

@@ -14,6 +14,10 @@ from urllib.parse import urlsplit
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "index.html"
+
+# This script checks repo/catalog consistency, not educational quality.
+# A page can pass this check and still need content review, or fail it because
+# of fixable integration issues such as a missing index entry or filename style.
 FILENAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*\.html$")
 TITLE_PATTERN = re.compile(r"<title>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 H1_PATTERN = re.compile(r"<h1\b[^>]*>(.*?)</h1>", re.IGNORECASE | re.DOTALL)
@@ -139,6 +143,7 @@ def meaningful_tokens(text: str) -> set[str]:
 
 
 def is_metadata_divergent(label: str, other: str) -> bool:
+    """Return True when catalog text and page metadata appear unrelated."""
     if not label or not other:
         return True
 
@@ -161,6 +166,8 @@ def local_href(href: str) -> bool:
 
 
 def collect_catalog_entries(index_text: str) -> list[CatalogEntry]:
+    # The catalog is the set of local <a class="viz-link"> entries in index.html.
+    # External links and hash-only anchors are ignored because they are not repo pages.
     parser = CatalogParser()
     parser.feed(index_text)
     return [entry for entry in parser.entries if local_href(entry.href)]
@@ -187,6 +194,9 @@ def main() -> int:
     catalog_entries = collect_catalog_entries(index_text)
     catalog_by_href = {entry.href: entry for entry in catalog_entries}
 
+    # Catalog entries should be unique. Duplicate hrefs are errors because they
+    # make the landing page ambiguous; duplicate titles are warnings because two
+    # related visualizations may legitimately use similar names.
     href_counts = Counter(entry.href for entry in catalog_entries)
     for href, count in sorted(href_counts.items()):
         if count > 1:
@@ -203,6 +213,8 @@ def main() -> int:
             errors.append(f"Broken index link: {entry.href}")
             continue
 
+        # Redirect stubs preserve old URLs, but the public catalog should point
+        # directly to the canonical visualization page.
         target_text = load_text(target)
         if is_redirect_stub(target_text):
             errors.append(f"Catalog points to redirect stub instead of canonical page: {entry.href}")
@@ -220,12 +232,17 @@ def main() -> int:
         text = load_text(path)
         redirect_stub = is_redirect_stub(text)
 
+        # Kebab-case filenames keep URLs predictable and match the existing
+        # visualization naming convention, e.g. "flash-attention.html".
         if not redirect_stub and not FILENAME_PATTERN.match(path.name):
             errors.append(f"Non-kebab-case filename: {rel_path}")
 
         if redirect_stub:
             continue
 
+        # Every real visualization page should be discoverable from index.html.
+        # This is the most common failure for student PRs that add a standalone
+        # HTML file but do not add it to the catalog.
         if rel_path not in catalog_by_href:
             errors.append(f"Page missing from index catalog: {rel_path}")
 
@@ -238,6 +255,9 @@ def main() -> int:
         if not h1:
             warnings.append(f"Missing H1: {rel_path}")
 
+        # The catalog label, <title>, and <h1> do not need to be identical, but
+        # they should describe the same visualization so browser tabs, search,
+        # and the landing page do not drift apart.
         if entry and title and is_metadata_divergent(entry.title, title):
             warnings.append(
                 f"Catalog/title drift: {rel_path} | catalog='{entry.title}' | title='{title}'"
@@ -247,9 +267,13 @@ def main() -> int:
                 f"Catalog/H1 drift: {rel_path} | catalog='{entry.title}' | h1='{h1}'"
             )
 
+        # Canvas pages with hard-coded dimensions often look broken on phones
+        # unless the script also resizes or redraws them.
         if CANVAS_TAG_PATTERN.search(text) and has_fixed_canvas_dimensions(text) and not has_resize_handler(text):
             warnings.append(f"Canvas page may be missing resize handling: {rel_path}")
 
+        # Flag obvious desktop-only inline layouts. This is intentionally a
+        # heuristic warning, not an error, because visual pages vary a lot.
         if has_fixed_desktop_layout(text):
             warnings.append(f"Page may use a fixed desktop-only layout: {rel_path}")
 

@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #6 by Azrin Khan (@azrin984): Add: Positional Encoding Explained with Examples; PR #17 by Azrin Khan (@azrin984): feat: Add Prefill vs Decode Visualizer. -->
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Positional Encoding Interactive Visual</title>
+  <style>
+    :root{
+      --bg:#f8fafc;
+      --card:#ffffff;
+      --text:#0f172a;
+      --muted:#64748b;
+      --line:#e2e8f0;
+      --line2:#cbd5e1;
+      --accent:#0f172a;
+      --soft:#f1f5f9;
+      --amber:#fef3c7;
+      --shadow:0 10px 30px rgba(15,23,42,.08);
+      --radius:22px;
+    }
+    *{box-sizing:border-box}
+    body{
+      margin:0;
+      font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif;
+      background:var(--bg);
+      color:var(--text);
+    }
+    .page{max-width:1280px;margin:0 auto;padding:28px}
+    .hero{margin-bottom:28px}
+    .badges{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:14px}
+    .badge{
+      padding:7px 12px;border:1px solid var(--line2);border-radius:999px;
+      background:#fff;font-size:12px;font-weight:700;color:#334155;
+    }
+    h1{font-size:clamp(32px,5vw,56px);line-height:1.02;margin:0 0 12px}
+    .hero p{max-width:900px;font-size:18px;line-height:1.7;color:var(--muted);margin:0}
+    .grid{display:grid;gap:16px}
+    .top-grid{grid-template-columns:2fr 1fr 1fr;margin:28px 0}
+    .card{
+      background:var(--card);border:1px solid var(--line);border-radius:30px;
+      box-shadow:var(--shadow);overflow:hidden;
+    }
+    .card h2,.card h3{margin:0}
+    .card-head{padding:22px 22px 8px}
+    .card-title{font-size:20px;font-weight:800}
+    .card-sub{font-size:14px;color:var(--muted);margin-top:6px;line-height:1.6}
+    .note{
+      margin-top:14px;padding:12px 14px;border:1px solid #bae6fd;background:#f0f9ff;
+      color:#075985;border-radius:16px;font-size:13px;line-height:1.6;
+    }
+    .card-body{padding:0 22px 22px}
+    .input{
+      width:100%;padding:14px 16px;border-radius:16px;border:1px solid var(--line2);
+      font-size:16px;outline:none;background:#fff;
+    }
+    .token-row{display:flex;gap:10px;flex-wrap:wrap;margin-top:14px}
+    .token-btn{
+      border:1px solid var(--line2);border-radius:16px;padding:10px 13px;
+      background:#fff;cursor:pointer;font-size:14px;transition:.18s transform,.18s box-shadow,.18s background;
+    }
+    .token-btn:hover{transform:translateY(-1px)}
+    .token-btn.active{background:#0f172a;color:#fff;box-shadow:0 8px 20px rgba(15,23,42,.18)}
+    .token-meta{opacity:.7}
+    .big-num{font-size:42px;font-weight:800;margin:2px 0 8px}
+    input[type="range"]{width:100%}
+    select{
+      width:100%;padding:14px;border-radius:16px;border:1px solid var(--line2);
+      font-size:15px;background:#fff;
+    }
+    .tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin:12px 0 22px}
+    .tab-btn{
+      border:1px solid var(--line2);background:#fff;padding:14px 16px;border-radius:18px;
+      font-weight:700;cursor:pointer;
+    }
+    .tab-btn.active{background:#0f172a;color:#fff}
+    .tab-panel{display:none}
+    .tab-panel.active{display:block}
+    .two-col{display:grid;grid-template-columns:1.1fr 1.9fr;gap:20px}
+    .vector-stack{display:grid;gap:14px}
+    .soft-box{
+      border:1px solid var(--line);background:var(--soft);border-radius:18px;padding:16px;
+      line-height:1.8;font-size:14px;color:#334155;
+    }
+    .mini-info{
+      display:flex;gap:12px;align-items:flex-start;border:1px solid var(--line);
+      border-radius:18px;padding:16px;
+    }
+    .mini-info .icon{
+      width:34px;height:34px;border-radius:12px;background:var(--soft);display:grid;place-items:center;font-weight:800
+    }
+    .vector-card{
+      border:1px solid var(--line);background:#fff;border-radius:22px;padding:14px;
+    }
+    .vector-title{
+      font-size:12px;text-transform:uppercase;letter-spacing:.08em;font-weight:800;color:#64748b;margin-bottom:10px
+    }
+    .vector-grid{
+      display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px
+    }
+    .heat{
+      height:48px;border-radius:14px;border:1px solid rgba(148,163,184,.45);
+      display:grid;place-items:center;font-size:11px;font-weight:700;
+    }
+    .flow{
+      text-align:center;color:#64748b;font-size:14px;padding:2px 0
+    }
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:22px;background:#fff}
+    table{width:100%;border-collapse:collapse}
+    th,td{padding:12px 14px;border-top:1px solid var(--line);text-align:left}
+    thead th{background:#f8fafc;color:#475569;border-top:none;font-size:13px}
+    tbody td{font-size:14px}
+    tbody tr.active{background:#f8fafc}
+    tbody tr.same{background:#fffbeb}
+    .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    .tri-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .subtle{color:var(--muted)}
+    .plot-card{padding:16px;border:1px solid var(--line);border-radius:22px;background:#fff}
+    .plot-head{display:flex;align-items:center;gap:10px;margin-bottom:10px;font-size:14px;font-weight:700;color:#334155}
+    .intuition{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+    .intuition .cell{border:1px solid var(--line);border-radius:18px;padding:16px;background:#fff}
+    .actions{display:flex;gap:12px;flex-wrap:wrap;margin-top:22px}
+    .btn{
+      border:1px solid var(--line2);background:#fff;color:#0f172a;padding:12px 16px;border-radius:16px;
+      cursor:pointer;font-weight:700;
+    }
+    .btn.primary{background:#0f172a;color:#fff}
+    .amber-box{background:var(--amber);border:1px solid #fcd34d;border-radius:18px;padding:16px;font-size:14px;line-height:1.8}
+    .compare-row{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+    .pill{display:inline-block;padding:4px 9px;border-radius:999px;font-size:12px;border:1px solid var(--line2);background:#fff}
+    @media (max-width: 1000px){
+      .top-grid,.two-col,.tri-grid,.intuition,.tabs{grid-template-columns:1fr}
+    }
+    @media (max-width: 700px){
+      .page{padding:18px}
+      .vector-grid{grid-template-columns:repeat(4,minmax(54px,1fr))}
+      th,td{padding:10px}
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <div class="badges">
+        <span class="badge">Transformer visual</span>
+        <span class="badge">Positional encoding</span>
+        <span class="badge">Interactive</span>
+      </div>
+      <h1>Positional Encoding, under a microscope 🔬</h1>
+      <p>
+        This interactive canvas shows how positional encoding works in transformers. Self-attention alone does not know token order, so each token embedding is combined with a position vector built from sine and cosine patterns. The result carries both word meaning and sequence order.
+      </p>
+    </section>
+
+    <section class="grid top-grid">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">1) Build your sentence</div>
+          <div class="card-sub">Use a repeated word like “cat” or “the” to see why the same word needs different position vectors.</div>
+        </div>
+        <div class="card-body">
+          <input id="sentenceInput" class="input" aria-label="Sentence input" />
+          <div id="tokenRow" class="token-row"></div>
+          <div class="note">
+            Note: token embeddings in this demo are simulated with a deterministic function so the visualization is stable. In real transformer models, token embeddings are learned during training.
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">2) Embedding size D</div>
+          <div class="card-sub">Even dimensions use sine. Odd dimensions use cosine.</div>
+        </div>
+        <div class="card-body">
+          <div class="big-num">D = <span id="dValue">8</span></div>
+          <input id="dSlider" type="range" min="4" max="16" step="2" value="8" aria-label="Embedding dimension slider"/>
+          <div class="card-sub" style="margin-top:10px">Bigger D means more coordinate slots to store position patterns.</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">3) Focus dimension</div>
+          <div class="card-sub">Watch one coordinate wiggle across positions.</div>
+        </div>
+        <div class="card-body">
+          <select id="dimSelect" aria-label="Focus dimension selector"></select>
+          <div class="card-sub" style="margin-top:10px">The chosen dimension is currently <b id="dimLabel">d0</b>.</div>
+        </div>
+      </div>
+    </section>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="single">Single token walk-through</button>
+      <button class="tab-btn" data-tab="sameword">Same word, different position</button>
+      <button class="tab-btn" data-tab="matrix">Full positional matrix</button>
+      <button class="tab-btn" data-tab="wave">Wave behavior by dimension</button>
+    </div>
+
+    <section id="single" class="tab-panel active">
+      <div class="two-col">
+        <div class="card">
+          <div class="card-head">
+            <div id="singleTitle" class="card-title">Step-by-step</div>
+            <div class="card-sub">This is the exact add operation the lecture highlights.</div>
+          </div>
+          <div class="card-body">
+            <div class="soft-box">
+              <div><b>Word meaning vector</b> comes from the token embedding.</div>
+              <div><b>Position vector</b> comes from the sinusoidal formula at this position.</div>
+              <div><b>Final input to the transformer</b> is their elementwise sum.</div>
+            </div>
+            <div class="mini-info" style="margin-top:14px">
+              <div class="icon">T</div>
+              <div>
+                <div><b>Selected token</b></div>
+                <div id="selectedMeta" class="subtle"></div>
+              </div>
+            </div>
+            <div class="mini-info" style="margin-top:14px">
+              <div class="icon">ƒ</div>
+              <div>
+                <div><b>Formula used at each coordinate</b></div>
+                <div class="mono subtle" style="font-size:12px;line-height:1.7">PE(pos, 2i)=sin(pos / 10000^(2i/D)), PE(pos, 2i+1)=cos(pos / 10000^(2i/D))</div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="vector-stack">
+          <div id="embVec" class="vector-card"></div>
+          <div class="flow">＋ add position vector</div>
+          <div id="peVec" class="vector-card"></div>
+          <div class="flow">→ result sent into attention</div>
+          <div id="sumVec" class="vector-card"></div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="card-head">
+          <div class="card-title">Coordinate-by-coordinate addition</div>
+          <div class="card-sub">Each slot in the vector gets its own tiny addition.</div>
+        </div>
+        <div class="card-body">
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Dim</th>
+                  <th>Token emb</th>
+                  <th>PE</th>
+                  <th>Sum</th>
+                  <th>Interpretation</th>
+                </tr>
+              </thead>
+              <tbody id="coordBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="sameword" class="tab-panel">
+      <div class="grid tri-grid" style="grid-template-columns:1fr 1fr">
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">Why the same word needs different encodings</div>
+            <div class="card-sub">Without position, repeated words are twins wearing identical jerseys. With position, each one gets a different coordinate fingerprint.</div>
+          </div>
+          <div class="card-body">
+            <div id="repeatBox" class="amber-box"></div>
+            <div id="sameBase" class="vector-card" style="margin-top:14px"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">Two copies, two different final vectors</div>
+            <div class="card-sub">The word vector is the same. Only the positional vector changes.</div>
+          </div>
+          <div class="card-body">
+            <div id="leftPE" class="vector-card"></div>
+            <div id="rightPE" class="vector-card" style="margin-top:14px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="grid tri-grid" style="margin-top:20px;grid-template-columns:1fr 1fr">
+        <div id="leftCombined" class="vector-card"></div>
+        <div id="rightCombined" class="vector-card"></div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="card-head">
+          <div class="card-title">Difference vector</div>
+          <div class="card-sub">Notice how the word meaning stayed the same, but the final vector changed because the position channels changed.</div>
+        </div>
+        <div class="card-body">
+          <div id="diffVec" class="vector-grid"></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="matrix" class="tab-panel">
+      <div class="card">
+        <div class="card-head">
+          <div class="card-title">Positional encoding as a matrix</div>
+          <div class="card-sub">Each row is a token position. Each column is a vector dimension. No single scalar position value is added. A whole vector is added.</div>
+        </div>
+        <div class="card-body">
+          <div class="table-wrap">
+            <table>
+              <thead><tr id="matrixHead"></tr></thead>
+              <tbody id="matrixBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="card-head">
+          <div class="card-title">Pick another position to compare</div>
+          <div class="card-sub">Great for watching how nearby positions differ only a bit, while farther positions drift more.</div>
+        </div>
+        <div class="card-body">
+          <div class="compare-row">
+            <span class="subtle">Compare current selected position <b id="currPosLabel"></b> with</span>
+            <select id="compareSelect" style="width:180px" aria-label="Compare position selector"></select>
+          </div>
+          <div class="tri-grid">
+            <div id="compareA" class="vector-card"></div>
+            <div id="compareB" class="vector-card"></div>
+            <div id="compareDiff" class="vector-card"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="wave" class="tab-panel">
+      <div class="two-col" style="grid-template-columns:1.9fr 1.1fr">
+        <div class="plot-card">
+          <div class="plot-head">~ Dimension <span id="waveDim">0</span> uses <b id="waveType">sin</b></div>
+          <svg id="plotSvg" viewBox="0 0 760 240" style="width:100%"></svg>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="card-title">What this wave is telling you</div>
+            <div class="card-sub">The model does not use one giant position number. It uses many coordinated wave channels.</div>
+          </div>
+          <div class="card-body" style="line-height:1.85;color:var(--muted);font-size:14px">
+            <div>• Even dimensions are sine, odd dimensions are cosine.</div>
+            <div>• Different dimensions change at different rates, so position 3 and position 4 look similar but not identical.</div>
+            <div>• Combining many such channels makes each position act like a small frequency fingerprint.</div>
+            <div>• That is why transformers can tell order apart even though self-attention itself does not naturally know sequence order.</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:20px">
+        <div class="card-head">
+          <div class="card-title">Quick intuition panel</div>
+          <div class="card-sub">Why not a simple monotonic or single periodic function?</div>
+        </div>
+        <div class="card-body">
+          <div class="intuition">
+            <div class="cell">
+              <div><b>Only word embedding</b></div>
+              <div class="subtle" style="margin-top:8px">The model knows what the token is, but not where it is. Order becomes foggy.</div>
+            </div>
+            <div class="cell">
+              <div><b>One monotonic position value</b></div>
+              <div class="subtle" style="margin-top:8px">Values can grow too large and become numerically awkward. One scalar is also too skinny to mix richly with a D-dimensional embedding.</div>
+            </div>
+            <div class="cell">
+              <div><b>Many sinusoidal channels</b></div>
+              <div class="subtle" style="margin-top:8px">Stable values, multiple frequencies, smooth relative shifts, and a distinctive pattern for each position.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="resetBtn" class="btn primary">Reset demo</button>
+      <button id="randomBtn" class="btn">Random example</button>
+    </div>
+  </div>
+
+  <script>
+    /*
+      Educational goal:
+      Help EE508 students understand why transformers need positional encoding,
+      how sinusoidal position vectors are computed, and how those vectors are
+      added to token embeddings before self-attention.
+    */
+    const DEFAULT_SENTENCE = 'the white cat and the brown cat sat on the mat';
+    const state = {
+      sentence: DEFAULT_SENTENCE,
+      D: 8,
+      selectedPos: 2,
+      comparePos: 6,
+      selectedDim: 0,
+      activeTab: 'single'
+    };
+
+    const tokenColors = [
+      '#e0f2fe','#ede9fe','#d1fae5','#fef3c7','#ffe4e6','#cffafe','#fae8ff','#fed7aa'
+    ];
+
+    function clamp(v, min, max){ return Math.max(min, Math.min(max, v)); }
+    function tokenize(sentence){
+      const tokens = sentence.trim().split(/\s+/).filter(Boolean).slice(0, 18);
+      return tokens.length ? tokens : ['token'];
+    }
+    function uniqueWords(tokens){ return [...new Set(tokens)]; }
+
+    // Creates a deterministic "fake" token embedding for the selected word.
+    // This is only for visualization. Real transformer embeddings are learned.
+    function pseudoEmbedding(word, D){
+      let seed = 0;
+      for(let i=0;i<word.length;i++) seed = (seed * 31 + word.charCodeAt(i)) % 1000003;
+      const out = [];
+      for(let d=0; d<D; d++){
+        const x = Math.sin(seed * (d + 1) * 0.013 + (d + 1) * 0.71) + Math.cos(seed * 0.007 + d * 0.37);
+        out.push(Number((x * 0.45).toFixed(3)));
+      }
+      return out;
+    }
+
+    // Generate sinusoidal positional encoding as used in Transformers.
+    // Even dimensions use sine and odd dimensions use cosine.
+    function positionalEncoding(pos, D, n = 10000){
+      const pe = [];
+      for(let j=0;j<D;j++){
+        const i = Math.floor(j / 2);
+        const denom = Math.pow(n, (2 * i) / D);
+        if(j % 2 === 0) pe.push(Number(Math.sin(pos / denom).toFixed(3)));
+        else pe.push(Number(Math.cos(pos / denom).toFixed(3)));
+      }
+      return pe;
+    }
+
+    // Add the token embedding and positional encoding element-by-element.
+    function addVec(a, b){ return a.map((v, i) => Number((v + b[i]).toFixed(3))); }
+    function fmt(v){ return v >= 0 ? `+${v.toFixed(3)}` : v.toFixed(3); }
+
+    function heatBackground(value){
+      const alpha = Math.min(1, Math.abs(value));
+      const positive = value >= 0;
+      return positive ? `rgba(34,197,94,${0.12 + alpha * 0.6})` : `rgba(239,68,68,${0.12 + alpha * 0.6})`;
+    }
+
+    function renderVector(container, title, values){
+      container.innerHTML = `
+        <div class="vector-title">${title}</div>
+        <div class="vector-grid">
+          ${values.map(v => `<div class="heat" style="background:${heatBackground(v)}">${Number(v).toFixed(2)}</div>`).join('')}
+        </div>
+      `;
+    }
+
+    function renderDiffGrid(container, values){
+      container.innerHTML = values.map(v => `<div class="heat" style="background:${heatBackground(v)}">${Number(v).toFixed(2)}</div>`).join('');
+    }
+
+    function buildDimSelect(){
+      const sel = document.getElementById('dimSelect');
+      sel.innerHTML = '';
+      for(let d=0; d<state.D; d++){
+        const opt = document.createElement('option');
+        opt.value = d;
+        opt.textContent = `dimension ${d} ${d % 2 === 0 ? '(sin)' : '(cos)'}`;
+        if(d === state.selectedDim) opt.selected = true;
+        sel.appendChild(opt);
+      }
+    }
+
+    function buildCompareSelect(tokens){
+      const sel = document.getElementById('compareSelect');
+      sel.innerHTML = '';
+      tokens.forEach((_, i) => {
+        const opt = document.createElement('option');
+        opt.value = i;
+        opt.textContent = `position ${i}`;
+        if(i === state.comparePos) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    }
+
+    function renderTokens(tokens){
+      const row = document.getElementById('tokenRow');
+      row.innerHTML = '';
+      tokens.forEach((tok, i) => {
+        const btn = document.createElement('button');
+        btn.className = 'token-btn' + (i === state.selectedPos ? ' active' : '');
+        if(i !== state.selectedPos){
+          btn.style.background = tokenColors[i % tokenColors.length];
+        }
+        btn.innerHTML = `${tok} <span class="token-meta">@${i}</span>`;
+        btn.onclick = () => { state.selectedPos = i; render(); };
+        row.appendChild(btn);
+      });
+    }
+
+    function renderPlot(D, selectedDim, maxPos){
+      const svg = document.getElementById('plotSvg');
+      const width = 760, height = 240, pad = 24;
+      const isEven = selectedDim % 2 === 0;
+      document.getElementById('waveDim').textContent = selectedDim;
+      document.getElementById('waveType').textContent = isEven ? 'sin' : 'cos';
+      let grid = '';
+      for(let i=0;i<6;i++){
+        const x = pad + (i / 5) * (width - pad * 2);
+        grid += `<line x1="${x}" x2="${x}" y1="${pad}" y2="${height - pad}" stroke="#e2e8f0" stroke-dasharray="4 5"/>`;
+      }
+      [1,0.5,0,-0.5,-1].forEach(v => {
+        const y = height / 2 - v * 82;
+        grid += `<line x1="${pad}" x2="${width - pad}" y1="${y}" y2="${y}" stroke="#e2e8f0" stroke-dasharray="4 5"/>`;
+      });
+      const pts = [];
+      for(let pos=0; pos<=maxPos; pos++){
+        const yVal = positionalEncoding(pos, D)[selectedDim];
+        const x = pad + (pos / maxPos) * (width - pad * 2);
+        const y = height / 2 - yVal * 82;
+        pts.push(`${x},${y}`);
+      }
+      svg.innerHTML = `
+        <line x1="${pad}" x2="${width - pad}" y1="${height/2}" y2="${height/2}" stroke="#94a3b8" stroke-width="1.5"/>
+        <line x1="${pad}" x2="${pad}" y1="${pad}" y2="${height-pad}" stroke="#94a3b8" stroke-width="1.5"/>
+        ${grid}
+        <polyline fill="none" stroke="#0f172a" stroke-width="3" points="${pts.join(' ')}"/>
+        <text x="${width - 48}" y="${height/2 - 8}" font-size="12" fill="#475569">PE</text>
+        <text x="${pad + 4}" y="16" font-size="11" fill="#64748b">value</text>
+        <text x="${width - 28}" y="${height - 8}" font-size="11" fill="#64748b">pos</text>
+      `;
+    }
+
+    function renderMatrix(tokens, D, highlightedWord, selectedPos){
+      const head = document.getElementById('matrixHead');
+      const body = document.getElementById('matrixBody');
+      head.innerHTML = `<th>Pos</th><th>Word</th>${Array.from({length:D}).map((_,d)=>`<th>d${d}</th>`).join('')}`;
+      body.innerHTML = tokens.map((tok, pos) => {
+        const same = tok === highlightedWord;
+        const active = pos === selectedPos;
+        const pe = positionalEncoding(pos, D);
+        return `
+          <tr class="${active ? 'active' : same ? 'same' : ''}">
+            <td>${pos}</td>
+            <td>${tok} ${same ? '<span class="pill">same word</span>' : ''} ${active ? '<span class="pill">selected</span>' : ''}</td>
+            ${pe.map(v => `<td class="mono" style="font-size:12px">${v.toFixed(3)}</td>`).join('')}
+          </tr>
+        `;
+      }).join('');
+    }
+
+    function render(){
+      const tokens = tokenize(state.sentence);
+      const words = uniqueWords(tokens);
+      const maxPos = Math.max(tokens.length - 1, 1);
+
+      state.selectedPos = clamp(state.selectedPos, 0, maxPos);
+      state.comparePos = clamp(state.comparePos, 0, maxPos);
+      state.selectedDim = clamp(state.selectedDim, 0, state.D - 1);
+
+      document.getElementById('sentenceInput').value = state.sentence;
+      document.getElementById('dValue').textContent = state.D;
+      document.getElementById('dSlider').value = state.D;
+      document.getElementById('dimLabel').textContent = `d${state.selectedDim}`;
+
+      buildDimSelect();
+      buildCompareSelect(tokens);
+      renderTokens(tokens);
+
+      const selectedWord = tokens[state.selectedPos] ?? tokens[0] ?? 'token';
+      const emb = pseudoEmbedding(selectedWord, state.D);
+      const pe = positionalEncoding(state.selectedPos, state.D);
+      const combined = addVec(emb, pe);
+
+      const compareWord = tokens[state.comparePos] ?? selectedWord;
+      const compareEmb = pseudoEmbedding(compareWord, state.D);
+      const comparePe = positionalEncoding(state.comparePos, state.D);
+      const compareCombined = addVec(compareEmb, comparePe);
+
+      document.getElementById('singleTitle').innerHTML = `Step-by-step for token <span class="mono">"${selectedWord}"</span> at position ${state.selectedPos}`;
+      document.getElementById('selectedMeta').textContent = `${selectedWord} at index ${state.selectedPos}`;
+      renderVector(document.getElementById('embVec'), `1. Token embedding of "${selectedWord}"`, emb);
+      renderVector(document.getElementById('peVec'), `2. Positional encoding at pos = ${state.selectedPos}`, pe);
+      renderVector(document.getElementById('sumVec'), `3. Final input embedding = token embedding + PE`, combined);
+
+      document.getElementById('coordBody').innerHTML = Array.from({length:state.D}).map((_, d) => `
+        <tr ${d === state.selectedDim ? 'class="same"' : ''}>
+          <td><b>d${d}</b></td>
+          <td class="mono">${fmt(emb[d])}</td>
+          <td class="mono">${fmt(pe[d])}</td>
+          <td class="mono"><b>${fmt(combined[d])}</b></td>
+          <td class="subtle">${d % 2 === 0 ? 'sine channel' : 'cosine channel'} with scale based on dimension group</td>
+        </tr>
+      `).join('');
+
+      let duplicatedWord = tokens[0] || 'the';
+      for(const w of words){
+        if(tokens.filter(t => t === w).length > 1){ duplicatedWord = w; break; }
+      }
+      const dupPositions = tokens.map((t,i) => t === duplicatedWord ? i : -1).filter(x => x >= 0);
+      const leftDupPos = dupPositions[0] ?? 0;
+      const rightDupPos = dupPositions[1] ?? Math.min(1, maxPos);
+      const sameWordBase = pseudoEmbedding(duplicatedWord, state.D);
+      const leftPE = positionalEncoding(leftDupPos, state.D);
+      const rightPE = positionalEncoding(rightDupPos, state.D);
+      const leftCombined = addVec(sameWordBase, leftPE);
+      const rightCombined = addVec(sameWordBase, rightPE);
+
+      document.getElementById('repeatBox').innerHTML = `Repeated word detected: <b>"${duplicatedWord}"</b>. We compare it at positions <b>${leftDupPos}</b> and <b>${rightDupPos}</b>.`;
+      renderVector(document.getElementById('sameBase'), `Base word embedding for "${duplicatedWord}"`, sameWordBase);
+      renderVector(document.getElementById('leftPE'), `PE for pos ${leftDupPos}`, leftPE);
+      renderVector(document.getElementById('rightPE'), `PE for pos ${rightDupPos}`, rightPE);
+      renderVector(document.getElementById('leftCombined'), `Final embedding for "${duplicatedWord}" at pos ${leftDupPos}`, leftCombined);
+      renderVector(document.getElementById('rightCombined'), `Final embedding for "${duplicatedWord}" at pos ${rightDupPos}`, rightCombined);
+      renderDiffGrid(document.getElementById('diffVec'), leftCombined.map((v, i) => Number((v - rightCombined[i]).toFixed(3))));
+
+      renderMatrix(tokens, state.D, duplicatedWord, state.selectedPos);
+      document.getElementById('currPosLabel').textContent = state.selectedPos;
+      renderVector(document.getElementById('compareA'), `${selectedWord} @ ${state.selectedPos}`, combined);
+      renderVector(document.getElementById('compareB'), `${compareWord} @ ${state.comparePos}`, compareCombined);
+      renderVector(document.getElementById('compareDiff'), `difference`, combined.map((v, i) => Number((v - compareCombined[i]).toFixed(3))));
+
+      renderPlot(state.D, state.selectedDim, Math.max(maxPos, 12));
+
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.toggle('active', btn.dataset.tab === state.activeTab);
+      });
+      document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.toggle('active', panel.id === state.activeTab);
+      });
+    }
+
+    document.getElementById('sentenceInput').addEventListener('input', e => {
+      state.sentence = e.target.value;
+      render();
+    });
+    document.getElementById('dSlider').addEventListener('input', e => {
+      state.D = Number(e.target.value);
+      if(state.selectedDim >= state.D) state.selectedDim = state.D - 1;
+      render();
+    });
+    document.getElementById('dimSelect').addEventListener('change', e => {
+      state.selectedDim = Number(e.target.value);
+      render();
+    });
+    document.getElementById('compareSelect').addEventListener('change', e => {
+      state.comparePos = Number(e.target.value);
+      render();
+    });
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        state.activeTab = btn.dataset.tab;
+        render();
+      });
+    });
+    document.getElementById('resetBtn').addEventListener('click', () => {
+      state.sentence = DEFAULT_SENTENCE;
+      state.D = 8;
+      state.selectedPos = 2;
+      state.comparePos = 6;
+      state.selectedDim = 0;
+      state.activeTab = 'single';
+      render();
+    });
+    document.getElementById('randomBtn').addEventListener('click', () => {
+      const samples = [
+        'the cat chased the cat',
+        'i love transformers because transformers love patterns',
+        'a token at the start is not the same as a token at the end'
+      ];
+      state.sentence = samples[Math.floor(Math.random() * samples.length)];
+      render();
+    });
+
+    render();
+  </script>
+</body>
+</html>

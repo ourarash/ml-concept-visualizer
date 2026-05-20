@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #33 by bkrhee (@bkrhee): feat: add quantization visualization suite (number formats + weight q…. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Floating-Point Formats for ML</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0f172a; color: #e2e8f0; font-family: 'Inter', sans-serif; }
+        .bit-cell {
+            width: 22px; height: 34px;
+            display: inline-flex; align-items: center; justify-content: center;
+            font-family: monospace; font-size: 13px; font-weight: 700;
+            border-radius: 4px; border: 1.5px solid rgba(255,255,255,0.15);
+            cursor: default; transition: transform 0.15s, box-shadow 0.15s;
+            user-select: none;
+        }
+        .bit-cell:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
+        .bit-sign   { background: #7f1d1d; border-color: #ef4444; color: #fca5a5; }
+        .bit-exp    { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+        .bit-man    { background: #14532d; border-color: #22c55e; color: #86efac; }
+        .bit-int    { background: #3b1f6e; border-color: #a855f7; color: #d8b4fe; }
+        .format-card {
+            background: rgba(255,255,255,0.05);
+            border: 1px solid rgba(255,255,255,0.1);
+            border-radius: 14px;
+            padding: 20px;
+            transition: border-color 0.2s;
+        }
+        .format-card.active { border-color: #6366f1; box-shadow: 0 0 0 1px #6366f1; }
+        .range-bar {
+            height: 10px; border-radius: 5px;
+            background: linear-gradient(90deg, #1e3a5f, #3b82f6);
+            transition: width 0.5s ease;
+        }
+        .range-bar.precision { background: linear-gradient(90deg, #14532d, #22c55e); }
+        input[type=range] {
+            -webkit-appearance: none; width: 100%; height: 6px;
+            background: #334155; border-radius: 5px; outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 20px; height: 20px;
+            background: #6366f1; cursor: pointer; border-radius: 50%;
+        }
+        .tag { font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 9999px; text-transform: uppercase; letter-spacing: 0.08em; }
+        .tag-blue  { background: #1e3a8a; color: #93c5fd; }
+        .tag-green { background: #14532d; color: #86efac; }
+        .tag-red   { background: #7f1d1d; color: #fca5a5; }
+        .tag-purple{ background: #3b1f6e; color: #d8b4fe; }
+        .tooltip-row td { padding: 4px 8px; font-size: 12px; }
+        .gap-px { gap: 2px; }
+    </style>
+</head>
+<body class="min-h-screen p-4 lg:p-8">
+
+<div class="max-w-5xl mx-auto">
+
+    <!-- Header -->
+    <div class="mb-8">
+        <a href="../index.html" class="text-slate-500 hover:text-slate-300 text-sm mb-2 inline-block">← Back to Catalog</a>
+        <h1 class="text-3xl font-bold text-white">Floating-Point Formats for ML</h1>
+        <p class="text-slate-400 mt-1">See exactly which bits represent sign, exponent, and mantissa — and why the choice of format matters for hardware efficiency.</p>
+    </div>
+
+    <!-- Number input + live decode -->
+    <div class="format-card mb-6">
+        <div class="flex flex-wrap items-center gap-4">
+            <label class="text-sm text-slate-400 font-semibold whitespace-nowrap">Enter a value:</label>
+            <input id="num-input" type="number" value="3.14159" step="any"
+                class="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-white font-mono text-sm w-36 focus:outline-none focus:border-indigo-500"/>
+            <input id="num-slider" type="range" min="-10" max="10" step="0.01" value="3.14159" class="flex-1 min-w-32"/>
+            <span class="tag tag-blue">Type any float</span>
+        </div>
+        <p class="text-slate-500 text-xs mt-2">Slide or type to watch all four formats update in real time.</p>
+    </div>
+
+    <!-- Format rows -->
+    <div id="formats-container" class="space-y-4 mb-8"></div>
+
+    <!-- Side-by-side comparison table -->
+    <div class="format-card mb-8">
+        <h2 class="text-lg font-bold text-white mb-4">Format Properties at a Glance</h2>
+        <div class="overflow-x-auto">
+            <table class="w-full text-sm">
+                <thead>
+                    <tr class="text-slate-400 border-b border-slate-700">
+                        <th class="text-left py-2 px-3">Format</th>
+                        <th class="text-center py-2 px-3">Total bits</th>
+                        <th class="text-center py-2 px-3">Sign</th>
+                        <th class="text-center py-2 px-3">Exponent</th>
+                        <th class="text-center py-2 px-3">Mantissa</th>
+                        <th class="text-center py-2 px-3">Max range</th>
+                        <th class="text-center py-2 px-3">Precision (decimal digits)</th>
+                        <th class="text-center py-2 px-3">Typical use</th>
+                    </tr>
+                </thead>
+                <tbody id="compare-table" class="text-slate-300"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Range bars -->
+    <div class="format-card mb-8">
+        <h2 class="text-lg font-bold text-white mb-1">Relative Range vs. Precision</h2>
+        <p class="text-slate-400 text-sm mb-4">BF16 keeps the same exponent width as FP32, preserving dynamic range — but sacrifices mantissa bits for precision.</p>
+        <div class="space-y-5" id="bar-container"></div>
+    </div>
+
+    <!-- Key insight cards -->
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <div class="format-card">
+            <div class="text-2xl mb-2">🎯</div>
+            <h3 class="font-bold text-white mb-1">Why BF16 beats FP16 for training</h3>
+            <p class="text-slate-400 text-sm">FP16 has only 5 exponent bits → tiny range → frequent overflow during gradient updates. BF16 has 8 exponent bits (same as FP32), so gradient magnitudes stay representable without loss-scaling hacks.</p>
+        </div>
+        <div class="format-card">
+            <div class="text-2xl mb-2">⚡</div>
+            <h3 class="font-bold text-white mb-1">Why INT8 is fastest for inference</h3>
+            <p class="text-slate-400 text-sm">Integer ops skip the floating-point unit entirely. An A100 delivers <strong class="text-white">2× more INT8 TOPS than FP16 TFLOPS</strong>. INT8 also halves memory bandwidth vs FP16, a key bottleneck for LLM decoding.</p>
+        </div>
+        <div class="format-card">
+            <div class="text-2xl mb-2">🔢</div>
+            <h3 class="font-bold text-white mb-1">The exponent bias</h3>
+            <p class="text-slate-400 text-sm">Exponents are stored unsigned with a bias (127 for FP32, 15 for FP16). Actual exponent = stored value − bias. This lets the bit pattern sort naturally while representing both tiny and huge numbers.</p>
+        </div>
+        <div class="format-card">
+            <div class="text-2xl mb-2">📉</div>
+            <h3 class="font-bold text-white mb-1">Memory bandwidth savings</h3>
+            <p class="text-slate-400 text-sm">A 7B parameter model: FP32 ≈ 28 GB, FP16/BF16 ≈ 14 GB, INT8 ≈ 7 GB, INT4 ≈ 3.5 GB. Halving bit-width halves the bandwidth needed to stream weights — directly raising arithmetic intensity on the roofline.</p>
+        </div>
+    </div>
+
+</div>
+
+<script>
+const FORMATS = [
+    {
+        id: 'fp32', name: 'FP32', label: 'float32', bits: 32,
+        signBits: 1, expBits: 8, manBits: 23, bias: 127,
+        maxRange: '~3.4 × 10³⁸', precDigits: '~7', use: 'Training (reference)',
+        tagClass: 'tag-blue', color: '#3b82f6',
+        description: 'The standard 32-bit IEEE 754 format. Full precision for training; too slow and large for most inference.'
+    },
+    {
+        id: 'fp16', name: 'FP16', label: 'float16', bits: 16,
+        signBits: 1, expBits: 5, manBits: 10, bias: 15,
+        maxRange: '~6.5 × 10⁴', precDigits: '~3.3', use: 'Mixed-precision training / inference',
+        tagClass: 'tag-green', color: '#22c55e',
+        description: 'Half the memory of FP32. Narrow exponent range (5 bits) can cause overflow; usually paired with loss scaling.'
+    },
+    {
+        id: 'bf16', name: 'BF16', label: 'bfloat16', bits: 16,
+        signBits: 1, expBits: 8, manBits: 7, bias: 127,
+        maxRange: '~3.4 × 10³⁸', precDigits: '~2.3', use: 'Training on TPUs / A100+',
+        tagClass: 'tag-purple', color: '#a855f7',
+        description: 'Brain Float 16 — same exponent width as FP32, fewer mantissa bits. Preferred on modern accelerators for stable training.'
+    },
+    {
+        id: 'int8', name: 'INT8', label: 'int8 / uint8', bits: 8,
+        signBits: 1, expBits: 0, manBits: 7, bias: 0,
+        maxRange: '−128 … 127', precDigits: 'Exact (integer)', use: 'Post-training quantization',
+        tagClass: 'tag-red', color: '#ef4444',
+        description: 'Fixed-point integer. No exponent field. Requires calibration (scale + zero-point) to map float weights into this range before deployment.'
+    },
+];
+
+function encodeFloat(value, expBits, manBits, bias) {
+    if (expBits === 0) {
+        const clamped = Math.max(-128, Math.min(127, Math.round(value)));
+        const bits = ((clamped + 256) & 0xff);
+        return bits;
+    }
+    if (value === 0) return 0;
+    const sign = value < 0 ? 1 : 0;
+    const absVal = Math.abs(value);
+    let exp = Math.floor(Math.log2(absVal));
+    const maxExp = (1 << expBits) - 2 - bias;
+    const minExp = 1 - bias;
+    exp = Math.max(minExp, Math.min(maxExp, exp));
+    const mantissa = absVal / Math.pow(2, exp) - 1;
+    const manMax = (1 << manBits) - 1;
+    const manBitsVal = Math.min(manMax, Math.round(mantissa * (1 << manBits)));
+    const expBiased = exp + bias;
+    return (sign << (expBits + manBits)) | (expBiased << manBits) | manBitsVal;
+}
+
+function decodeBits(encoded, expBits, manBits, bias) {
+    if (expBits === 0) {
+        const v = encoded & 0xff;
+        return v > 127 ? v - 256 : v;
+    }
+    const totalBits = 1 + expBits + manBits;
+    const sign = (encoded >> (expBits + manBits)) & 1;
+    const expMask = (1 << expBits) - 1;
+    const manMask = (1 << manBits) - 1;
+    const expVal = (encoded >> manBits) & expMask;
+    const manVal = encoded & manMask;
+    if (expVal === expMask) return sign ? -Infinity : Infinity;
+    if (expVal === 0) return 0;
+    const mantissa = 1 + manVal / (1 << manBits);
+    const exp = expVal - bias;
+    return (sign ? -1 : 1) * mantissa * Math.pow(2, exp);
+}
+
+function toBitArray(encoded, totalBits) {
+    const bits = [];
+    for (let i = totalBits - 1; i >= 0; i--) {
+        bits.push((encoded >> i) & 1);
+    }
+    return bits;
+}
+
+function renderFormat(fmt, value) {
+    const encoded = encodeFloat(value, fmt.expBits, fmt.manBits, fmt.bias);
+    const decoded = decodeBits(encoded, fmt.expBits, fmt.manBits, fmt.bias);
+    const bits = toBitArray(encoded, fmt.bits);
+    const error = Math.abs(value - decoded);
+    const relError = value !== 0 ? (error / Math.abs(value) * 100) : 0;
+
+    let bitHtml = '';
+    let idx = 0;
+    // Sign
+    for (let i = 0; i < fmt.signBits; i++, idx++) {
+        bitHtml += `<span class="bit-cell bit-sign" title="Sign bit">${bits[idx]}</span>`;
+    }
+    // Exponent
+    for (let i = 0; i < fmt.expBits; i++, idx++) {
+        bitHtml += `<span class="bit-cell bit-exp" title="Exponent bit ${i}">${bits[idx]}</span>`;
+    }
+    // Mantissa / integer
+    const manClass = fmt.expBits === 0 ? 'bit-int' : 'bit-man';
+    for (let i = 0; i < fmt.manBits; i++, idx++) {
+        bitHtml += `<span class="bit-cell ${manClass}" title="${fmt.expBits === 0 ? 'Integer' : 'Mantissa'} bit ${i}">${bits[idx]}</span>`;
+    }
+
+    return `
+    <div class="format-card" id="card-${fmt.id}">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <div class="flex items-center gap-3">
+                <span class="text-xl font-black text-white">${fmt.name}</span>
+                <span class="tag ${fmt.tagClass}">${fmt.label}</span>
+                <span class="tag tag-blue">${fmt.bits} bits</span>
+            </div>
+            <div class="text-right font-mono text-sm">
+                <span class="text-slate-400">Decoded: </span>
+                <span class="text-white font-bold">${decoded.toPrecision(6)}</span>
+                ${fmt.expBits > 0 ? `<span class="ml-3 text-xs ${relError > 1 ? 'text-red-400' : 'text-green-400'}">Δ ${relError.toFixed(3)}%</span>` : ''}
+            </div>
+        </div>
+        <div class="flex flex-wrap gap-px mb-3" style="gap:2px">${bitHtml}</div>
+        <div class="flex flex-wrap gap-4 text-xs text-slate-400">
+            ${fmt.expBits > 0 ? `
+            <span><span class="inline-block w-3 h-3 rounded-sm bg-red-900 border border-red-500 mr-1 align-middle"></span>Sign (${fmt.signBits}b)</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm bg-blue-900 border border-blue-500 mr-1 align-middle"></span>Exponent (${fmt.expBits}b, bias ${fmt.bias})</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm bg-green-900 border border-green-500 mr-1 align-middle"></span>Mantissa (${fmt.manBits}b)</span>
+            ` : `
+            <span><span class="inline-block w-3 h-3 rounded-sm bg-red-900 border border-red-500 mr-1 align-middle"></span>Sign (1b)</span>
+            <span><span class="inline-block w-3 h-3 rounded-sm bg-purple-900 border border-purple-500 mr-1 align-middle"></span>Integer value (7b)</span>
+            `}
+        </div>
+        <p class="text-slate-500 text-xs mt-2">${fmt.description}</p>
+    </div>`;
+}
+
+function renderCompareTable() {
+    const tbody = document.getElementById('compare-table');
+    tbody.innerHTML = FORMATS.map(f => `
+        <tr class="border-b border-slate-800 hover:bg-slate-800/40 transition-colors">
+            <td class="py-2 px-3 font-bold text-white">${f.name}</td>
+            <td class="py-2 px-3 text-center">${f.bits}</td>
+            <td class="py-2 px-3 text-center text-red-400">${f.signBits}</td>
+            <td class="py-2 px-3 text-center text-blue-400">${f.expBits}</td>
+            <td class="py-2 px-3 text-center text-green-400">${f.manBits}</td>
+            <td class="py-2 px-3 text-center font-mono text-xs">${f.maxRange}</td>
+            <td class="py-2 px-3 text-center">${f.precDigits}</td>
+            <td class="py-2 px-3 text-slate-400 text-xs">${f.use}</td>
+        </tr>
+    `).join('');
+}
+
+function renderBars() {
+    const container = document.getElementById('bar-container');
+    const maxExpBits = 8, maxManBits = 23;
+    container.innerHTML = FORMATS.map(f => `
+        <div>
+            <div class="flex items-center gap-3 mb-1">
+                <span class="w-12 text-sm font-bold text-white">${f.name}</span>
+                <span class="text-xs text-slate-400">Dynamic Range</span>
+            </div>
+            <div class="bg-slate-800 rounded h-3 mb-1 overflow-hidden">
+                <div class="range-bar h-3" style="width:${f.expBits / maxExpBits * 100}%"></div>
+            </div>
+            <div class="flex items-center gap-3 mb-1">
+                <span class="w-12"></span>
+                <span class="text-xs text-slate-400">Precision (mantissa)</span>
+            </div>
+            <div class="bg-slate-800 rounded h-3 overflow-hidden">
+                <div class="range-bar precision h-3" style="width:${f.manBits / maxManBits * 100}%"></div>
+            </div>
+        </div>
+    `).join('');
+}
+
+function update(value) {
+    const container = document.getElementById('formats-container');
+    container.innerHTML = FORMATS.map(f => renderFormat(f, value)).join('');
+}
+
+const numInput = document.getElementById('num-input');
+const numSlider = document.getElementById('num-slider');
+
+numInput.addEventListener('input', () => {
+    const v = parseFloat(numInput.value);
+    if (!isNaN(v)) { numSlider.value = Math.max(-10, Math.min(10, v)); update(v); }
+});
+numSlider.addEventListener('input', () => {
+    const v = parseFloat(numSlider.value);
+    numInput.value = v.toFixed(4);
+    update(v);
+});
+
+renderCompareTable();
+renderBars();
+update(3.14159);
+</script>
+</body>
+</html>

@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #25 by Prathamesh Giriraj Hirekodi (@prathamesh-hirekodi): feat: add DLRM Memory Bandwidth & Compute visualizer. -->
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DLRM: Memory Bandwidth & Compute Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        .embedding-table {
+            display: grid;
+            gap: 1px;
+            background: #e2e8f0;
+            border: 1px solid #cbd5e1;
+            border-radius: 4px;
+            padding: 2px;
+        }
+        .emb-row {
+            height: 5px;
+            background: #f1f5f9;
+            border-radius: 1px;
+            transition: background-color 0.4s ease, transform 0.3s ease;
+        }
+        .emb-row.lookup {
+            background: #f59e0b;
+            transform: scaleX(1.1);
+            box-shadow: 0 0 6px rgba(245, 158, 11, 0.7);
+        }
+        .emb-row.lookup-secondary {
+            background: #fbbf24;
+        }
+
+        .mlp-block {
+            transition: all 0.4s ease;
+        }
+        .mlp-block.active {
+            background-color: #dbeafe;
+            border-color: #2563eb;
+            box-shadow: 0 0 12px rgba(37, 99, 235, 0.35);
+            transform: translateY(-2px);
+        }
+
+        .interaction-cell {
+            transition: background-color 0.4s ease;
+        }
+        .interaction-cell.active {
+            background-color: #a855f7 !important;
+        }
+
+        .bw-fill {
+            transition: width 0.7s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s;
+        }
+
+        .stage-indicator {
+            transition: all 0.3s ease;
+        }
+        .stage-indicator.active {
+            background-color: #2563eb;
+            color: white;
+            transform: scale(1.04);
+        }
+
+        .roofline-axis { stroke: #475569; stroke-width: 1.5; }
+
+        .mode-panel {
+            transition: all 0.3s ease;
+        }
+        .mode-panel.highlight-emb {
+            border-color: #f59e0b;
+            box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.15);
+        }
+        .mode-panel.highlight-mlp {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+        }
+    </style>
+    <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex items-center justify-center p-4 lg:p-8">
+
+    <div class="max-w-7xl w-full bg-white rounded-2xl shadow-xl overflow-hidden flex flex-col">
+
+        <!-- Header & Controls -->
+        <div class="bg-slate-50 p-4 border-b border-slate-200 flex flex-col md:flex-row justify-between items-center gap-4">
+            <div>
+                <h1 class="text-xl font-bold text-slate-900">DLRM: Memory Bandwidth & Compute Visualizer</h1>
+                <p class="text-xs text-slate-500 italic">"Sparse embeddings starve the bandwidth, dense MLPs starve the compute."</p>
+            </div>
+
+            <div class="flex items-center gap-3 flex-wrap justify-center">
+                <div class="flex bg-white border border-slate-300 rounded-lg p-1 shadow-sm text-xs font-semibold">
+                    <button id="mode-balanced" class="mode-btn px-3 py-1.5 rounded bg-blue-600 text-white">Balanced</button>
+                    <button id="mode-emb-heavy" class="mode-btn px-3 py-1.5 rounded text-slate-600 hover:bg-slate-100">Embedding-heavy</button>
+                    <button id="mode-mlp-heavy" class="mode-btn px-3 py-1.5 rounded text-slate-600 hover:bg-slate-100">MLP-heavy</button>
+                    <button id="mode-compare" class="mode-btn px-3 py-1.5 rounded text-slate-600 hover:bg-slate-100 border-l border-slate-200 ml-1 pl-3">Compare All</button>
+                </div>
+                <button id="reset-btn" class="px-4 py-2 text-sm font-semibold text-slate-600 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
+                    Reset
+                </button>
+                <div id="step-controls" class="flex bg-white border border-slate-300 rounded-lg p-1 shadow-sm">
+                    <button id="prev-btn" class="p-2 hover:bg-slate-50 rounded disabled:opacity-30" disabled>
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+                    </button>
+                    <div class="px-4 flex items-center font-mono font-bold text-blue-600">
+                        Step <span id="step-count" class="ml-1">1</span> / 6
+                    </div>
+                    <button id="next-btn" class="p-2 hover:bg-slate-50 rounded">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 18 6-6-6-6"/></svg>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mode summary banner -->
+        <div id="mode-banner" class="px-6 py-3 border-b border-slate-200 bg-gradient-to-r from-slate-50 to-blue-50/30">
+            <div class="flex items-center gap-3 flex-wrap">
+                <span id="mode-label" class="text-xs font-bold uppercase tracking-widest px-2 py-1 rounded bg-blue-600 text-white">Balanced</span>
+                <span id="mode-summary" class="text-xs text-slate-600">6 embedding tables (~12 GB) · Bottom MLP [13→64→32→16] · Top MLP [31→128→64→1]</span>
+            </div>
+        </div>
+
+        <!-- Stage Tracker -->
+        <div id="stage-tracker" class="bg-white px-6 py-3 border-b border-slate-200 flex items-center justify-center gap-2 flex-wrap text-center">
+            <div id="stage-1" class="stage-indicator px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-500">1. Inputs</div>
+            <div class="text-slate-300">→</div>
+            <div id="stage-2" class="stage-indicator px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-500">2. Embedding Lookups</div>
+            <div class="text-slate-300">→</div>
+            <div id="stage-3" class="stage-indicator px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-500">3. Bottom MLP</div>
+            <div class="text-slate-300">→</div>
+            <div id="stage-4" class="stage-indicator px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-500">4. Feature Interaction</div>
+            <div class="text-slate-300">→</div>
+            <div id="stage-5" class="stage-indicator px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-500">5. Top MLP</div>
+            <div class="text-slate-300">→</div>
+            <div id="stage-6" class="stage-indicator px-3 py-1.5 rounded-md text-xs font-bold bg-slate-100 text-slate-500">6. Click Pred.</div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- SINGLE-MODE VIEW                                              -->
+        <!-- ============================================================ -->
+        <div id="single-view" class="flex flex-col lg:flex-row flex-grow overflow-hidden">
+
+            <div class="flex-grow p-4 lg:p-6 flex flex-col gap-5 bg-white overflow-y-auto" id="viz-area">
+
+                <div class="border-2 border-slate-200 bg-slate-50/50 rounded-2xl p-4 relative">
+                    <div class="absolute -top-3 left-6 bg-slate-700 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">Input Sample (User Click Event)</div>
+                    <div class="grid grid-cols-2 gap-4 mt-2">
+                        <div>
+                            <div class="text-[10px] font-bold text-amber-700 uppercase tracking-wider mb-1">Sparse / Categorical Features</div>
+                            <div id="sparse-features" class="flex flex-wrap gap-2"></div>
+                        </div>
+                        <div>
+                            <div class="text-[10px] font-bold text-blue-700 uppercase tracking-wider mb-1">Dense / Continuous Features</div>
+                            <div id="dense-features" class="flex flex-wrap gap-1.5"></div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-12 gap-3">
+
+                    <div class="col-span-5 border-2 border-amber-200 bg-amber-50/40 rounded-2xl p-3 relative">
+                        <div class="absolute -top-3 left-4 bg-amber-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">Embedding Tables (HBM)</div>
+                        <div class="text-[10px] text-slate-500 mt-2 mb-2"><span id="emb-count-label">6 tables</span> · Total: <span id="emb-total-size" class="font-mono font-bold text-slate-700">~12 GB</span></div>
+                        <div id="emb-tables" class="grid grid-cols-3 gap-2"></div>
+                    </div>
+
+                    <div class="col-span-3 border-2 border-purple-200 bg-purple-50/40 rounded-2xl p-3 relative flex flex-col">
+                        <div class="absolute -top-3 left-4 bg-purple-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">Interaction</div>
+                        <div class="text-[10px] text-slate-500 mt-2 mb-2">Dot product: \(x_i \cdot x_j\)</div>
+                        <div id="interaction-matrix" class="grid gap-0.5 flex-grow place-content-center"></div>
+                        <div class="text-[10px] text-slate-500 mt-2 text-center">Pairwise: \(O(n^2)\)</div>
+                    </div>
+
+                    <div class="col-span-4 border-2 border-blue-200 bg-blue-50/40 rounded-2xl p-3 relative flex flex-col gap-3">
+                        <div class="absolute -top-3 left-4 bg-blue-600 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">MLP Towers</div>
+
+                        <div class="mt-2">
+                            <div class="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Bottom MLP <span id="bot-depth-label" class="text-slate-400">(4 layers)</span></div>
+                            <div id="bottom-mlp" class="flex flex-col gap-1"></div>
+                        </div>
+
+                        <div>
+                            <div class="text-[10px] font-bold text-slate-600 uppercase tracking-wider mb-1">Top MLP <span id="top-depth-label" class="text-slate-400">(4 layers)</span></div>
+                            <div id="top-mlp" class="flex flex-col gap-1"></div>
+                        </div>
+
+                        <div class="mt-auto bg-white border border-slate-200 rounded-lg p-2">
+                            <div class="text-[10px] text-slate-500">Click Probability</div>
+                            <div class="flex items-baseline gap-2">
+                                <div id="click-prob" class="text-2xl font-mono font-bold text-blue-600">—</div>
+                                <div class="text-[10px] text-slate-400">σ(z)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="border-2 border-slate-200 rounded-2xl p-4 relative">
+                    <div class="absolute -top-3 left-4 bg-slate-700 text-white text-[10px] font-bold px-3 py-1 rounded-full uppercase tracking-widest shadow-sm">GPU Hardware Pressure (this step)</div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-2">
+                        <div>
+                            <div class="flex justify-between items-baseline mb-1">
+                                <span class="text-xs font-bold text-amber-700">HBM Bandwidth</span>
+                                <span id="bw-pct" class="text-xs font-mono font-bold text-amber-700">0%</span>
+                            </div>
+                            <div class="h-4 bg-slate-200 rounded-full overflow-hidden">
+                                <div id="bw-bar" class="bw-fill h-full bg-amber-500" style="width: 0%;"></div>
+                            </div>
+                            <div class="text-[10px] text-slate-500 mt-1">Peak: 2 TB/s · Used: <span id="bw-used" class="font-mono">0 GB/s</span></div>
+                        </div>
+
+                        <div>
+                            <div class="flex justify-between items-baseline mb-1">
+                                <span class="text-xs font-bold text-blue-700">Tensor Core / FLOPs</span>
+                                <span id="compute-pct" class="text-xs font-mono font-bold text-blue-700">0%</span>
+                            </div>
+                            <div class="h-4 bg-slate-200 rounded-full overflow-hidden">
+                                <div id="compute-bar" class="bw-fill h-full bg-blue-500" style="width: 0%;"></div>
+                            </div>
+                            <div class="text-[10px] text-slate-500 mt-1">Peak: 312 TFLOPs · Used: <span id="compute-used" class="font-mono">0 TFLOPs</span></div>
+                        </div>
+                    </div>
+
+                    <div id="bottleneck-banner" class="mt-3 px-3 py-2 rounded-lg text-xs font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                        Bottleneck: idle — press Next to begin
+                    </div>
+                </div>
+
+            </div>
+
+            <div class="lg:w-96 lg:flex-shrink-0 bg-slate-50 border-l border-slate-200 p-5 overflow-y-auto flex flex-col gap-5">
+
+                <div>
+                    <h3 class="text-sm font-bold text-slate-900 mb-2">What's happening?</h3>
+                    <p id="step-narration" class="text-sm text-slate-600 leading-relaxed">
+                        Press <span class="font-mono text-blue-600 font-bold">Next</span> to walk through one DLRM forward pass. Try the three mode buttons above — each rebuilds the model architecture so you can see embedding-heavy and MLP-heavy DLRMs visually.
+                    </p>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-4">
+                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">DLRM Forward Pass</h4>
+                    <div class="text-center text-xs leading-loose">
+                        \(e_i = E_i[\text{idx}_i]\) <span class="text-slate-400">(lookup)</span><br>
+                        \(d = \text{MLP}_\text{bot}(x_\text{dense})\)<br>
+                        \(z_{ij} = e_i \cdot e_j\) <span class="text-slate-400">(dot)</span><br>
+                        \(\hat{y} = \sigma(\text{MLP}_\text{top}([d; z]))\)
+                    </div>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-4">
+                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Roofline Position</h4>
+                    <svg id="roofline" viewBox="0 0 220 140" class="w-full">
+                        <line x1="20" y1="120" x2="210" y2="120" class="roofline-axis"/>
+                        <line x1="20" y1="20" x2="20" y2="120" class="roofline-axis"/>
+                        <line x1="20" y1="120" x2="100" y2="40" stroke="#f59e0b" stroke-width="2"/>
+                        <line x1="100" y1="40" x2="210" y2="40" stroke="#2563eb" stroke-width="2"/>
+                        <circle cx="100" cy="40" r="2.5" fill="#475569"/>
+                        <circle id="roofline-dot" cx="40" cy="100" r="5" fill="#dc2626" stroke="white" stroke-width="2"/>
+                        <text x="115" y="36" font-size="8" fill="#2563eb" font-family="ui-monospace, monospace">compute-bound</text>
+                        <text x="22" y="55" font-size="8" fill="#f59e0b" font-family="ui-monospace, monospace">mem-bound</text>
+                        <text x="80" y="135" font-size="8" fill="#64748b" font-family="ui-monospace, monospace">Arithmetic Intensity (FLOPs/Byte)</text>
+                    </svg>
+                    <p id="roofline-caption" class="text-[11px] text-slate-500 mt-1 italic">Embedding lookups sit far left — memory-bound.</p>
+                </div>
+
+                <div class="bg-white border border-slate-200 rounded-xl p-4">
+                    <h4 class="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Step Stats</h4>
+                    <div class="grid grid-cols-2 gap-2 text-xs">
+                        <div class="text-slate-500">Bytes accessed</div>
+                        <div id="stat-bytes" class="font-mono font-bold text-slate-800 text-right">0 KB</div>
+                        <div class="text-slate-500">FLOPs</div>
+                        <div id="stat-flops" class="font-mono font-bold text-slate-800 text-right">0</div>
+                        <div class="text-slate-500">Arith. intensity</div>
+                        <div id="stat-ai" class="font-mono font-bold text-slate-800 text-right">— FLOP/B</div>
+                        <div class="text-slate-500">Access pattern</div>
+                        <div id="stat-pattern" class="font-mono font-bold text-slate-800 text-right">—</div>
+                    </div>
+                </div>
+
+                <div class="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <h4 class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2">Why this matters</h4>
+                    <p class="text-[11px] text-slate-700 leading-relaxed">
+                        Embedding tables in production DLRMs are <strong>terabyte-scale</strong>. Each lookup touches only a tiny slice but the access pattern is irregular and uncacheable, so HBM bandwidth — not FLOPs — bounds throughput. MLPs are the opposite: small, dense, and Tensor-Core-friendly. This is why DLRM motivated specialized hardware like TPU v4/v7 and Meta's MTIA.
+                    </p>
+                </div>
+
+                <div class="text-[10px] text-slate-400 italic border-t border-slate-200 pt-3">
+                    Reference: Naumov et al., <em>Deep Learning Recommendation Model for Personalization and Recommendation Systems</em>, Meta AI, arXiv:1906.00091. Course: EE508 Week 9.
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================================ -->
+        <!-- COMPARE-ALL VIEW                                              -->
+        <!-- ============================================================ -->
+        <div id="compare-view" class="hidden p-6 bg-white">
+            <div class="mb-4">
+                <h3 class="text-sm font-bold text-slate-900 mb-1">All three configurations side by side</h3>
+                <p class="text-xs text-slate-500">Same DLRM forward pass, three different model shapes. The architectures are drawn to scale — bigger boxes mean more memory or compute. Bars at the bottom of each panel show hardware pressure at the <strong>embedding lookup step</strong> (Step 2) and the <strong>top MLP step</strong> (Step 5).</p>
+            </div>
+            <div id="compare-grid" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+
+            <div class="mt-6 bg-slate-50 border border-slate-200 rounded-xl p-4">
+                <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">What to notice</h4>
+                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                    <div>
+                        <div class="font-bold text-amber-700 mb-1">📦 Embedding-heavy</div>
+                        <p class="text-slate-600 leading-relaxed">Many large tables, shallow MLPs. Step 2 saturates HBM; tensor cores barely move. <strong>This is what production ad-ranking DLRMs look like</strong> — and why they need HBM-rich, embedding-aware accelerators.</p>
+                    </div>
+                    <div>
+                        <div class="font-bold text-blue-700 mb-1">⚖️ Balanced</div>
+                        <p class="text-slate-600 leading-relaxed">Moderate tables and MLPs. Both bottlenecks hit during the forward pass. The roofline dot bounces between the two regions as you step through.</p>
+                    </div>
+                    <div>
+                        <div class="font-bold text-blue-700 mb-1">🧮 MLP-heavy</div>
+                        <p class="text-slate-600 leading-relaxed">Few small tables, deep MLPs. HBM is comfortable; tensor cores run hot. Looks more like a normal deep network — and benefits from generic GPU acceleration.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+<script>
+const SPARSE_FEATURES_BALANCED = ["user_id", "item_id", "ad_id", "city", "device", "category"];
+const SPARSE_FEATURES_EMB = ["user_id", "item_id", "ad_id", "city", "device", "category", "publisher", "country", "lang", "campaign", "creative", "hour"];
+const SPARSE_FEATURES_MLP = ["user_id", "item_id", "ad_id"];
+
+const profiles = {
+    "balanced": {
+        label: "Balanced",
+        labelColor: "bg-blue-600",
+        sparseFeatures: SPARSE_FEATURES_BALANCED,
+        embTableRows: 22,
+        embTableSizeGB: 12,
+        bottomMLP: [13, 64, 32, 16],
+        topMLP: [31, 128, 64, 1],
+        denseDims: 13,
+        pressure: { 1: [5, 2], 2: [88, 4], 3: [18, 65], 4: [12, 35], 5: [16, 78], 6: [3, 5] },
+        verdict: "Mixed bottleneck",
+        verdictDetail: "Both HBM and tensor cores see saturation at different steps."
+    },
+    "emb-heavy": {
+        label: "Embedding-heavy",
+        labelColor: "bg-amber-600",
+        sparseFeatures: SPARSE_FEATURES_EMB,
+        embTableRows: 30,
+        embTableSizeGB: 80,
+        bottomMLP: [13, 32, 16],
+        topMLP: [27, 64, 1],
+        denseDims: 13,
+        pressure: { 1: [8, 2], 2: [99, 3], 3: [12, 28], 4: [22, 38], 5: [10, 32], 6: [4, 4] },
+        verdict: "🔴 Severely HBM-bound",
+        verdictDetail: "Production ad-ranking DLRMs look like this. Tensor cores stay mostly idle."
+    },
+    "mlp-heavy": {
+        label: "MLP-heavy",
+        labelColor: "bg-blue-700",
+        sparseFeatures: SPARSE_FEATURES_MLP,
+        embTableRows: 14,
+        embTableSizeGB: 4,
+        bottomMLP: [13, 128, 128, 64, 64, 32, 16],
+        topMLP: [19, 256, 256, 128, 64, 32, 1],
+        denseDims: 13,
+        pressure: { 1: [3, 2], 2: [42, 5], 3: [22, 92], 4: [10, 48], 5: [20, 96], 6: [3, 6] },
+        verdict: "🔵 Severely compute-bound",
+        verdictDetail: "Looks more like a typical deep network. Generic GPU compute scales it well."
+    }
+};
+
+const stepNarrations = {
+    1: `<strong>Step 1 — Inputs Arrive.</strong> A click event arrives. It contains <em>sparse</em> categorical features (user_id, item_id, …) — each is just a giant integer index — and <em>dense</em> continuous features. The sparse features will look up vectors from massive tables; the dense features go through an MLP.`,
+    2: `<strong>Step 2 — Embedding Lookups.</strong> Each sparse index becomes a row fetch from a giant embedding table sitting in HBM. The accesses are <strong>sparse, irregular, and uncacheable</strong>. The arithmetic per byte is essentially zero (just a memory read), so the GPU's tensor cores sit idle while HBM saturates. <strong>This is the classic DLRM bottleneck.</strong>`,
+    3: `<strong>Step 3 — Bottom MLP.</strong> The dense features run through a small MLP — a series of dense GEMMs. The matrices are small but the arithmetic intensity is high — every weight gets reused across the whole batch. <strong>Tensor cores light up; HBM is barely touched.</strong> The bottleneck has flipped.`,
+    4: `<strong>Step 4 — Feature Interaction.</strong> The embedding vectors plus the bottom-MLP output are combined pairwise via dot products: \\(z_{ij} = e_i \\cdot e_j\\). This is \\(O(n^2)\\) work but on already-resident vectors — no new memory traffic. This is where the model actually <em>learns feature crosses</em> like "user × ad_category".`,
+    5: `<strong>Step 5 — Top MLP.</strong> The interaction output is concatenated with the bottom-MLP output and fed through a wider MLP. Again, this is GEMM-heavy: tensor cores dominate. HBM is once more nearly idle. Notice how DLRM's compute and memory phases are <em>strictly sequential</em>.`,
+    6: `<strong>Step 6 — Click Prediction.</strong> A sigmoid produces \\(\\hat{y} \\in [0, 1]\\), the predicted click probability. Cross the whole forward pass and you'll see DLRM's defining feature: <strong>two completely different bottlenecks in the same model</strong>.`
+};
+
+const stepStats = {
+    1: { bytes: "8 KB", flops: "0", ai: "—", pattern: "—" },
+    2: { bytes: "1.5 MB", flops: "1.5K", ai: "0.001 FLOP/B", pattern: "sparse, random" },
+    3: { bytes: "32 KB", flops: "8.2M", ai: "256 FLOP/B", pattern: "dense, regular" },
+    4: { bytes: "16 KB", flops: "2.1M", ai: "131 FLOP/B", pattern: "dense, on-chip" },
+    5: { bytes: "48 KB", flops: "16.4M", ai: "341 FLOP/B", pattern: "dense, regular" },
+    6: { bytes: "0.1 KB", flops: "1", ai: "—", pattern: "scalar" }
+};
+
+const rooflinePos = {
+    1: { x: 30, y: 110 }, 2: { x: 28, y: 95 }, 3: { x: 160, y: 45 },
+    4: { x: 130, y: 50 }, 5: { x: 175, y: 45 }, 6: { x: 100, y: 70 }
+};
+
+const stepBottleneck = {
+    1: { text: "Idle — staging inputs", cls: "bg-slate-100 text-slate-600 border-slate-200" },
+    2: { text: "🔴 HBM bandwidth saturated — tensor cores idle", cls: "bg-amber-100 text-amber-800 border-amber-300" },
+    3: { text: "🔵 Compute-bound — tensor cores busy, HBM idle", cls: "bg-blue-100 text-blue-800 border-blue-300" },
+    4: { text: "🟣 Balanced — interaction is small but compute-leaning", cls: "bg-purple-100 text-purple-800 border-purple-300" },
+    5: { text: "🔵 Compute-bound — tensor cores at high utilization", cls: "bg-blue-100 text-blue-800 border-blue-300" },
+    6: { text: "✅ Done — prediction emitted", cls: "bg-emerald-100 text-emerald-800 border-emerald-300" }
+};
+
+const rooflineCaptions = {
+    1: "Inputs not yet processed.",
+    2: "Embedding lookups: far-left, memory-bound.",
+    3: "Bottom MLP: right side, compute-bound.",
+    4: "Interaction: middle, mostly compute.",
+    5: "Top MLP: deep right, compute-bound.",
+    6: "Final scalar — negligible cost."
+};
+
+let currentStep = 1;
+let currentMode = "balanced";
+const NUM_STEPS = 6;
+const $ = (id) => document.getElementById(id);
+
+function buildSparseFeatures(profile) {
+    const c = $("sparse-features");
+    c.innerHTML = "";
+    profile.sparseFeatures.forEach((name, i) => {
+        const idx = Math.floor(Math.random() * 1_000_000);
+        const chip = document.createElement("div");
+        chip.id = `sparse-chip-${i}`;
+        chip.className = "px-2 py-0.5 bg-amber-100 border border-amber-300 rounded text-[10px] font-mono text-amber-800 transition-all";
+        chip.innerHTML = `<span class="font-bold">${name}</span><span class="text-amber-500">[${idx.toLocaleString()}]</span>`;
+        c.appendChild(chip);
+    });
+}
+
+function buildDenseFeatures(profile) {
+    const c = $("dense-features");
+    c.innerHTML = "";
+    for (let i = 0; i < profile.denseDims; i++) {
+        const cell = document.createElement("div");
+        cell.id = `dense-cell-${i}`;
+        const v = (Math.random() * 2 - 1).toFixed(1);
+        cell.className = "w-7 h-6 bg-blue-100 border border-blue-300 rounded text-[9px] font-mono text-blue-800 flex items-center justify-center transition-all";
+        cell.textContent = v;
+        c.appendChild(cell);
+    }
+}
+
+function buildEmbeddingTables(profile) {
+    const c = $("emb-tables");
+    c.innerHTML = "";
+    const n = profile.sparseFeatures.length;
+    const cols = n <= 3 ? n : (n <= 6 ? 3 : 4);
+    c.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`;
+    for (let t = 0; t < n; t++) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "flex flex-col gap-1";
+        wrapper.innerHTML = `
+            <div class="text-[9px] font-mono text-amber-700 truncate">${profile.sparseFeatures[t]}</div>
+            <div id="emb-table-${t}" class="embedding-table grid-cols-1"></div>
+        `;
+        c.appendChild(wrapper);
+        const tbl = wrapper.querySelector(`#emb-table-${t}`);
+        for (let r = 0; r < profile.embTableRows; r++) {
+            const row = document.createElement("div");
+            row.className = "emb-row";
+            row.id = `emb-${t}-${r}`;
+            tbl.appendChild(row);
+        }
+    }
+    $("emb-count-label").textContent = `${n} tables`;
+    $("emb-total-size").textContent = `~${profile.embTableSizeGB} GB`;
+}
+
+function buildInteractionMatrix(profile) {
+    const c = $("interaction-matrix");
+    c.innerHTML = "";
+    const n = Math.min(profile.sparseFeatures.length, 8) + 1;
+    c.style.gridTemplateColumns = `repeat(${n}, minmax(0, 1fr))`;
+    c.style.maxWidth = "140px";
+    c.style.margin = "0 auto";
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            const cell = document.createElement("div");
+            cell.id = `int-${i}-${j}`;
+            cell.className = "interaction-cell aspect-square rounded-sm border border-slate-200";
+            if (i > j) cell.style.backgroundColor = "#e9d5ff";
+            else if (i === j) cell.style.backgroundColor = "#f1f5f9";
+            else cell.style.backgroundColor = "#fafafa";
+            c.appendChild(cell);
+        }
+    }
+}
+
+function buildMLP(containerId, dims, prefix) {
+    const c = $(containerId);
+    c.innerHTML = "";
+    for (let i = 0; i < dims.length - 1; i++) {
+        const block = document.createElement("div");
+        block.id = `${prefix}-${i}`;
+        block.className = "mlp-block bg-white border border-slate-300 rounded px-2 py-0.5 text-[9px] font-mono text-slate-600 flex justify-between items-center";
+        block.innerHTML = `<span>FC ${dims[i]}→${dims[i+1]}</span><span class="text-slate-400">ReLU</span>`;
+        c.appendChild(block);
+    }
+}
+
+function rebuildArchitecture() {
+    const profile = profiles[currentMode];
+    buildSparseFeatures(profile);
+    buildDenseFeatures(profile);
+    buildEmbeddingTables(profile);
+    buildInteractionMatrix(profile);
+    buildMLP("bottom-mlp", profile.bottomMLP, "bot");
+    buildMLP("top-mlp", profile.topMLP, "top");
+
+    $("bot-depth-label").textContent = `(${profile.bottomMLP.length - 1} layers)`;
+    $("top-depth-label").textContent = `(${profile.topMLP.length - 1} layers)`;
+
+    const lbl = $("mode-label");
+    lbl.textContent = profile.label;
+    lbl.className = `text-xs font-bold uppercase tracking-widest px-2 py-1 rounded text-white ${profile.labelColor}`;
+    $("mode-summary").innerHTML = `${profile.sparseFeatures.length} embedding tables (~${profile.embTableSizeGB} GB) · Bottom MLP [${profile.bottomMLP.join('→')}] · Top MLP [${profile.topMLP.join('→')}] · <span class="font-semibold">${profile.verdict}</span>`;
+}
+
+function renderStep(n) {
+    const profile = profiles[currentMode];
+
+    for (let s = 1; s <= 6; s++) $(`stage-${s}`).classList.toggle("active", s === n);
+    $("step-count").textContent = n;
+    $("step-narration").innerHTML = stepNarrations[n];
+
+    const [bw, compute] = profile.pressure[n];
+    $("bw-bar").style.width = `${bw}%`;
+    $("bw-pct").textContent = `${bw}%`;
+    $("bw-used").textContent = `${(bw * 0.02).toFixed(2)} TB/s`;
+    $("compute-bar").style.width = `${compute}%`;
+    $("compute-pct").textContent = `${compute}%`;
+    $("compute-used").textContent = `${(compute * 3.12).toFixed(0)} TFLOPs`;
+
+    const b = stepBottleneck[n];
+    const banner = $("bottleneck-banner");
+    banner.className = `mt-3 px-3 py-2 rounded-lg text-xs font-semibold border ${b.cls}`;
+    banner.textContent = b.text;
+
+    const s = stepStats[n];
+    $("stat-bytes").textContent = s.bytes;
+    $("stat-flops").textContent = s.flops;
+    $("stat-ai").textContent = s.ai;
+    $("stat-pattern").textContent = s.pattern;
+
+    const pos = rooflinePos[n];
+    const dot = $("roofline-dot");
+    dot.setAttribute("cx", pos.x);
+    dot.setAttribute("cy", pos.y);
+    $("roofline-caption").textContent = rooflineCaptions[n];
+
+    clearHighlights();
+    if (n === 1) {
+        profile.sparseFeatures.forEach((_, i) => $(`sparse-chip-${i}`)?.classList.add("ring-2", "ring-amber-400"));
+    } else if (n === 2) {
+        for (let t = 0; t < profile.sparseFeatures.length; t++) {
+            const row = Math.floor(Math.random() * profile.embTableRows);
+            $(`emb-${t}-${row}`)?.classList.add("lookup");
+            if (Math.random() > 0.5 && row + 1 < profile.embTableRows) {
+                $(`emb-${t}-${row + 1}`)?.classList.add("lookup-secondary");
+            }
+            $(`sparse-chip-${t}`)?.classList.add("ring-2", "ring-amber-500");
+        }
+    } else if (n === 3) {
+        for (let i = 0; i < profile.bottomMLP.length - 1; i++) $(`bot-${i}`)?.classList.add("active");
+        for (let i = 0; i < profile.denseDims; i++) $(`dense-cell-${i}`)?.classList.add("ring-2", "ring-blue-400");
+    } else if (n === 4) {
+        const sz = Math.min(profile.sparseFeatures.length, 8) + 1;
+        for (let i = 0; i < sz; i++) for (let j = 0; j < i; j++) $(`int-${i}-${j}`)?.classList.add("active");
+    } else if (n === 5) {
+        for (let i = 0; i < profile.topMLP.length - 1; i++) $(`top-${i}`)?.classList.add("active");
+    } else if (n === 6) {
+        $("click-prob").textContent = (0.3 + Math.random() * 0.5).toFixed(3);
+        $("click-prob").classList.add("text-emerald-600");
+    }
+
+    $("prev-btn").disabled = (n <= 1);
+    $("next-btn").disabled = (n >= NUM_STEPS);
+}
+
+function clearHighlights() {
+    document.querySelectorAll(".emb-row").forEach(el => el.classList.remove("lookup", "lookup-secondary"));
+    document.querySelectorAll("[id^='sparse-chip-']").forEach(el => el.classList.remove("ring-2", "ring-amber-400", "ring-amber-500"));
+    document.querySelectorAll("[id^='dense-cell-']").forEach(el => el.classList.remove("ring-2", "ring-blue-400"));
+    document.querySelectorAll(".mlp-block").forEach(el => el.classList.remove("active"));
+    document.querySelectorAll(".interaction-cell").forEach(el => el.classList.remove("active"));
+    $("click-prob").classList.remove("text-emerald-600");
+    if (currentStep < 6) $("click-prob").textContent = "—";
+}
+
+function renderCompareView() {
+    const grid = $("compare-grid");
+    grid.innerHTML = "";
+
+    const order = ["emb-heavy", "balanced", "mlp-heavy"];
+    order.forEach(modeKey => {
+        const p = profiles[modeKey];
+        const panel = document.createElement("div");
+        panel.className = `mode-panel border-2 border-slate-200 rounded-xl p-4 bg-white flex flex-col gap-3 ${modeKey === 'emb-heavy' ? 'highlight-emb' : (modeKey === 'mlp-heavy' ? 'highlight-mlp' : '')}`;
+
+        const headerColor = modeKey === 'emb-heavy' ? 'bg-amber-600' : (modeKey === 'mlp-heavy' ? 'bg-blue-700' : 'bg-blue-600');
+        let html = `
+            <div class="flex items-center gap-2">
+                <span class="text-[10px] font-bold uppercase tracking-widest px-2 py-1 rounded text-white ${headerColor}">${p.label}</span>
+                <span class="text-[10px] text-slate-500">${p.sparseFeatures.length} tables · ${p.bottomMLP.length - 1} + ${p.topMLP.length - 1} layers</span>
+            </div>
+            <div class="text-xs text-slate-700"><strong>${p.verdict}</strong></div>
+            <div class="text-[10px] text-slate-500 italic">${p.verdictDetail}</div>
+        `;
+
+        html += `<div class="bg-slate-50 border border-slate-200 rounded-lg p-2 flex flex-col gap-2">`;
+
+        html += `<div>
+            <div class="text-[9px] font-bold text-amber-700 uppercase tracking-wider mb-1">Embeddings (~${p.embTableSizeGB} GB)</div>
+            <div class="grid gap-1" style="grid-template-columns: repeat(${Math.min(p.sparseFeatures.length, 6)}, minmax(0, 1fr));">`;
+        const tablesToShow = Math.min(p.sparseFeatures.length, 6);
+        for (let t = 0; t < tablesToShow; t++) {
+            const heightRows = Math.min(p.embTableRows, 16);
+            html += `<div class="bg-amber-200 border border-amber-300 rounded-sm" style="height: ${heightRows * 1.5}px;"></div>`;
+        }
+        if (p.sparseFeatures.length > 6) {
+            html += `<div class="text-[8px] text-slate-400 self-center text-center">+${p.sparseFeatures.length - 6}</div>`;
+        }
+        html += `</div></div>`;
+
+        html += `<div class="grid grid-cols-2 gap-2">
+            <div>
+                <div class="text-[9px] font-bold text-blue-700 uppercase tracking-wider mb-1">Bot MLP</div>
+                <div class="flex flex-col gap-0.5">`;
+        for (let i = 0; i < p.bottomMLP.length - 1; i++) {
+            html += `<div class="bg-blue-200 border border-blue-300 rounded-sm h-2"></div>`;
+        }
+        html += `</div></div><div>
+            <div class="text-[9px] font-bold text-blue-700 uppercase tracking-wider mb-1">Top MLP</div>
+            <div class="flex flex-col gap-0.5">`;
+        for (let i = 0; i < p.topMLP.length - 1; i++) {
+            html += `<div class="bg-blue-200 border border-blue-300 rounded-sm h-2"></div>`;
+        }
+        html += `</div></div></div>`;
+        html += `</div>`;
+
+        const [bw2, comp2] = p.pressure[2];
+        const [bw5, comp5] = p.pressure[5];
+        html += `
+        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-wider mt-1">@ Step 2 — Embedding Lookup</div>
+        <div class="grid grid-cols-2 gap-2 text-[10px]">
+            <div>
+                <div class="flex justify-between"><span class="text-amber-700 font-semibold">HBM</span><span class="font-mono">${bw2}%</span></div>
+                <div class="h-2 bg-slate-200 rounded-full overflow-hidden"><div class="h-full bg-amber-500" style="width: ${bw2}%;"></div></div>
+            </div>
+            <div>
+                <div class="flex justify-between"><span class="text-blue-700 font-semibold">Compute</span><span class="font-mono">${comp2}%</span></div>
+                <div class="h-2 bg-slate-200 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${comp2}%;"></div></div>
+            </div>
+        </div>
+
+        <div class="text-[10px] font-bold text-slate-600 uppercase tracking-wider mt-1">@ Step 5 — Top MLP</div>
+        <div class="grid grid-cols-2 gap-2 text-[10px]">
+            <div>
+                <div class="flex justify-between"><span class="text-amber-700 font-semibold">HBM</span><span class="font-mono">${bw5}%</span></div>
+                <div class="h-2 bg-slate-200 rounded-full overflow-hidden"><div class="h-full bg-amber-500" style="width: ${bw5}%;"></div></div>
+            </div>
+            <div>
+                <div class="flex justify-between"><span class="text-blue-700 font-semibold">Compute</span><span class="font-mono">${comp5}%</span></div>
+                <div class="h-2 bg-slate-200 rounded-full overflow-hidden"><div class="h-full bg-blue-500" style="width: ${comp5}%;"></div></div>
+            </div>
+        </div>
+        `;
+
+        panel.innerHTML = html;
+        grid.appendChild(panel);
+    });
+}
+
+function setMode(newMode) {
+    if (newMode === "compare") {
+        $("single-view").classList.add("hidden");
+        $("compare-view").classList.remove("hidden");
+        $("stage-tracker").classList.add("hidden");
+        $("step-controls").classList.add("hidden");
+        $("mode-banner").classList.add("hidden");
+        renderCompareView();
+    } else {
+        $("single-view").classList.remove("hidden");
+        $("compare-view").classList.add("hidden");
+        $("stage-tracker").classList.remove("hidden");
+        $("step-controls").classList.remove("hidden");
+        $("mode-banner").classList.remove("hidden");
+        currentMode = newMode;
+        rebuildArchitecture();
+        renderStep(currentStep);
+    }
+
+    ["balanced", "emb-heavy", "mlp-heavy", "compare"].forEach(m => {
+        const btn = $(`mode-${m}`);
+        const extras = m === "compare" ? " border-l border-slate-200 ml-1 pl-3" : "";
+        if (m === newMode) {
+            btn.className = `mode-btn px-3 py-1.5 rounded bg-blue-600 text-white${extras}`;
+        } else {
+            btn.className = `mode-btn px-3 py-1.5 rounded text-slate-600 hover:bg-slate-100${extras}`;
+        }
+    });
+}
+
+function nextStep() {
+    if (currentStep >= NUM_STEPS) return;
+    currentStep++;
+    renderStep(currentStep);
+}
+function prevStep() {
+    if (currentStep <= 1) return;
+    currentStep--;
+    renderStep(currentStep);
+}
+function reset() {
+    currentStep = 1;
+    renderStep(1);
+}
+
+$("next-btn").addEventListener("click", nextStep);
+$("prev-btn").addEventListener("click", prevStep);
+$("reset-btn").addEventListener("click", reset);
+$("mode-balanced").addEventListener("click", () => setMode("balanced"));
+$("mode-emb-heavy").addEventListener("click", () => setMode("emb-heavy"));
+$("mode-mlp-heavy").addEventListener("click", () => setMode("mlp-heavy"));
+$("mode-compare").addEventListener("click", () => setMode("compare"));
+
+rebuildArchitecture();
+renderStep(1);
+</script>
+
+</body>
+</html>

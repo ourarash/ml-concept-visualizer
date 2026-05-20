@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<!-- Source: Integrated from PR #46 by Om Bhatt (@OmBhatt18): feat: add Mixture of Depths (MoD) vs MoE interactive visualizer with performance analysis. -->
+<!--
+  Mixture of Experts (MoE) & Mixture of Depths (MoD) — Interactive Visualizer
+  EE508 · Systems for ML
+  catalog: { "title": "Mixture of Depths (MoD) vs MoE", "section": "NLP & Language Models",
+             "description": "Interactive analysis of sparse computation across depth (MoD) and width (MoE) — token routing, layer skipping, expert specialization, hardware tradeoffs, and head-to-head comparison of the architectures behind DeepSeek-V3 and Mixtral." }
+-->
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Mixture of Depths (MoD) vs MoE — Interactive Visualizer</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Syne:wght@400;600;700;800&display=swap');
+
+:root{
+  --bg:#0a0e1a;--surface:#111827;--surface2:#1a2236;
+  --border:#1e2d4a;--accent:#38bdf8;--accent2:#818cf8;
+  --accent3:#34d399;--warn:#fb923c;--text:#e2e8f0;--muted:#64748b;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Syne',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+
+header{padding:2.2rem 2rem 1.6rem;border-bottom:1px solid var(--border);background:linear-gradient(180deg,#0d1526,var(--bg));position:relative;overflow:hidden}
+header::before{content:'';position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse 60% 120% at 70% -20%,rgba(56,189,248,.08),transparent 70%)}
+.header-inner{max-width:1100px;margin:0 auto;position:relative}
+.kicker{font-family:'JetBrains Mono',monospace;font-size:.72rem;letter-spacing:.18em;color:var(--accent);text-transform:uppercase;margin-bottom:.5rem}
+h1{font-size:clamp(1.6rem,4vw,2.6rem);font-weight:800;line-height:1.1}
+h1 span{color:var(--accent)}
+h1 em{color:var(--accent3);font-style:normal}
+.subtitle{color:var(--muted);font-size:.95rem;margin-top:.45rem;max-width:740px;line-height:1.6}
+
+.tab-nav{display:flex;gap:.2rem;flex-wrap:wrap;max-width:1100px;margin:0 auto;padding:1rem 2rem 0}
+.tab-btn{font-family:'Syne',sans-serif;font-size:.8rem;font-weight:600;padding:.4rem .9rem;border-radius:6px;border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;transition:all .18s}
+.tab-btn:hover{color:var(--text);border-color:var(--border);background:var(--surface)}
+.tab-btn.active{background:var(--accent);color:#0a0e1a;border-color:var(--accent)}
+.tab-btn.mod-tab.active{background:var(--accent3);border-color:var(--accent3)}
+
+main{max-width:1100px;margin:0 auto;padding:1.8rem}
+.section{display:none;animation:fadeIn .3s ease}
+.section.active{display:block}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:none}}
+
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:1.4rem;margin-bottom:1.4rem}
+.card-title{font-size:.68rem;font-weight:700;letter-spacing:.15em;text-transform:uppercase;color:var(--accent);margin-bottom:.9rem;font-family:'JetBrains Mono',monospace}
+.card-title.mod{color:var(--accent3)}
+
+.controls{display:flex;flex-wrap:wrap;gap:1rem;align-items:flex-end;margin-bottom:1.4rem}
+.ctrl-group{display:flex;flex-direction:column;gap:.28rem}
+.ctrl-label{font-size:.72rem;color:var(--muted);font-family:'JetBrains Mono',monospace}
+.ctrl-val{font-size:.92rem;font-weight:700;color:var(--text)}
+input[type=range]{-webkit-appearance:none;appearance:none;width:120px;height:4px;border-radius:2px;background:var(--border);outline:none;cursor:pointer}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;border-radius:50%;background:var(--accent);cursor:pointer;box-shadow:0 0 0 3px rgba(56,189,248,.2)}
+input[type=range].mod-range::-webkit-slider-thumb{background:var(--accent3);box-shadow:0 0 0 3px rgba(52,211,153,.2)}
+select{font-family:'Syne',sans-serif;font-size:.83rem;background:var(--surface2);color:var(--text);border:1px solid var(--border);border-radius:6px;padding:.38rem .75rem;cursor:pointer;outline:none}
+.btn{font-family:'Syne',sans-serif;font-size:.83rem;font-weight:700;padding:.48rem 1.1rem;border-radius:8px;border:none;cursor:pointer;transition:all .18s;white-space:nowrap}
+.btn-primary{background:var(--accent);color:#0a0e1a}
+.btn-primary:hover{filter:brightness(1.15)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;filter:none}
+.btn-mod{background:var(--accent3);color:#0a0e1a}
+.btn-mod:hover{filter:brightness(1.12)}
+.btn-ghost{background:var(--surface2);color:var(--text);border:1px solid var(--border)}
+.btn-ghost:hover{border-color:var(--accent);color:var(--accent)}
+
+.canvas-wrap{border-radius:10px;overflow:hidden;background:var(--surface2);border:1px solid var(--border)}
+canvas{display:block;width:100%;height:auto}
+
+#token-log{font-family:'JetBrains Mono',monospace;font-size:.74rem;background:#060a14;border:1px solid var(--border);border-radius:8px;padding:.9rem;max-height:150px;overflow-y:auto;color:var(--accent3);line-height:1.9;margin-top:.9rem}
+
+.annotation{font-family:'JetBrains Mono',monospace;font-size:.76rem;background:var(--surface2);border-left:3px solid var(--accent);padding:.75rem 1rem;border-radius:0 8px 8px 0;color:var(--text);margin-top:.9rem;line-height:1.7}
+.annotation b{color:var(--accent)}
+.annotation.mod-ann{border-left-color:var(--accent3)}
+.annotation.mod-ann b{color:var(--accent3)}
+.annotation.good-ann{border-left-color:var(--accent3)}
+.annotation.good-ann b{color:var(--accent3)}
+
+.concept-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:.9rem}
+.concept-card{background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:1.1rem}
+.concept-card h3{font-size:.9rem;font-weight:700;margin-bottom:.45rem}
+.concept-card p{font-size:.8rem;color:var(--muted);line-height:1.6}
+.badge{display:inline-block;font-size:.66rem;font-weight:700;padding:.13rem .48rem;border-radius:4px;margin-bottom:.35rem;font-family:'JetBrains Mono',monospace}
+
+.stats-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:.75rem;margin-bottom:1.4rem}
+.stat-box{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:.8rem;text-align:center}
+.stat-val{font-size:1.3rem;font-weight:800;color:var(--accent);font-family:'JetBrains Mono',monospace}
+.stat-val.mod{color:var(--accent3)}
+.stat-label{font-size:.66rem;color:var(--muted);margin-top:.2rem;font-family:'JetBrains Mono',monospace}
+
+.table-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:.8rem;min-width:560px}
+th{text-align:left;padding:.55rem .75rem;color:var(--muted);border-bottom:1px solid var(--border);font-family:'JetBrains Mono',monospace;font-size:.68rem;letter-spacing:.08em}
+td{padding:.55rem .75rem;border-bottom:1px solid #131c2e;vertical-align:top}
+tr:last-child td{border-bottom:none}
+tr:hover td{background:rgba(255,255,255,.02)}
+.good{color:#34d399}.bad{color:#f87171}.med{color:#fb923c}
+td.moe-col{color:var(--accent)}
+td.mod-col{color:var(--accent3)}
+td.both-col{color:#f472b6;font-weight:600}
+
+.legend{display:flex;flex-wrap:wrap;gap:.5rem 1.1rem;margin-top:.75rem}
+.legend-item{display:flex;align-items:center;gap:.35rem;font-size:.76rem;color:var(--muted)}
+.legend-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0}
+
+.spec-token-grid{display:flex;flex-wrap:wrap;gap:.45rem;margin-bottom:.9rem}
+.spec-tok{font-family:'JetBrains Mono',monospace;font-size:.76rem;font-weight:600;padding:.22rem .55rem;border-radius:5px;cursor:pointer;transition:all .14s;border:1px solid transparent}
+.spec-tok:hover{filter:brightness(1.2)}
+.spec-tok.selected{box-shadow:0 0 0 2px white}
+.two-col{display:grid;grid-template-columns:1fr 1fr;gap:1rem}
+@media(max-width:700px){.two-col{grid-template-columns:1fr}}
+@media(max-width:640px){main{padding:1rem}.controls{gap:.7rem}input[type=range]{width:95px}.tab-nav{padding:.8rem 1rem 0}}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-inner">
+    <p class="kicker">EE508 · Systems for ML · 2024 Architecture Deep-Dive</p>
+    <h1>Mixture of <em>Depths</em> <span style="color:var(--muted);font-weight:400;font-size:60%">vs</span> Mixture of <span>Experts</span></h1>
+    <p class="subtitle"><strong style="color:var(--accent3)">Mixture of Depths (MoD)</strong> routes tokens across transformer layers. <strong style="color:var(--accent)">Mixture of Experts (MoE)</strong> routes tokens across FFN experts. Together they cut FLOPs by up to 88% vs dense — this is the architecture behind DeepSeek-V3. Interact with both, compare them head-to-head, and see why MoD is the idea MoE was missing.</p>
+  </div>
+</header>
+
+<div class="tab-nav">
+  <button class="tab-btn active"  onclick="showTab('overview',this)">① MoE Overview</button>
+  <button class="tab-btn"         onclick="showTab('stack',this)">② Transformer Stack</button>
+  <button class="tab-btn"         onclick="showTab('loadbalance',this)">③ Load Balancing</button>
+  <button class="tab-btn"         onclick="showTab('hardware',this)">④ Hardware Costs</button>
+  <button class="tab-btn"         onclick="showTab('specialization',this)">⑤ Expert Specialization ✦</button>
+  <button class="tab-btn mod-tab" onclick="showTab('mod',this)">⑥ Mixture of Depths ✦</button>
+  <button class="tab-btn mod-tab" onclick="showTab('compare',this)">⑦ MoE vs MoD vs Both</button>
+</div>
+
+<main>
+
+<!-- ══════════════ TAB 1: MoE OVERVIEW ══════════════ -->
+<div class="section active" id="sec-overview">
+  <div class="card">
+    <p class="card-title">What is Sparse Activation?</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(56,189,248,.15);color:var(--accent)">Dense FFN</span>
+        <h3>Traditional Transformer</h3>
+        <p>Every token passes through one large FFN. All parameters active on all tokens. Compute ∝ parameters.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(52,211,153,.15);color:var(--accent3)">Sparse MoE</span>
+        <h3>Mixture of Experts</h3>
+        <p>FFN split into N Expert sub-networks. Each token activates only <strong>top-k experts</strong>. Parameters ↑, FLOPs/token stays constant.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(129,140,248,.15);color:var(--accent2)">Router</span>
+        <h3>Gating Network</h3>
+        <p>Small linear layer: token embedding → N logits → softmax → top-k selection. Learned end-to-end with the model.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(251,146,60,.15);color:var(--warn)">Result</span>
+        <h3>Mixtral 8×7B</h3>
+        <p>46.7B total params, 12.9B active per token. Beats Llama-2 70B on most benchmarks at <strong>6× less compute</strong>.</p>
+      </div>
+    </div>
+  </div>
+  <div class="card">
+    <p class="card-title">Animate a Token Through the MoE Layer</p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Experts (N)</span><span class="ctrl-val" id="lbl-n">8</span><input type="range" min="2" max="8" value="8" id="sl-n" oninput="onOvSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Top-k</span><span class="ctrl-val" id="lbl-k">2</span><input type="range" min="1" max="4" value="2" id="sl-k" oninput="onOvSlider()"></div>
+      <button class="btn btn-primary" id="btn-animate" onclick="animateToken()">▶ Animate Token</button>
+      <button class="btn btn-ghost" onclick="resetOverview()">↺ Reset</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-overview"></canvas></div>
+    <div id="token-log">&gt; Click <strong style="color:var(--accent)">"Animate Token"</strong> to watch a token route through the MoE layer.</div>
+  </div>
+</div>
+
+<!-- ══════════════ TAB 2: TRANSFORMER STACK ══════════════ -->
+<div class="section" id="sec-stack">
+  <div class="card">
+    <p class="card-title">Where Does MoE Sit in the Transformer?</p>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:1rem;line-height:1.6">
+      MoE replaces the FFN sublayer inside each transformer block. Every other component — token embeddings, multi-head attention, layer norm, residual connections — stays identical to a dense transformer. Toggle between architectures and animate a token flowing through the full stack.
+    </p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Layers</span><span class="ctrl-val" id="stk-lbl-l">6</span><input type="range" min="2" max="8" value="6" id="stk-sl-l" oninput="onStackSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Experts / layer</span><span class="ctrl-val" id="stk-lbl-n">8</span><input type="range" min="2" max="8" value="8" id="stk-sl-n" oninput="onStackSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Architecture</span>
+        <select id="stk-mode" onchange="onStackSlider()">
+          <option value="dense">Dense Transformer</option>
+          <option value="moe" selected>Sparse MoE Transformer</option>
+          <option value="mixed">Mixed (alt. dense + MoE)</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" id="btn-stk-anim" onclick="animateStack()">▶ Animate Token</button>
+      <button class="btn btn-ghost" onclick="resetStack()">↺ Reset</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-stack"></canvas></div>
+    <div class="annotation" id="stk-annotation">Select an architecture and click <b>Animate Token</b> to watch a token flow through all layers.</div>
+  </div>
+  <div class="card">
+    <p class="card-title">Layer-by-Layer Breakdown</p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <h3 style="color:var(--accent2)">Multi-Head Attention</h3>
+        <p>Identical in dense and MoE. Each token attends to all others in the sequence. Cost = O(seq²·d). <strong>Not changed by MoE.</strong></p>
+      </div>
+      <div class="concept-card">
+        <h3 style="color:var(--accent)">MoE FFN Sublayer</h3>
+        <p>Replaces the single FFN. Router selects top-k of N experts. Only k expert FFNs execute — rest are skipped. Residual + LayerNorm wrap it exactly as before.</p>
+      </div>
+      <div class="concept-card">
+        <h3 style="color:var(--accent3)">Residual Stream</h3>
+        <p>The residual connection bypasses each sublayer. In MoE, dropped tokens (over capacity) ride the residual unchanged — their representation is not updated by that expert layer.</p>
+      </div>
+      <div class="concept-card">
+        <h3 style="color:var(--warn)">Mixed Architecture</h3>
+        <p>Many real models alternate: some layers use dense FFN (for stability at early/late layers), others use MoE. Mixtral uses MoE at every FFN layer. GPT-4 reportedly uses mixed.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ TAB 3: LOAD BALANCE ══════════════ -->
+<div class="section" id="sec-loadbalance">
+  <div class="card">
+    <p class="card-title">Load Balancing — The Core Training Challenge</p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Experts (N)</span><span class="ctrl-val" id="lb-lbl-n">8</span><input type="range" min="2" max="8" value="8" id="lb-sl-n" oninput="onLBSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Tokens/batch</span><span class="ctrl-val" id="lb-lbl-t">64</span><input type="range" min="16" max="128" step="8" value="64" id="lb-sl-t" oninput="onLBSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Capacity factor C</span><span class="ctrl-val" id="lb-lbl-cap">1.25</span><input type="range" min="10" max="30" step="1" value="13" id="lb-sl-cap" oninput="onLBSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Collapse bias</span><span class="ctrl-val" id="lb-lbl-c">5</span><input type="range" min="1" max="10" value="5" id="lb-sl-c" oninput="onLBSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Mode</span>
+        <select id="lb-mode" onchange="onLBSlider()">
+          <option value="collapse">Expert Collapse (no aux loss)</option>
+          <option value="balanced">Balanced (with aux loss)</option>
+          <option value="random">Random baseline</option>
+        </select>
+      </div>
+      <button class="btn btn-primary" onclick="runLBSim()">▶ Re-sample</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-lb"></canvas></div>
+    <div class="annotation" id="lb-annotation">Select a mode and click <b>Re-sample</b>.</div>
+  </div>
+  <div class="card">
+    <p class="card-title">Why Balance Matters</p>
+    <div class="concept-grid">
+      <div class="concept-card"><h3>Expert Collapse</h3><p>Without regularization the router picks 1–2 favorites. Others receive ~0 tokens — wasted parameters, no gradient, stuck training.</p></div>
+      <div class="concept-card"><h3>Auxiliary Loss</h3><p style="font-family:'JetBrains Mono',monospace;color:var(--accent);margin:.3rem 0">L_aux = α·N·Σ fᵢ·Pᵢ</p><p>f_i = fraction of tokens routed to expert i (pre-capacity). Penalizes imbalance differentiably.</p></div>
+      <div class="concept-card"><h3>Capacity &amp; Dropping</h3><p>capacity = ⌊T/N⌋×C. Tokens over capacity are <strong style="color:var(--warn)">dropped</strong> — residual bypass. Red hatching shows overflow in the chart above.</p></div>
+      <div class="concept-card"><h3>Real-World</h3><p>Mixtral: top-2, no dropping. Switch: top-1, C=1.25. DeepSeek-V3: aux-loss-free with bias correction, 256 experts.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ TAB 4: HARDWARE ══════════════ -->
+<div class="section" id="sec-hardware">
+  <div class="card">
+    <p class="card-title">Hardware Implications — Why MoE is Hard to Deploy</p>
+    <div class="stats-row">
+      <div class="stat-box"><div class="stat-val" id="hw-params">—</div><div class="stat-label">Total Params</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-active">—</div><div class="stat-label">Active/Token</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-ratio">—</div><div class="stat-label">Activation %</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-mem">—</div><div class="stat-label">Memory (bf16)</div></div>
+      <div class="stat-box"><div class="stat-val" id="hw-flops">—</div><div class="stat-label">FLOPs/Token</div></div>
+    </div>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Experts (N)</span><span class="ctrl-val" id="hw-lbl-n">8</span><input type="range" min="2" max="64" value="8" id="hw-sl-n" oninput="onHWSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Top-k</span><span class="ctrl-val" id="hw-lbl-k">2</span><input type="range" min="1" max="8" value="2" id="hw-sl-k" oninput="onHWSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">FFN dim</span><span class="ctrl-val" id="hw-lbl-d">4096</span><input type="range" min="512" max="16384" step="512" value="4096" id="hw-sl-d" oninput="onHWSlider()"></div>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-hw"></canvas></div>
+  </div>
+  <div class="card">
+    <p class="card-title">All-to-All Communication &amp; Memory Tradeoff</p>
+    <div class="concept-grid">
+      <div class="concept-card"><h3 style="color:var(--accent)">Expert Parallelism</h3><p>Each GPU holds N/D experts. Tokens dispatched to correct device via <strong>All-to-All collective</strong> per MoE layer — hard sync barrier.</p></div>
+      <div class="concept-card"><h3 style="color:var(--warn)">Comm. Bottleneck</h3><p>O(B×d_model) bytes per device. Doesn't overlap with compute. Larger N = more experts = more shards = more All-to-All traffic.</p></div>
+      <div class="concept-card"><h3 style="color:var(--accent3)">Memory vs Compute</h3><p>MoE 8×7B: ~94GB memory, ~26T FLOPs/tok. Dense 70B: ~140GB, ~140T FLOPs/tok. Pay in memory, save on compute.</p></div>
+      <div class="concept-card"><h3 style="color:var(--accent2)">Token Dropping</h3><p>Buffer overflow → token bypasses expert via residual. Introduces approximation error. Careful capacity tuning is critical for quality.</p></div>
+    </div>
+  </div>
+</div>
+
+<!-- ══════════════ TAB 5: EXPERT SPECIALIZATION ══════════════ -->
+<div class="section" id="sec-specialization">
+  <div class="card">
+    <p class="card-title">What is Expert Specialization?</p>
+    <div class="concept-grid">
+      <div class="concept-card"><h3 style="color:var(--accent)">Emergent Behavior</h3><p>Nobody programs experts to specialize. It emerges from training — experts that handle certain token types well receive more gradient for those tokens and naturally develop domain focus.</p></div>
+      <div class="concept-card"><h3 style="color:var(--accent3)">Mixtral Findings</h3><p>Analysis of Mixtral 8×7B routing (Jiang et al., 2024) shows domain clustering: some experts strongly prefer code tokens, others math, others multilingual text.</p></div>
+      <div class="concept-card"><h3 style="color:var(--accent2)">Why It Matters</h3><p>Specialization is why MoE beats dense at equal FLOPs — experts become efficient specialists. It also enables interpretability: probe which expert "knows" a domain.</p></div>
+      <div class="concept-card"><h3 style="color:var(--warn)">Not Perfect</h3><p>Soft and distributed, not hard-coded. Load balancing constrains it. Early layers specialize less. The same token type may split across multiple experts.</p></div>
+    </div>
+  </div>
+  <div class="card">
+    <p class="card-title">Routing Heatmap — Token Category × Expert Affinity</p>
+    <p style="font-size:.8rem;color:var(--muted);margin-bottom:.9rem;line-height:1.6">Brighter = stronger affinity. Based on approximate findings from Mixtral 8×7B layer analysis. Click a row to highlight.</p>
+    <div class="two-col">
+      <div><div class="canvas-wrap"><canvas id="cv-spec-heat"></canvas></div></div>
+      <div><div class="canvas-wrap"><canvas id="cv-spec-legend"></canvas></div></div>
+    </div>
+    <div class="annotation good-ann" id="spec-heat-annotation"><b>Click any row</b> to highlight that token category and see which experts it prefers.</div>
+  </div>
+  <div class="card">
+    <p class="card-title">Training Dynamics — Watch Specialization Emerge</p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Training progress</span><span class="ctrl-val" id="spec-lbl-train">0%</span><input type="range" min="0" max="100" value="0" id="spec-sl-train" oninput="onSpecTrainSlider()" style="width:180px"></div>
+      <button class="btn btn-primary" id="btn-spec-anim" onclick="animateTraining()">▶ Animate</button>
+      <button class="btn btn-ghost" onclick="resetTraining()">↺ Reset</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-spec-train"></canvas></div>
+    <div class="annotation" id="spec-train-annotation">At initialization (0%), routing is nearly uniform across all experts.</div>
+  </div>
+  <div class="card">
+    <p class="card-title">Live Token Stream</p>
+    <div class="spec-token-grid" id="spec-token-grid"></div>
+    <div class="canvas-wrap"><canvas id="cv-spec-stream"></canvas></div>
+    <div class="annotation" id="spec-stream-annotation">Select a token above to animate its routing path.</div>
+  </div>
+</div>
+
+<!-- ══════════════ TAB 6: MIXTURE OF DEPTHS ══════════════ -->
+<div class="section" id="sec-mod">
+  <div class="card">
+    <p class="card-title mod">What is Mixture of Depths (MoD)?</p>
+    <p style="font-size:.82rem;color:var(--muted);margin-bottom:1rem;line-height:1.6">
+      <strong style="color:var(--accent3)">MoD (Raposo et al., Google DeepMind, 2024)</strong> extends sparse activation from the <em>width</em> dimension to the <em>depth</em> dimension. Instead of asking "which expert processes this token?", MoD asks: <strong style="color:var(--accent3)">"does this token even need to go through this layer?"</strong>
+    </p>
+    <div class="concept-grid">
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(56,189,248,.15);color:var(--accent)">MoE — Width Sparse</span>
+        <h3>Routes Across Experts</h3>
+        <p>All tokens process every layer. Within each FFN, only k of N experts are activated. Saves compute inside the FFN sublayer.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(52,211,153,.15);color:var(--accent3)">MoD — Depth Sparse</span>
+        <h3>Routes Across Layers</h3>
+        <p>At each layer, a router decides which tokens to process. Tokens that don't "need" this layer skip it entirely via the residual — <strong>zero compute</strong> for those tokens at that layer.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(244,114,182,.15);color:#f472b6">MoE + MoD</span>
+        <h3>Sparse in Both Dimensions</h3>
+        <p>Combine both: each token selects which layers to pass through (MoD), and within active layers selects which expert (MoE). DeepSeek-V3 approaches this design.</p>
+      </div>
+      <div class="concept-card">
+        <span class="badge" style="background:rgba(251,146,60,.15);color:var(--warn)">Key Result</span>
+        <h3>Same Quality, Less Compute</h3>
+        <p>MoD models match isoFLOP dense baselines while using significantly fewer FLOPs/token. At 12.5% capacity, a 12-layer MoD uses ~1.5 layers of compute per token on average.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title mod">MoD — Animate Token Paths Through the Layer Stack</p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Layers</span><span class="ctrl-val" id="mod-lbl-l">8</span><input type="range" min="4" max="12" value="8" id="mod-sl-l" oninput="onModSlider()" class="mod-range"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Capacity (% pass-through)</span><span class="ctrl-val" id="mod-lbl-c">50%</span><input type="range" min="10" max="90" step="5" value="50" id="mod-sl-c" oninput="onModSlider()" class="mod-range"></div>
+      <div class="ctrl-group"><span class="ctrl-label">Tokens to show</span><span class="ctrl-val" id="mod-lbl-t">6</span><input type="range" min="3" max="10" value="6" id="mod-sl-t" oninput="onModSlider()" class="mod-range"></div>
+      <button class="btn btn-mod" id="btn-mod-anim" onclick="animateMoD()">▶ Animate</button>
+      <button class="btn btn-ghost" onclick="resetMoD()">↺ Reset</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-mod"></canvas></div>
+    <div class="annotation mod-ann" id="mod-annotation">Click <b>Animate</b> to watch tokens selectively skip layers based on the router's decision.</div>
+  </div>
+
+  <div class="card">
+    <p class="card-title mod">MoD vs MoE — Compute Savings Explorer</p>
+    <div class="stats-row">
+      <div class="stat-box"><div class="stat-val mod" id="mod-stat-flops">—</div><div class="stat-label">MoD FLOPs/Token</div></div>
+      <div class="stat-box"><div class="stat-val" id="mod-stat-moe">—</div><div class="stat-label">MoE FLOPs/Token</div></div>
+      <div class="stat-box"><div class="stat-val mod" id="mod-stat-saving">—</div><div class="stat-label">MoD Saving vs Dense</div></div>
+      <div class="stat-box"><div class="stat-val" id="mod-stat-moe-saving">—</div><div class="stat-label">MoE Saving vs Dense</div></div>
+    </div>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">MoD capacity %</span><span class="ctrl-val" id="mod-c2-lbl">50%</span><input type="range" min="10" max="90" step="5" value="50" id="mod-c2-sl" oninput="onModCompareSlider()" class="mod-range"></div>
+      <div class="ctrl-group"><span class="ctrl-label">MoE experts (N)</span><span class="ctrl-val" id="mod-n2-lbl">8</span><input type="range" min="2" max="16" value="8" id="mod-n2-sl" oninput="onModCompareSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">MoE top-k</span><span class="ctrl-val" id="mod-k2-lbl">2</span><input type="range" min="1" max="4" value="2" id="mod-k2-sl" oninput="onModCompareSlider()"></div>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-mod-compare"></canvas></div>
+    <div class="annotation mod-ann" id="mod-compare-annotation">Adjust sliders to compare compute costs across architectures.</div>
+  </div>
+</div>
+
+<!-- ══════════════ TAB 7: MoE vs MoD vs BOTH ══════════════ -->
+<div class="section" id="sec-compare">
+  <div class="card">
+    <p class="card-title mod">Head-to-Head: Dense vs MoE vs MoD vs MoE+MoD</p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Layers</span><span class="ctrl-val" id="cmp-lbl-l">6</span><input type="range" min="4" max="8" value="6" id="cmp-sl-l" oninput="onCmpAnimSlider()"></div>
+      <div class="ctrl-group"><span class="ctrl-label">MoD capacity %</span><span class="ctrl-val" id="cmp-lbl-c">50%</span><input type="range" min="10" max="90" step="10" value="50" id="cmp-sl-c" oninput="onCmpAnimSlider()" class="mod-range"></div>
+      <div class="ctrl-group"><span class="ctrl-label">MoE experts</span><span class="ctrl-val" id="cmp-lbl-n">8</span><input type="range" min="2" max="8" value="8" id="cmp-sl-n" oninput="onCmpAnimSlider()"></div>
+      <button class="btn btn-mod" id="btn-cmp-anim" onclick="animateComparison()">▶ Animate All</button>
+      <button class="btn btn-ghost" onclick="resetComparison()">↺ Reset</button>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-cmp-anim"></canvas></div>
+    <div class="annotation mod-ann" id="cmp-anim-annotation">Click <b>Animate All</b> to see the same token processed by all four architectures simultaneously.</div>
+  </div>
+
+  <div class="card">
+    <p class="card-title mod">Full Comparison Table</p>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Dimension</th><th>Dense</th><th class="moe-col">Sparse MoE</th><th class="mod-col">Mixture of Depths</th><th class="both-col">MoE + MoD</th></tr></thead>
+      <tbody>
+        <tr><td>Sparse dimension</td><td>None</td><td class="moe-col">Width (experts)</td><td class="mod-col">Depth (layers)</td><td class="both-col">Width + Depth</td></tr>
+        <tr><td>Total parameters</td><td>Baseline</td><td class="moe-col">N× more (one per expert)</td><td class="mod-col">Same as dense</td><td class="both-col">N× more</td></tr>
+        <tr><td>Active params/token</td><td>100%</td><td class="moe-col">k/N of FFN params</td><td class="mod-col">C% of all layers</td><td class="both-col">k/N × C%</td></tr>
+        <tr><td>FLOPs/token vs dense</td><td>1×</td><td class="moe-col">~25% (top-2 of 8)</td><td class="mod-col">~50% (50% capacity)</td><td class="both-col">~12–15%</td></tr>
+        <tr><td>Memory requirement</td><td>Baseline</td><td class="moe-col">N× (all experts loaded)</td><td class="mod-col">Same as dense</td><td class="both-col">N× (all experts)</td></tr>
+        <tr><td>Routing overhead</td><td>None</td><td class="moe-col">1 router per layer</td><td class="mod-col">1 router per layer</td><td class="both-col">2 routers per layer</td></tr>
+        <tr><td>Communication</td><td>Low</td><td class="moe-col">All-to-All per layer</td><td class="mod-col">Low (no expert dispatch)</td><td class="both-col">All-to-All per active layer</td></tr>
+        <tr><td>Training stability</td><td class="good">High</td><td class="med">Moderate</td><td class="good">High</td><td class="med">Moderate</td></tr>
+        <tr><td>Load balancing needed</td><td>No</td><td class="moe-col">Yes (aux loss)</td><td class="mod-col">Inherent (capacity)</td><td class="both-col">Yes (both routers)</td></tr>
+        <tr><td>Expert specialization</td><td>None</td><td class="moe-col">Yes — emergent</td><td class="mod-col">Layer importance learned</td><td class="both-col">Both</td></tr>
+        <tr><td>Key model</td><td>GPT-2, LLaMA</td><td class="moe-col">Mixtral, Switch</td><td class="mod-col">MoD (DeepMind 2024)</td><td class="both-col">DeepSeek-V3 (approx)</td></tr>
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+  <div class="card">
+    <p class="card-title mod">Quality vs Compute — Three Scaling Curves</p>
+    <div class="controls">
+      <div class="ctrl-group"><span class="ctrl-label">Compute budget (TFLOPs/token)</span><span class="ctrl-val" id="sc-lbl">20</span><input type="range" min="5" max="200" value="20" id="sc-sl" oninput="onScaleSlider()"></div>
+    </div>
+    <div class="canvas-wrap"><canvas id="cv-scale"></canvas></div>
+    <div class="legend">
+      <div class="legend-item"><span class="legend-dot" style="background:#38bdf8"></span>Dense</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#34d399"></span>Sparse MoE</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#f472b6"></span>MoE + MoD</div>
+      <div class="legend-item"><span class="legend-dot" style="background:#fb923c"></span>Your budget</div>
+    </div>
+    <div class="annotation mod-ann" id="sc-annotation">Drag to explore quality at any compute budget.</div>
+  </div>
+</div>
+
+</main>
+<script>
+'use strict';
+const EC=['#38bdf8','#818cf8','#34d399','#fb923c','#f472b6','#facc15','#a78bfa','#60a5fa'];
+const SPEC_CATEGORIES=['Code / Syntax','Mathematics','English Prose','Multilingual','Python Keywords','Punctuation','Numerics','Named Entities'];
+const SPEC_CAT_COLORS=['#38bdf8','#818cf8','#34d399','#f472b6','#60a5fa','#facc15','#fb923c','#a78bfa'];
+const SPEC_MATRIX_TRAINED=[
+  [0.42,0.05,0.07,0.04,0.22,0.06,0.06,0.08],
+  [0.05,0.46,0.06,0.05,0.08,0.04,0.18,0.08],
+  [0.06,0.05,0.42,0.09,0.05,0.10,0.07,0.16],
+  [0.04,0.05,0.11,0.46,0.04,0.08,0.06,0.16],
+  [0.38,0.06,0.05,0.04,0.30,0.05,0.06,0.06],
+  [0.06,0.04,0.12,0.08,0.05,0.46,0.05,0.14],
+  [0.06,0.20,0.06,0.05,0.05,0.05,0.44,0.09],
+  [0.05,0.07,0.16,0.12,0.05,0.09,0.08,0.38],
+];
+const SPEC_TOKENS=[
+  {label:'def',cat:0,color:'#38bdf8'},{label:'class',cat:0,color:'#38bdf8'},
+  {label:'return',cat:4,color:'#60a5fa'},{label:'import',cat:4,color:'#60a5fa'},
+  {label:'∫',cat:1,color:'#818cf8'},{label:'∑',cat:1,color:'#818cf8'},
+  {label:'3.14',cat:6,color:'#fb923c'},{label:'42',cat:6,color:'#fb923c'},
+  {label:'the',cat:2,color:'#34d399'},{label:'of',cat:2,color:'#34d399'},
+  {label:'le',cat:3,color:'#f472b6'},{label:'der',cat:3,color:'#f472b6'},
+  {label:',',cat:5,color:'#facc15'},{label:'.',cat:5,color:'#facc15'},
+  {label:'Google',cat:7,color:'#a78bfa'},{label:'Paris',cat:7,color:'#a78bfa'},
+];
+
+let _raf=null, _timers=[];
+function cancelAll(){if(_raf){cancelAnimationFrame(_raf);_raf=null;}_timers.forEach(h=>clearTimeout(h));_timers=[];}
+
+function softmax(a,tau){tau=tau||1;const mx=Math.max(...a);const ex=a.map(v=>Math.exp((v-mx)/tau));const s=ex.reduce((a,b)=>a+b,0);return ex.map(v=>v/s);}
+function topKIdx(a,k){return a.map((v,i)=>[v,i]).sort((a,b)=>b[0]-a[0]).slice(0,k).map(p=>p[1]);}
+function randNormal(){let u,v;do{u=Math.random();}while(u===0);do{v=Math.random();}while(v===0);return Math.sqrt(-2*Math.log(u))*Math.cos(2*Math.PI*v);}
+function easeIO(t){return t<0.5?2*t*t:-1+(4-2*t)*t;}
+function easeOut(t){return 1-(1-t)*(1-t);}
+function clamp(v,lo,hi){return Math.max(lo,Math.min(hi,v));}
+function lerp(a,b,t){return a+(b-a)*t;}
+function lerpMat(a,b,t){return a.map((r,i)=>r.map((v,j)=>v+(b[i][j]-v)*t));}
+
+const _ctxCache={};
+function setSize(id,cssH){
+  const c=document.getElementById(id);
+  if(!c)return[0,0,null];
+  const dpr=window.devicePixelRatio||1;
+  const cssW=c.parentElement.clientWidth;
+  const wW=Math.round(cssW*dpr),wH=Math.round(cssH*dpr);
+  if(c.width!==wW||c.height!==wH){
+    c.width=wW;c.height=wH;c.style.height=cssH+'px';
+    const ctx=c.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);_ctxCache[id]=ctx;
+  }
+  if(!_ctxCache[id]){const ctx=c.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);_ctxCache[id]=ctx;}
+  return[cssW,cssH,_ctxCache[id]];
+}
+function rr(ctx,x,y,w,h,r){r=Math.max(0,Math.min(r,w/2,h/2));ctx.beginPath();ctx.moveTo(x+r,y);ctx.lineTo(x+w-r,y);ctx.arcTo(x+w,y,x+w,y+r,r);ctx.lineTo(x+w,y+h-r);ctx.arcTo(x+w,y+h,x+w-r,y+h,r);ctx.lineTo(x+r,y+h);ctx.arcTo(x,y+h,x,y+h-r,r);ctx.lineTo(x,y+r);ctx.arcTo(x,y,x+r,y,r);ctx.closePath();}
+function tip(ctx,x,y,col){ctx.save();ctx.fillStyle=col;ctx.beginPath();ctx.moveTo(x-8,y-4);ctx.lineTo(x,y);ctx.lineTo(x-8,y+4);ctx.fill();ctx.restore();}
+
+function showTab(id,btn){
+  cancelAll();
+  document.querySelectorAll('.section').forEach(s=>s.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById('sec-'+id).classList.add('active');
+  btn.classList.add('active');
+  if(id==='overview')       onOvSlider();
+  if(id==='stack')          onStackSlider();
+  if(id==='loadbalance')    runLBSim();
+  if(id==='hardware')       onHWSlider();
+  if(id==='specialization') initSpec();
+  if(id==='mod')            {onModSlider();onModCompareSlider();}
+  if(id==='compare')        {onCmpAnimSlider();onScaleSlider();}
+}
+
+// ── TAB 1: OVERVIEW ──────────────────────────────────
+function onOvSlider(){
+  const n=+document.getElementById('sl-n').value,k=clamp(+document.getElementById('sl-k').value,1,n);
+  document.getElementById('lbl-n').textContent=n;document.getElementById('lbl-k').textContent=k;
+  drawOverview(n,k,[],null);
+}
+function resetOverview(){cancelAll();document.getElementById('btn-animate').disabled=false;document.getElementById('token-log').innerHTML='&gt; Click <strong style="color:var(--accent)">"Animate Token"</strong> to watch a token route through the MoE layer.';onOvSlider();}
+function drawOverview(n,k,sel,tp){
+  const CH=clamp(n*46+60,280,440);
+  const[W,H,ctx]=setSize('cv-overview',CH);if(!ctx)return;
+  ctx.clearRect(0,0,W,H);
+  const PAD=14,tokR=20,gW=88,gH=42;
+  const expR=clamp((H-PAD*2)/(n*2.4),9,24);
+  const tokCX=PAD+tokR+2,tokCY=H/2,gCX=tokCX+tokR+50+gW/2,gCY=H/2;
+  const expX=gCX+gW/2+68+expR,outCX=W-PAD-22,outCY=H/2;
+  const eYs=Array.from({length:n},(_,i)=>PAD+expR+(H-PAD*2-expR*2)*(n>1?i/(n-1):0.5));
+  for(let i=0;i<n;i++){
+    const act=sel.includes(i);
+    ctx.save();ctx.beginPath();const mx=gCX+gW/2+26;
+    ctx.moveTo(gCX+gW/2,gCY);ctx.bezierCurveTo(mx,gCY,mx,eYs[i],expX-expR,eYs[i]);
+    ctx.strokeStyle=act?EC[i%8]:'rgba(30,45,74,.5)';ctx.lineWidth=act?2.5:1;ctx.setLineDash(act?[]:[4,4]);ctx.stroke();ctx.restore();
+  }
+  for(const i of sel){ctx.save();ctx.beginPath();ctx.moveTo(expX+expR,eYs[i]);ctx.bezierCurveTo(outCX-48,eYs[i],outCX-48,outCY,outCX-19,outCY);ctx.strokeStyle=EC[i%8]+'bb';ctx.lineWidth=2;ctx.stroke();ctx.restore();}
+  for(let i=0;i<n;i++){
+    const act=sel.includes(i),col=EC[i%8];
+    ctx.save();ctx.beginPath();ctx.arc(expX,eYs[i],expR,0,Math.PI*2);
+    ctx.fillStyle=act?col+'33':'#111827cc';ctx.fill();ctx.strokeStyle=act?col:'#1e2d4a';ctx.lineWidth=act?2.5:1;ctx.stroke();
+    ctx.fillStyle=act?col:'#475569';ctx.font=`bold ${clamp(expR*.56,8,13)}px 'JetBrains Mono',monospace`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('E'+i,expX,eYs[i]);ctx.restore();
+  }
+  ctx.save();rr(ctx,gCX-gW/2,gCY-gH/2,gW,gH,8);ctx.fillStyle='#1a2236';ctx.fill();ctx.strokeStyle='#38bdf8';ctx.lineWidth=1.5;ctx.stroke();
+  ctx.fillStyle='#38bdf8';ctx.font='bold 11px Syne,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('ROUTER',gCX,gCY-7);
+  ctx.fillStyle='#64748b';ctx.font='9px JetBrains Mono,monospace';ctx.fillText('top-'+k+' of '+n,gCX,gCY+8);ctx.restore();
+  ctx.save();ctx.beginPath();ctx.moveTo(tokCX+tokR,tokCY);ctx.lineTo(gCX-gW/2,tokCY);ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.stroke();tip(ctx,gCX-gW/2,tokCY,'#38bdf8');ctx.restore();
+  ctx.save();ctx.beginPath();ctx.arc(outCX,outCY,19,0,Math.PI*2);ctx.fillStyle=sel.length>0?'rgba(52,211,153,.18)':'#111827';ctx.fill();ctx.strokeStyle=sel.length>0?'#34d399':'#1e2d4a';ctx.lineWidth=1.5;ctx.stroke();ctx.fillStyle=sel.length>0?'#34d399':'#475569';ctx.font='bold 9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('OUT',outCX,outCY);ctx.restore();
+  let tx=tp===null?tokCX:tp==='done'?gCX-gW/2-tokR-3:tokCX+(gCX-gW/2-tokR-3-tokCX)*tp;
+  ctx.save();ctx.beginPath();ctx.arc(tx,tokCY,tokR,0,Math.PI*2);ctx.fillStyle='rgba(56,189,248,.18)';ctx.fill();ctx.strokeStyle='#38bdf8';ctx.lineWidth=2;ctx.stroke();ctx.fillStyle='#38bdf8';ctx.font='bold 9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('TOKEN',tx,tokCY);ctx.restore();
+  ctx.save();ctx.fillStyle='#334155';ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='center';['input','router','experts','output'].forEach((l,i)=>ctx.fillText(l,[tokCX,gCX,expX,outCX][i],H-7));ctx.restore();
+}
+function logLine(h){const el=document.getElementById('token-log');el.innerHTML+='<br>'+h;el.scrollTop=el.scrollHeight;}
+function animateToken(){
+  cancelAll();document.getElementById('btn-animate').disabled=true;
+  const n=+document.getElementById('sl-n').value,k=clamp(+document.getElementById('sl-k').value,1,n);
+  const logits=Array.from({length:n},()=>randNormal()*2.5),probs=softmax(logits),sel=topKIdx(probs,k);
+  logLine('<span style="color:#334155">───────────────────</span>');
+  logLine('<span style="color:#38bdf8">▶ New token</span> — top-'+k+' of '+n);
+  logLine('  Probs: ['+probs.map(v=>(v*100).toFixed(1)+'%').join(', ')+']');
+  let fr=0;const FR=50;
+  function p1(){drawOverview(n,k,[],easeIO(clamp(fr/FR,0,1)));fr++;if(fr<=FR){_raf=requestAnimationFrame(p1);}else{_raf=null;logLine('  At <span style="color:#38bdf8">Router</span>...');_timers.push(setTimeout(p2,250));}}
+  function p2(){drawOverview(n,k,sel,'done');const ss=sel.reduce((s,i)=>s+probs[i],0);logLine('  <span style="color:#38bdf8">Selected:</span> '+sel.map(i=>`<span style="color:${EC[i%8]}">E${i}(${(probs[i]*100).toFixed(1)}%)</span>`).join(', '));logLine('  <span style="color:#34d399">Renorm:</span> '+sel.map(i=>`p̃${i}=${(probs[i]/ss*100).toFixed(1)}%`).join(' + '));_timers.push(setTimeout(p3,600));}
+  function p3(){drawOverview(n,k,sel,null);logLine('<span style="color:#34d399">✓ Output = weighted sum</span>');document.getElementById('btn-animate').disabled=false;}
+  _raf=requestAnimationFrame(p1);
+}
+
+// ── TAB 2: TRANSFORMER STACK ──────────────────────────
+function onStackSlider(){
+  const L=+document.getElementById('stk-sl-l').value,N=+document.getElementById('stk-sl-n').value,mode=document.getElementById('stk-mode').value;
+  document.getElementById('stk-lbl-l').textContent=L;document.getElementById('stk-lbl-n').textContent=N;
+  drawStack(L,N,mode,-1,null);
+}
+function resetStack(){cancelAll();document.getElementById('btn-stk-anim').disabled=false;onStackSlider();}
+
+function drawStack(L,N,mode,activeLayer,tokenY){
+  const BLK_H=46,BLK_W_ATT=100,BLK_W_FFN=130,GAP=6,PAD_L=30,PAD_T=20,PAD_R=20;
+  const CSS_H=L*(BLK_H+GAP)+PAD_T+40;
+  const[W,H,ctx]=setSize('cv-stack',CSS_H);if(!ctx)return;
+  ctx.clearRect(0,0,W,H);
+
+  const colW=(W-PAD_L-PAD_R-GAP*3)/4;
+  const col=(i)=>PAD_L+i*(colW+GAP);
+
+  // Column headers
+  ['Input','Attn','FFN / MoE','Output'].forEach((lbl,i)=>{
+    ctx.save();ctx.fillStyle='#475569';ctx.font='bold 9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText(lbl,col(i)+colW/2,PAD_T-4);ctx.restore();
+  });
+
+  for(let l=0;l<L;l++){
+    const y=PAD_T+l*(BLK_H+GAP);
+    const cy=y+BLK_H/2;
+    const isMoE=mode==='moe'||(mode==='mixed'&&l%2===0);
+    const isActive=l===activeLayer;
+
+    // Residual line (left)
+    if(l>0){ctx.save();ctx.beginPath();ctx.moveTo(col(0)+colW/2,y-GAP);ctx.lineTo(col(0)+colW/2,y);ctx.strokeStyle='#38bdf888';ctx.lineWidth=2;ctx.stroke();ctx.restore();}
+
+    // Attention block
+    ctx.save();rr(ctx,col(1),y,colW,BLK_H,5);
+    ctx.fillStyle=isActive?'rgba(129,140,248,.25)':'rgba(129,140,248,.08)';ctx.fill();
+    ctx.strokeStyle=isActive?'#818cf8':'#818cf844';ctx.lineWidth=isActive?2:1;ctx.stroke();
+    ctx.fillStyle=isActive?'#818cf8':'#64748b';ctx.font='bold 9px Syne,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('MHA',col(1)+colW/2,cy);ctx.restore();
+
+    // FFN / MoE block
+    const ffnColor=isMoE?'#38bdf8':'#34d399';
+    ctx.save();rr(ctx,col(2),y,colW,BLK_H,5);
+    ctx.fillStyle=isActive?ffnColor+'33':ffnColor+'0d';ctx.fill();
+    ctx.strokeStyle=isActive?ffnColor:ffnColor+'55';ctx.lineWidth=isActive?2:1;ctx.stroke();
+    ctx.fillStyle=isActive?ffnColor:'#475569';ctx.font='bold 9px Syne,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText(isMoE?`MoE(${N})`:'FFN',col(2)+colW/2,cy);ctx.restore();
+
+    // Layer label
+    ctx.save();ctx.fillStyle=isActive?'#e2e8f0':'#475569';ctx.font=`${isActive?'bold ':''} 9px JetBrains Mono,monospace`;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('L'+l,col(0)+colW/2,cy);ctx.restore();
+
+    // Arrows between blocks
+    [[1,2],[2,3]].forEach(([from,to])=>{
+      ctx.save();ctx.beginPath();ctx.moveTo(col(from)+colW,cy);ctx.lineTo(col(to)-2,cy);
+      ctx.strokeStyle=isActive?'#e2e8f0':'#334155';ctx.lineWidth=isActive?1.5:1;ctx.stroke();
+      tip(ctx,col(to)-2,cy,isActive?'#e2e8f0':'#334155');ctx.restore();
+    });
+
+    // Expert mini circles for MoE
+    if(isMoE&&isActive){
+      const ex=Math.min(N,6);
+      for(let e=0;e<ex;e++){
+        const ex_x=col(2)+colW/(ex+1)*(e+1);
+        ctx.save();ctx.beginPath();ctx.arc(ex_x,cy,5,0,Math.PI*2);
+        ctx.fillStyle=EC[e%8]+'88';ctx.fill();ctx.restore();
+      }
+    }
+  }
+
+  // Animated token dot
+  if(tokenY!==null){
+    const x=col(0)+colW/2;
+    ctx.save();ctx.beginPath();ctx.arc(x,tokenY,8,0,Math.PI*2);
+    ctx.fillStyle='rgba(56,189,248,.9)';ctx.fill();
+    ctx.strokeStyle='white';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+  }
+
+  // Legend
+  ctx.save();ctx.fillStyle='#38bdf8';ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='left';
+  if(mode==='moe')ctx.fillText('■ MoE FFN layer',col(2),H-6);
+  if(mode==='dense')ctx.fillText('■ Dense FFN layer',col(2),H-6);
+  if(mode==='mixed')ctx.fillText('■ MoE (even layers)  ■ Dense (odd layers)',col(1),H-6);
+  ctx.restore();
+}
+
+function animateStack(){
+  cancelAll();document.getElementById('btn-stk-anim').disabled=true;
+  const L=+document.getElementById('stk-sl-l').value,N=+document.getElementById('stk-sl-n').value,mode=document.getElementById('stk-mode').value;
+  const BLK_H=46,GAP=6,PAD_T=20;
+  const startY=PAD_T;
+  const endY=PAD_T+L*(BLK_H+GAP);
+  let frame=0;const FRAMES=L*20;
+  function step(){
+    const t=frame/FRAMES;
+    const ty=startY+t*(endY-startY);
+    const lyr=Math.floor(t*L);
+    drawStack(L,N,mode,clamp(lyr,0,L-1),ty);
+    const isMoE=mode==='moe'||(mode==='mixed'&&lyr%2===0);
+    document.getElementById('stk-annotation').innerHTML=
+      `Layer ${clamp(lyr,0,L-1)}: <b style="color:${isMoE?'#38bdf8':'#34d399'}">${isMoE?`MoE FFN (${N} experts)`:'Dense FFN'}</b> — token flowing through residual stream.`;
+    frame++;
+    if(frame<=FRAMES){_raf=requestAnimationFrame(step);}
+    else{_raf=null;drawStack(L,N,mode,-1,null);document.getElementById('btn-stk-anim').disabled=false;document.getElementById('stk-annotation').innerHTML=`<b>Complete</b> — token passed through all ${L} transformer layers.`;}
+  }
+  _raf=requestAnimationFrame(step);
+}
+
+// ── TAB 3: LOAD BALANCE ──────────────────────────────
+function onLBSlider(){
+  ['lb-sl-n','lb-sl-t','lb-sl-cap','lb-sl-c'].forEach(id=>{
+    const v=+document.getElementById(id).value;
+    const lblId=id.replace('sl','lbl');
+    if(document.getElementById(lblId)){
+      if(id==='lb-sl-cap') document.getElementById(lblId).textContent=(v/10).toFixed(2);
+      else document.getElementById(lblId).textContent=v;
+    }
+  });
+  runLBSim();
+}
+function runLBSim(){
+  const n=+document.getElementById('lb-sl-n').value,T=+document.getElementById('lb-sl-t').value;
+  const C=+document.getElementById('lb-sl-cap').value/10,bias=+document.getElementById('lb-sl-c').value;
+  const mode=document.getElementById('lb-mode').value;
+  const req=new Array(n).fill(0),cap=Math.floor(T/n*C);
+  if(mode==='collapse'){const b=Array.from({length:n},(_,i)=>Math.pow(bias,n-1-i));const tot=b.reduce((a,x)=>a+x,0);for(let t=0;t<T;t++){let r=Math.random()*tot,c=n-1;for(let i=0;i<n;i++){r-=b[i];if(r<=0){c=i;break;}}req[c]++;}}
+  else if(mode==='balanced'){for(let t=0;t<T;t++){const l=Array.from({length:n},()=>randNormal()*.4);req[topKIdx(softmax(l),1)[0]]++;}}
+  else{for(let t=0;t<T;t++)req[Math.floor(Math.random()*n)]++;}
+  const exec=req.map(v=>Math.min(v,cap));let dropped=0;exec.forEach((v,i)=>{dropped+=req[i]-v;});
+  drawLB(n,req,exec,cap,T,dropped,mode);
+}
+function drawLB(n,req,exec,cap,T,dropped,mode){
+  const[W,H,ctx]=setSize('cv-lb',300);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const PL=8,PR=52,PT=28,PB=48,CW=W-PL-PR,CH=H-PT-PB;
+  const gap=5,bw=clamp((CW-gap*(n-1))/n,8,68);
+  const bsx=PL+(CW-bw*n-gap*(n-1))/2,mx=Math.max(...req,1),ideal=T/n;
+  const capY=PT+CH*(1-cap/mx),idealY=PT+CH*(1-ideal/mx);
+  [[capY,'#fb923c88','cap='+cap,'#fb923c'],[idealY,'#34d39966','ideal','#34d399']].forEach(([y,sc,lbl,fc])=>{ctx.save();ctx.beginPath();ctx.moveTo(PL,y);ctx.lineTo(W-PR,y);ctx.strokeStyle=sc;ctx.lineWidth=1.2;ctx.setLineDash([5,3]);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle=fc;ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='left';ctx.fillText(lbl,W-PR+3,y+4);ctx.restore();});
+  for(let i=0;i<n;i++){
+    const bx=bsx+i*(bw+gap),over=req[i]>cap,col=over?'#f87171':EC[i%8];
+    const rh=req[i]/mx*CH,ry=PT+CH-rh,eh=exec[i]/mx*CH,ey=PT+CH-eh;
+    ctx.save();rr(ctx,bx,ry,bw,rh,3);ctx.fillStyle=col+'22';ctx.fill();ctx.strokeStyle=col+'44';ctx.lineWidth=1;ctx.stroke();ctx.restore();
+    ctx.save();rr(ctx,bx,ey,bw,eh,3);ctx.fillStyle=col+'88';ctx.fill();ctx.strokeStyle=col;ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+    if(over&&ry<ey-2){ctx.save();rr(ctx,bx,ry,bw,ey-ry,3);ctx.fillStyle='rgba(248,113,113,.22)';ctx.fill();ctx.strokeStyle='#f87171';ctx.lineWidth=1;ctx.setLineDash([2,2]);ctx.stroke();ctx.setLineDash([]);ctx.fillStyle='#f87171';ctx.font='bold 9px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('✕',bx+bw/2,ry+(ey-ry)/2);ctx.restore();}
+    ctx.save();ctx.fillStyle=col;ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText(req[i],bx+bw/2,Math.max(ry-4,PT+10));ctx.restore();
+    ctx.save();ctx.fillStyle='#475569';ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText('E'+i,bx+bw/2,H-PB+15);ctx.restore();
+  }
+  ctx.save();ctx.beginPath();ctx.moveTo(PL,PT+CH);ctx.lineTo(W-PR,PT+CH);ctx.strokeStyle='#1e2d4a';ctx.lineWidth=1;ctx.stroke();ctx.restore();
+  const mean=req.reduce((a,b)=>a+b,0)/n,cv=mean>0?Math.sqrt(req.reduce((a,b)=>a+(b-mean)**2,0)/n)/mean:0;
+  document.getElementById('lb-annotation').innerHTML={collapse:`<b>Expert Collapse:</b> CV=${cv.toFixed(2)}, ${dropped} tokens dropped (red). Router stuck on top experts.`,balanced:`<b>Balanced:</b> CV=${cv.toFixed(2)}, ${dropped} dropped. Aux loss enforces near-uniform routing.`,random:`<b>Random:</b> CV=${cv.toFixed(2)}, ${dropped} dropped. Uniform random top-1.`}[mode];
+}
+
+// ── TAB 4: HARDWARE ──────────────────────────────────
+function onHWSlider(){
+  const n=+document.getElementById('hw-sl-n').value,k=clamp(+document.getElementById('hw-sl-k').value,1,n),d=+document.getElementById('hw-sl-d').value;
+  document.getElementById('hw-lbl-n').textContent=n;document.getElementById('hw-lbl-k').textContent=k;document.getElementById('hw-lbl-d').textContent=d.toLocaleString();
+  const eB=(8*d*d)/1e9,tB=n*eB+7,aB=k*eB+7,mGB=tB*2,fT=aB*2;
+  document.getElementById('hw-params').textContent=tB.toFixed(1)+'B';document.getElementById('hw-active').textContent=aB.toFixed(1)+'B';
+  document.getElementById('hw-ratio').textContent=(aB/tB*100).toFixed(0)+'%';document.getElementById('hw-mem').textContent=mGB.toFixed(0)+'GB';document.getElementById('hw-flops').textContent=fT.toFixed(0)+'T';
+  drawHW(tB,aB,mGB,fT);
+}
+function drawHW(tP,aP,mGB,fT){
+  const[W,H,ctx]=setSize('cv-hw',260);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const LW=clamp(W*.28,90,136),VW=88,PAD=11,BM=W-PAD-LW-VW-PAD;
+  const mxP=Math.max(tP*1.1,50),mxM=Math.max(mGB*1.1,100),mxF=Math.max(fT*1.1,100);
+  const rows=[{l:'Total Params',v:tP,m:mxP,u:'B',c:'#818cf8'},{l:'Active Params',v:aP,m:mxP,u:'B',c:'#38bdf8'},{l:'Memory (bf16)',v:mGB,m:mxM,u:'GB',c:'#fb923c'},{l:'FLOPs/token',v:fT,m:mxF,u:'T',c:'#34d399'}];
+  const rH=(H-PAD*2)/rows.length-7;
+  rows.forEach((r,i)=>{
+    const y=PAD+i*(rH+7),my=y+rH*.62,fw=clamp((r.v/r.m)*BM,0,BM);
+    ctx.save();ctx.fillStyle='#64748b';ctx.font='11px Syne,sans-serif';ctx.textAlign='left';ctx.fillText(r.l,PAD,my);ctx.restore();
+    ctx.save();rr(ctx,PAD+LW,y,BM,rH,4);ctx.fillStyle='#0d1526';ctx.fill();ctx.restore();
+    if(fw>1){ctx.save();rr(ctx,PAD+LW,y,fw,rH,4);ctx.fillStyle=r.c+'55';ctx.fill();ctx.restore();}
+    ctx.save();rr(ctx,PAD+LW,y,BM,rH,4);ctx.strokeStyle=r.c;ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+    ctx.save();ctx.fillStyle=r.c;ctx.font='bold 11px JetBrains Mono,monospace';ctx.textAlign='left';ctx.fillText(r.v.toFixed(1)+' '+r.u,PAD+LW+fw+6,my);ctx.restore();
+  });
+}
+
+// ── TAB 5: SPECIALIZATION ────────────────────────────
+let _specSelRow=-1,_specPct=0,_specAnimating=false;
+const SPEC_UNIFORM=SPEC_MATRIX_TRAINED.map(r=>r.map(()=>1/8));
+
+function initSpec(){
+  buildTokenGrid();drawSpecHeat(1,_specSelRow);drawSpecLegend();drawSpecTrain(0);drawSpecStream(null);
+}
+function buildTokenGrid(){
+  const g=document.getElementById('spec-token-grid');if(g.children.length)return;
+  SPEC_TOKENS.forEach((t,i)=>{const b=document.createElement('span');b.className='spec-tok';b.textContent=t.label;b.style.background=t.color+'22';b.style.color=t.color;b.style.borderColor=t.color+'44';b.onclick=()=>{document.querySelectorAll('.spec-tok').forEach(x=>x.classList.remove('selected'));b.classList.add('selected');animateStream(i);};g.appendChild(b);});
+}
+function drawSpecHeat(tp,hlRow){
+  const mat=lerpMat(SPEC_UNIFORM,SPEC_MATRIX_TRAINED,tp),NC=SPEC_CATEGORIES.length,NE=8;
+  const CH=Math.max(230,NC*28+50);const[W,H,ctx]=setSize('cv-spec-heat',CH);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const PL=108,PT=22,PR=10,PB=22,CW=W-PL-PR,CH2=H-PT-PB,cw=CW/NE,ch=CH2/NC;
+  for(let j=0;j<NE;j++){ctx.save();ctx.fillStyle=EC[j]+'cc';ctx.font='bold 9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('E'+j,PL+j*cw+cw/2,PT-4);ctx.restore();}
+  for(let i=0;i<NC;i++){
+    const y=PT+i*ch,hl=i===hlRow;
+    ctx.save();ctx.fillStyle=hl?SPEC_CAT_COLORS[i]:SPEC_CAT_COLORS[i]+'88';ctx.font=`${hl?'bold ':''} 9px ${hl?"'Syne'":'JetBrains Mono'},sans-serif`;ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText(SPEC_CATEGORIES[i],PL-4,y+ch/2);ctx.restore();
+    if(hl){ctx.save();ctx.fillStyle='rgba(255,255,255,.04)';ctx.fillRect(PL,y,CW,ch);ctx.restore();}
+    for(let j=0;j<NE;j++){
+      const x=PL+j*cw,v=mat[i][j],isMx=v===Math.max(...mat[i]),al=clamp(v*5,.06,.95);
+      ctx.save();rr(ctx,x+1,y+1,cw-2,ch-2,2);ctx.fillStyle=SPEC_CAT_COLORS[i]+(Math.round(al*255).toString(16).padStart(2,'0'));ctx.fill();if(isMx&&tp>.3){ctx.strokeStyle=SPEC_CAT_COLORS[i];ctx.lineWidth=1.5;ctx.stroke();}ctx.restore();
+      ctx.save();ctx.fillStyle=al>.5?'#0a0e1a':'#94a3b8';ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText((v*100).toFixed(0)+'%',x+cw/2,y+ch/2);ctx.restore();
+    }
+  }
+}
+function drawSpecLegend(){
+  const[W,H,ctx]=setSize('cv-spec-legend',230);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  ctx.save();ctx.fillStyle='#64748b';ctx.font='bold 10px Syne,sans-serif';ctx.textAlign='left';ctx.fillText('Expert Roles (Mixtral 8×7B)',12,18);ctx.restore();
+  [['E0+E4 → Code/Python','#38bdf8'],['E1+E6 → Math/Numerics','#818cf8'],['E2+E7 → English/Entities','#34d399'],['E3    → Multilingual','#f472b6'],['E5    → Punctuation','#facc15']].forEach(([r,c],i)=>{
+    const y=34+i*32;ctx.save();rr(ctx,10,y-9,W-20,24,4);ctx.fillStyle=c+'25';ctx.fill();ctx.strokeStyle=c+'44';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle=c;ctx.font='bold 9px JetBrains Mono,monospace';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(r,18,y+3);ctx.restore();
+  });
+  ctx.save();ctx.fillStyle='#334155';ctx.font='8px JetBrains Mono,monospace';ctx.textAlign='left';ctx.fillText('Based on Mixtral 8×7B interpretability',12,H-18);ctx.fillText('analysis (Jiang et al., 2024 — approx.)',12,H-7);ctx.restore();
+}
+function onSpecTrainSlider(){const p=+document.getElementById('spec-sl-train').value;_specPct=p;document.getElementById('spec-lbl-train').textContent=p+'%';const t=p/100;drawSpecTrain(t);drawSpecHeat(t,_specSelRow);}
+function drawSpecTrain(t){
+  const mat=lerpMat(SPEC_UNIFORM,SPEC_MATRIX_TRAINED,easeOut(t));const NC=SPEC_CATEGORIES.length,NE=8;
+  const CH=Math.max(190,NC*24+44);const[W,H,ctx]=setSize('cv-spec-train',CH);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const PL=13,PT=20,PR=13,PB=12,CW=W-PL-PR,CH2=H-PT-PB,cw=CW/NE,ch=CH2/NC;
+  for(let j=0;j<NE;j++){ctx.save();ctx.fillStyle=EC[j]+'cc';ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='bottom';ctx.fillText('E'+j,PL+j*cw+cw/2,PT-3);ctx.restore();}
+  for(let i=0;i<NC;i++)for(let j=0;j<NE;j++){const x=PL+j*cw,y=PT+i*ch,v=mat[i][j],al=clamp(v*6,.05,1);ctx.save();rr(ctx,x+1,y+1,cw-2,ch-2,2);ctx.fillStyle=SPEC_CAT_COLORS[i]+(Math.round(al*255).toString(16).padStart(2,'0'));ctx.fill();ctx.restore();}
+  const ent=mat.flat().reduce((s,v)=>s-(v>0?v*Math.log2(v):0),0)/NC,mx=Math.log2(NE),spec=(1-ent/mx)*100;
+  document.getElementById('spec-train-annotation').innerHTML=t<.05?`<b>Init (0%):</b> uniform routing, entropy=${ent.toFixed(2)} bits. No specialization.`:t>.95?`<b>Converged:</b> specialization = <b style="color:#34d399">${spec.toFixed(0)}%</b>. Clear domain clustering.`:`<b>${(t*100).toFixed(0)}%</b> training: spec index = <b style="color:#38bdf8">${spec.toFixed(0)}%</b>. Patterns diverging.`;
+}
+function animateTraining(){if(_specAnimating)return;_specAnimating=true;document.getElementById('btn-spec-anim').disabled=true;const sl=document.getElementById('spec-sl-train');sl.value=0;_specPct=0;let fr=0;const FR=180;function step(){fr++;const p=Math.round(fr/FR*100);sl.value=p;document.getElementById('spec-lbl-train').textContent=p+'%';const t=easeOut(fr/FR);drawSpecTrain(t);drawSpecHeat(t,_specSelRow);if(fr<FR){_raf=requestAnimationFrame(step);}else{_specAnimating=false;_raf=null;document.getElementById('btn-spec-anim').disabled=false;}}_raf=requestAnimationFrame(step);}
+function resetTraining(){cancelAll();_specAnimating=false;document.getElementById('btn-spec-anim').disabled=false;document.getElementById('spec-sl-train').value=0;document.getElementById('spec-lbl-train').textContent='0%';drawSpecTrain(0);drawSpecHeat(0,_specSelRow);}
+document.addEventListener('click',e=>{
+  const cv=document.getElementById('cv-spec-heat');if(!cv)return;
+  const rc=cv.getBoundingClientRect();if(e.clientX<rc.left||e.clientX>rc.right||e.clientY<rc.top||e.clientY>rc.bottom)return;
+  const NC=SPEC_CATEGORIES.length,PT=22,PB=22,ch=(rc.height-PT-PB)/NC,row=Math.floor((e.clientY-rc.top-PT)/ch);
+  if(row>=0&&row<NC){_specSelRow=(row===_specSelRow)?-1:row;drawSpecHeat(_specPct/100,_specSelRow);if(_specSelRow>=0){const top=topKIdx(SPEC_MATRIX_TRAINED[_specSelRow],1)[0];document.getElementById('spec-heat-annotation').innerHTML=`<b>${SPEC_CATEGORIES[_specSelRow]}</b> → prefers <b style="color:${EC[top]}">Expert ${top}</b> (${(SPEC_MATRIX_TRAINED[_specSelRow][top]*100).toFixed(0)}%). Click again to deselect.`;}else document.getElementById('spec-heat-annotation').innerHTML='<b>Click any row</b> to highlight that token category.';}
+});
+function drawSpecStream(ti){
+  const NE=8;const[W,H,ctx]=setSize('cv-spec-stream',190);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const rX=W/2,rY=H/2,sp=(H-36)/(NE-1);
+  for(let i=0;i<NE;i++){const ey=18+i*sp;ctx.save();ctx.beginPath();ctx.arc(W-28,ey,14,0,Math.PI*2);ctx.fillStyle='#111827';ctx.fill();ctx.strokeStyle=EC[i]+'55';ctx.lineWidth=1;ctx.stroke();ctx.fillStyle=EC[i]+'88';ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('E'+i,W-28,ey);ctx.restore();}
+  ctx.save();rr(ctx,rX-34,rY-17,68,34,6);ctx.fillStyle='#1a2236';ctx.fill();ctx.strokeStyle=ti!==null?SPEC_TOKENS[ti].color:'#1e2d4a';ctx.lineWidth=1.5;ctx.stroke();ctx.fillStyle=ti!==null?SPEC_TOKENS[ti].color:'#475569';ctx.font='bold 9px Syne,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('ROUTER',rX,rY-5);ctx.fillStyle='#475569';ctx.font='9px JetBrains Mono,monospace';ctx.fillText('top-2 of 8',rX,rY+8);ctx.restore();
+  if(!ti&&ti!==0){ctx.save();ctx.fillStyle='#334155';ctx.font='10px Syne,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('← Select a token above',10,H/2);ctx.restore();}
+}
+function animateStream(ti){
+  cancelAll();const tok=SPEC_TOKENS[ti],probs=SPEC_MATRIX_TRAINED[tok.cat],tops=topKIdx(probs,2);
+  const NE=8;const sp=(190-36)/(NE-1);
+  const[W,H]=[(document.getElementById('cv-spec-stream').parentElement.clientWidth||400),190];
+  const rX=W/2,rY=H/2;let fr=0;const FR=45;
+  function step(){
+    const[W2,H2,ctx]=setSize('cv-spec-stream',190);if(!ctx)return;ctx.clearRect(0,0,W2,H2);
+    const sp2=(H2-36)/(NE-1);
+    for(let i=0;i<NE;i++){const ey=18+i*sp2,isT=tops.includes(i);ctx.save();ctx.beginPath();ctx.arc(W2-28,ey,14,0,Math.PI*2);ctx.fillStyle=isT?EC[i]+'33':'#111827';ctx.fill();ctx.strokeStyle=isT?EC[i]:EC[i]+'44';ctx.lineWidth=isT?2:1;ctx.stroke();ctx.fillStyle=isT?EC[i]:EC[i]+'66';ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('E'+i,W2-28,ey);if(isT){ctx.fillStyle=EC[i];ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='right';ctx.fillText((probs[i]*100).toFixed(0)+'%',W2-46,ey);}ctx.restore();}
+    ctx.save();rr(ctx,W2/2-34,H2/2-17,68,34,6);ctx.fillStyle='#1a2236';ctx.fill();ctx.strokeStyle=tok.color;ctx.lineWidth=1.5;ctx.stroke();ctx.fillStyle=tok.color;ctx.font='bold 9px Syne,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('ROUTER',W2/2,H2/2-5);ctx.fillStyle='#475569';ctx.font='9px JetBrains Mono,monospace';ctx.fillText('top-2 of 8',W2/2,H2/2+8);ctx.restore();
+    const t=easeIO(clamp(fr/FR,0,1));
+    if(fr<FR){const tx=12+18+(W2/2-34-18-12)*t;ctx.save();ctx.beginPath();ctx.arc(tx,H2/2,16,0,Math.PI*2);ctx.fillStyle=tok.color+'22';ctx.fill();ctx.strokeStyle=tok.color;ctx.lineWidth=2;ctx.stroke();ctx.fillStyle=tok.color;ctx.font='bold 9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(tok.label,tx,H2/2);ctx.restore();}
+    else{const t2=easeIO(clamp((fr-FR)/FR,0,1));tops.forEach(ei=>{const ey=18+ei*sp2,tx2=W2/2+34+(W2-46-W2/2-34)*t2,ty2=H2/2+(ey-H2/2)*t2;ctx.save();ctx.beginPath();ctx.arc(tx2,ty2,12,0,Math.PI*2);ctx.fillStyle=tok.color+'33';ctx.fill();ctx.strokeStyle=tok.color;ctx.lineWidth=1.5;ctx.stroke();ctx.fillStyle=tok.color;ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(tok.label,tx2,ty2);ctx.restore();});}
+    fr++;
+    if(fr<FR*2){_raf=requestAnimationFrame(step);}else{_raf=null;document.getElementById('spec-stream-annotation').innerHTML=`<b style="color:${tok.color}">"${tok.label}"</b> (${SPEC_CATEGORIES[tok.cat]}) → <b style="color:${EC[tops[0]]}">E${tops[0]}</b> (${(probs[tops[0]]*100).toFixed(0)}%) + <b style="color:${EC[tops[1]]}">E${tops[1]}</b> (${(probs[tops[1]]*100).toFixed(0)}%). Emergent specialization — not programmed.`;}
+  }
+  document.getElementById('spec-stream-annotation').innerHTML=`Routing <b style="color:${tok.color}">"${tok.label}"</b>...`;
+  _raf=requestAnimationFrame(step);
+}
+
+// ── TAB 6: MoD ───────────────────────────────────────
+function onModSlider(){
+  const L=+document.getElementById('mod-sl-l').value,C=+document.getElementById('mod-sl-c').value,T=+document.getElementById('mod-sl-t').value;
+  document.getElementById('mod-lbl-l').textContent=L;document.getElementById('mod-lbl-c').textContent=C+'%';document.getElementById('mod-lbl-t').textContent=T;
+  drawMoD(L,C/100,T,[]);
+}
+function resetMoD(){cancelAll();document.getElementById('btn-mod-anim').disabled=false;onModSlider();}
+
+function drawMoD(L,cap,numToks,tokenStates){
+  // Each token has a path: array of L booleans (true=processed, false=skipped)
+  const BH=36,GAP=5,PAD_L=14,PAD_T=28,PAD_R=14;
+  const CSS_H=L*(BH+GAP)+PAD_T+50;
+  const[W,H,ctx]=setSize('cv-mod',CSS_H);if(!ctx)return;ctx.clearRect(0,0,W,H);
+
+  const layerX=PAD_L+50,layerW=W-layerX-PAD_R-numToks*18-10;
+  const tokStartX=layerX+layerW+8;
+
+  // Layer boxes
+  for(let l=0;l<L;l++){
+    const y=PAD_T+l*(BH+GAP);
+    ctx.save();rr(ctx,layerX,y,layerW,BH,5);ctx.fillStyle='rgba(52,211,153,.08)';ctx.fill();ctx.strokeStyle='#34d399'+(tokenStates.length?'66':'44');ctx.lineWidth=1;ctx.stroke();
+    ctx.fillStyle='#34d399'+(tokenStates.length?'aa':'55');ctx.font='bold 10px Syne,sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('Layer '+l,layerX+layerW/2,y+BH/2);ctx.restore();
+    // Layer label
+    ctx.save();ctx.fillStyle='#475569';ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='right';ctx.textBaseline='middle';ctx.fillText('L'+l,layerX-4,y+BH/2);ctx.restore();
+  }
+
+  // Residual line on right of layers
+  ctx.save();ctx.beginPath();ctx.moveTo(layerX+layerW+5,PAD_T);ctx.lineTo(layerX+layerW+5,PAD_T+(L-1)*(BH+GAP)+BH);ctx.strokeStyle='#1e2d4a';ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+
+  // Tokens
+  tokenStates.forEach((tok,ti)=>{
+    const cx=tokStartX+ti*18;
+    for(let l=0;l<L;l++){
+      const ly=PAD_T+l*(BH+GAP),cy=ly+BH/2;
+      if(l>0){
+        const prevProcessed=tok.processed[l-1];
+        const curProcessed=tok.processed[l];
+        // Line from prev to current
+        ctx.save();ctx.beginPath();
+        if(prevProcessed){ctx.moveTo(cx,ly-GAP);ctx.lineTo(cx,ly);}
+        else{ctx.moveTo(layerX+layerW+5,ly-GAP);ctx.lineTo(layerX+layerW+5,ly);}
+        ctx.strokeStyle=tok.color+(curProcessed?'cc':'44');ctx.lineWidth=2;ctx.stroke();ctx.restore();
+      }
+      if(tok.processed[l]){
+        // Token dot inside layer
+        const dotY=ly+BH/2;
+        const t2=tok.animT?clamp((tok.animT-l/L)/(1/L),0,1):1;
+        const dotX=cx;
+        ctx.save();ctx.beginPath();ctx.arc(dotX,dotY,7,0,Math.PI*2);ctx.fillStyle=tok.color+'cc';ctx.fill();ctx.strokeStyle=tok.color;ctx.lineWidth=1.5;ctx.stroke();ctx.restore();
+        // Arrow into layer
+        ctx.save();ctx.beginPath();ctx.moveTo(layerX+layerW+5,cy);ctx.lineTo(layerX+layerW+20,cy);ctx.strokeStyle=tok.color+'66';ctx.lineWidth=1;ctx.setLineDash([2,2]);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+      } else {
+        // Skip indicator on residual
+        ctx.save();ctx.fillStyle=tok.color+'33';ctx.font='7px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText('skip',layerX+layerW+5,PAD_T+l*(BH+GAP)+BH/2);ctx.restore();
+      }
+    }
+    // Token label
+    ctx.save();ctx.fillStyle=tok.color;ctx.font='bold 8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText('T'+ti,cx,PAD_T-8);ctx.restore();
+  });
+
+  // Stats
+  if(tokenStates.length){
+    const totalLayers=tokenStates.length*L;
+    const activeComputations=tokenStates.reduce((s,t)=>s+t.processed.filter(Boolean).length,0);
+    const utilPct=(activeComputations/totalLayers*100).toFixed(1);
+    ctx.save();ctx.fillStyle='#34d399';ctx.font='bold 10px Syne,sans-serif';ctx.textAlign='left';ctx.fillText(`Active computations: ${activeComputations}/${totalLayers} = ${utilPct}% of dense`,PAD_L,H-8);ctx.restore();
+  }
+
+  // Header
+  ctx.save();ctx.fillStyle='#475569';ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText('Transformer Layers',layerX+layerW/2,PAD_T-8);ctx.fillText('Token paths →',tokStartX+numToks*9,PAD_T-8);ctx.restore();
+}
+
+function animateMoD(){
+  cancelAll();document.getElementById('btn-mod-anim').disabled=true;
+  const L=+document.getElementById('mod-sl-l').value,cap=+document.getElementById('mod-sl-c').value/100,numToks=+document.getElementById('mod-sl-t').value;
+  // Generate token paths: each token independently decides per layer based on capacity
+  const colors=['#38bdf8','#818cf8','#34d399','#fb923c','#f472b6','#facc15','#a78bfa','#60a5fa','#38bdf8','#34d399'];
+  const tokens=Array.from({length:numToks},(_,i)=>({color:colors[i%colors.length],processed:Array.from({length:L},()=>Math.random()<cap),animT:0}));
+  let fr=0;const FR=L*15;
+  function step(){
+    const t=fr/FR;
+    tokens.forEach(tok=>{tok.animT=t;});
+    drawMoD(L,cap,numToks,tokens);
+    const active=tokens.reduce((s,t)=>s+t.processed.filter(Boolean).length,0);
+    const total=tokens.length*L;
+    document.getElementById('mod-annotation').innerHTML=
+      `<b>MoD animation</b> — ${cap*100}% capacity. Active: ${active}/${total} layer computations (${(active/total*100).toFixed(1)}%). Tokens with more complex content process more layers.`;
+    fr++;if(fr<=FR){_raf=requestAnimationFrame(step);}else{_raf=null;document.getElementById('btn-mod-anim').disabled=false;}
+  }
+  _raf=requestAnimationFrame(step);
+}
+
+function onModCompareSlider(){
+  const C=+document.getElementById('mod-c2-sl').value,N=+document.getElementById('mod-n2-sl').value,K=clamp(+document.getElementById('mod-k2-sl').value,1,N);
+  document.getElementById('mod-c2-lbl').textContent=C+'%';document.getElementById('mod-n2-lbl').textContent=N;document.getElementById('mod-k2-lbl').textContent=K;
+  const modSave=(1-C/100)*100,moeSave=(1-K/N)*100,bothSave=(1-(C/100)*(K/N))*100;
+  document.getElementById('mod-stat-flops').textContent=C+'%';
+  document.getElementById('mod-stat-moe').textContent=(K/N*100).toFixed(0)+'%';
+  document.getElementById('mod-stat-saving').textContent=modSave.toFixed(0)+'%';
+  document.getElementById('mod-stat-moe-saving').textContent=moeSave.toFixed(0)+'%';
+  drawModCompare(C/100,K/N);
+}
+function drawModCompare(modCap,moeRatio){
+  const[W,H,ctx]=setSize('cv-mod-compare',200);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const configs=[{label:'Dense',ratio:1,color:'#64748b'},{label:'MoE',ratio:moeRatio,color:'#38bdf8'},{label:'MoD',ratio:modCap,color:'#34d399'},{label:'MoE+MoD',ratio:moeRatio*modCap,color:'#f472b6'}];
+  const PAD=14,BH=32,GAP=8,maxW=W-PAD*2-80;
+  configs.forEach((c,i)=>{
+    const y=PAD+i*(BH+GAP),fw=c.ratio*maxW;
+    ctx.save();rr(ctx,PAD,y,maxW,BH,5);ctx.fillStyle='#0d1526';ctx.fill();ctx.restore();
+    if(fw>1){ctx.save();rr(ctx,PAD,y,fw,BH,5);ctx.fillStyle=c.color+'55';ctx.fill();ctx.restore();}
+    ctx.save();rr(ctx,PAD,y,maxW,BH,5);ctx.strokeStyle=c.color+'88';ctx.lineWidth=1;ctx.stroke();ctx.restore();
+    ctx.save();ctx.fillStyle=c.color;ctx.font='bold 10px Syne,sans-serif';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText(c.label+': '+(c.ratio*100).toFixed(1)+'% FLOPs',PAD+4,y+BH/2);ctx.restore();
+    ctx.save();ctx.fillStyle='#475569';ctx.font='9px JetBrains Mono,monospace';ctx.textAlign='left';ctx.textBaseline='middle';ctx.fillText('−'+(100-c.ratio*100).toFixed(0)+'% vs dense',PAD+maxW+8,y+BH/2);ctx.restore();
+  });
+  document.getElementById('mod-compare-annotation').innerHTML=
+    `MoD (${(modCap*100).toFixed(0)}% cap) saves <b>${(100-modCap*100).toFixed(0)}%</b>. MoE (${(moeRatio*100).toFixed(0)}% active) saves <b>${(100-moeRatio*100).toFixed(0)}%</b>. Combined: <b style="color:#f472b6">${(100-moeRatio*modCap*100).toFixed(0)}% savings</b> vs dense.`;
+}
+
+// ── TAB 7: COMPARISON ────────────────────────────────
+function onCmpAnimSlider(){
+  const L=+document.getElementById('cmp-sl-l').value,C=+document.getElementById('cmp-sl-c').value,N=+document.getElementById('cmp-sl-n').value;
+  document.getElementById('cmp-lbl-l').textContent=L;document.getElementById('cmp-lbl-c').textContent=C+'%';document.getElementById('cmp-lbl-n').textContent=N;
+  drawCmpAnim(L,C/100,N,2,-1);
+}
+function resetComparison(){cancelAll();document.getElementById('btn-cmp-anim').disabled=false;onCmpAnimSlider();}
+
+function drawCmpAnim(L,modCap,N,K,animLayer){
+  const configs=[{id:'dense',label:'Dense',color:'#64748b',moe:false,mod:false},{id:'moe',label:'MoE',color:'#38bdf8',moe:true,mod:false},{id:'mod',label:'MoD',color:'#34d399',moe:false,mod:true},{id:'both',label:'MoE+MoD',color:'#f472b6',moe:true,mod:true}];
+  const BH=34,GAP=5,PT=32,PB=12,pad=6;
+  const CSS_H=L*(BH+GAP)+PT+PB+20;
+  const[W,H,ctx]=setSize('cv-cmp-anim',CSS_H);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const colW=(W-pad*2-12)/configs.length-3;
+
+  configs.forEach((cfg,ci)=>{
+    const cx=pad+ci*(colW+3),cy_top=PT;
+    // Header
+    ctx.save();ctx.fillStyle=cfg.color;ctx.font='bold 10px Syne,sans-serif';ctx.textAlign='center';ctx.fillText(cfg.label,cx+colW/2,PT-12);
+    const flops=(!cfg.mod?1:modCap)*(!cfg.moe?1:K/N);
+    ctx.fillStyle='#475569';ctx.font='8px JetBrains Mono,monospace';ctx.fillText((flops*100).toFixed(0)+'% FLOPs',cx+colW/2,PT-2);ctx.restore();
+
+    for(let l=0;l<L;l++){
+      const ly=PT+l*(BH+GAP);
+      const isAL=l===animLayer;
+      // MoD: randomly decide if this layer is skipped
+      const modPass=!cfg.mod||(l*7+ci*3)%(10)<(modCap*10);
+      const layerColor=modPass?cfg.color:'#334155';
+
+      ctx.save();rr(ctx,cx,ly,colW,BH,4);
+      ctx.fillStyle=modPass?(isAL?cfg.color+'44':cfg.color+'18'):'#0d1526';
+      ctx.fill();ctx.strokeStyle=isAL?cfg.color:layerColor+'55';ctx.lineWidth=isAL?2:1;ctx.stroke();
+
+      if(modPass){
+        ctx.fillStyle=isAL?cfg.color:'#475569';
+        ctx.font=`${isAL?'bold ':''} 8px ${isAL?"'Syne'":'JetBrains Mono'},monospace`;
+        ctx.textAlign='center';ctx.textBaseline='middle';
+        if(cfg.moe&&modPass) ctx.fillText('MoE('+K+'/'+N+')',cx+colW/2,ly+BH/2);
+        else if(modPass) ctx.fillText('FFN',cx+colW/2,ly+BH/2);
+      } else {
+        ctx.fillStyle='#334155';ctx.font='7px JetBrains Mono,monospace';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('skip',cx+colW/2,ly+BH/2);
+      }
+      ctx.restore();
+    }
+  });
+}
+
+function animateComparison(){
+  cancelAll();document.getElementById('btn-cmp-anim').disabled=true;
+  const L=+document.getElementById('cmp-sl-l').value,C=+document.getElementById('cmp-sl-c').value/100,N=+document.getElementById('cmp-sl-n').value;
+  let layer=0;
+  function step(){
+    drawCmpAnim(L,C,N,2,layer);
+    document.getElementById('cmp-anim-annotation').innerHTML=
+      `Layer <b>${layer}</b> of ${L}: <span style="color:#64748b">Dense</span> processes all tokens, <span style="color:#38bdf8">MoE</span> uses 2/${N} experts, <span style="color:#34d399">MoD</span> routes ~${(C*100).toFixed(0)}% of tokens, <span style="color:#f472b6">MoE+MoD</span> does both.`;
+    layer=(layer+1)%L;
+    _timers.push(setTimeout(step,600));
+  }
+  step();
+}
+
+function onScaleSlider(){const b=+document.getElementById('sc-sl').value;document.getElementById('sc-lbl').textContent=b;drawScale(b);}
+function drawScale(budget){
+  const[W,H,ctx]=setSize('cv-scale',250);if(!ctx)return;ctx.clearRect(0,0,W,H);
+  const PL=46,PR=18,PT=14,PB=34,CW=W-PL-PR,CH=H-PT-PB,MF=200,MNP=3,MXP=20;
+  const fX=f=>PL+(f/MF)*CW,pY=p=>PT+CH-clamp((p-MNP)/(MXP-MNP),0,1)*CH;
+  ctx.save();ctx.strokeStyle='#1e2d4a';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(PL,PT);ctx.lineTo(PL,PT+CH);ctx.lineTo(PL+CW,PT+CH);ctx.stroke();ctx.restore();
+  [5,8,12,16,20].forEach(p=>{const y=pY(p);if(y<PT||y>PT+CH)return;ctx.save();ctx.fillStyle='#2d3f5a';ctx.font='8px JetBrains Mono,monospace';ctx.textAlign='right';ctx.fillText(p,PL-3,y+3);ctx.restore();});
+  ctx.save();ctx.fillStyle='#475569';ctx.font='8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.translate(10,PT+CH/2);ctx.rotate(-Math.PI/2);ctx.fillText('Perplexity ↓',0,0);ctx.restore();
+  [25,50,100,150,200].forEach(f=>{ctx.save();ctx.fillStyle='#2d3f5a';ctx.font='8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText(f,fX(f),PT+CH+12);ctx.restore();});
+  ctx.save();ctx.fillStyle='#475569';ctx.font='8px JetBrains Mono,monospace';ctx.textAlign='center';ctx.fillText('Compute (TFLOPs/token)',PL+CW/2,H-4);ctx.restore();
+  // Three curves
+  const curves=[{a:22,b:0.34,c:'#38bdf8',l:'Dense'},{a:17,b:0.38,c:'#34d399',l:'MoE'},{a:14,b:0.42,c:'#f472b6',l:'MoE+MoD'}];
+  curves.forEach(cv=>{
+    ctx.save();ctx.beginPath();for(let f=5;f<=MF;f++){const p=cv.a*Math.pow(f,-cv.b);const x=fX(f),y=pY(p);f===5?ctx.moveTo(x,y):ctx.lineTo(x,y);}ctx.strokeStyle=cv.c;ctx.lineWidth=2;ctx.stroke();ctx.restore();
+  });
+  const bx=clamp(fX(budget),PL,PL+CW);
+  ctx.save();ctx.beginPath();ctx.moveTo(bx,PT);ctx.lineTo(bx,PT+CH);ctx.strokeStyle='#fb923caa';ctx.lineWidth=1.5;ctx.setLineDash([5,3]);ctx.stroke();ctx.setLineDash([]);ctx.restore();
+  curves.forEach(cv=>{const p=cv.a*Math.pow(budget,-cv.b);const y=pY(p);if(y<PT||y>PT+CH)return;ctx.save();ctx.beginPath();ctx.arc(bx,y,4,0,Math.PI*2);ctx.fillStyle=cv.c;ctx.fill();ctx.restore();});
+  const lF=MF*.7;curves.forEach(cv=>{ctx.save();ctx.fillStyle=cv.c;ctx.font='bold 9px Syne,sans-serif';ctx.textAlign='left';ctx.fillText(cv.l,fX(lF)+5,pY(cv.a*Math.pow(lF,-cv.b))+(cv.l==='Dense'?-6:cv.l==='MoE'?0:8));ctx.restore();});
+  const vals=curves.map(cv=>({l:cv.l,p:(cv.a*Math.pow(budget,-cv.b)).toFixed(2),c:cv.c}));
+  document.getElementById('sc-annotation').innerHTML=`At <b>${budget}T FLOPs</b>: `+vals.map(v=>`<b style="color:${v.c}">${v.l}=${v.p}</b>`).join(' → ')+`. MoE+MoD is best.`;
+}
+
+// ── INIT ──────────────────────────────────────────────
+let _rt=null;
+window.addEventListener('resize',()=>{clearTimeout(_rt);_rt=setTimeout(()=>{const a=document.querySelector('.section.active');if(!a)return;const id=a.id.replace('sec-','');if(id==='overview')onOvSlider();if(id==='stack')onStackSlider();if(id==='loadbalance')runLBSim();if(id==='hardware')onHWSlider();if(id==='specialization')initSpec();if(id==='mod'){onModSlider();onModCompareSlider();}if(id==='compare'){onCmpAnimSlider();onScaleSlider();}},80);});
+window.addEventListener('load',()=>{onOvSlider();onStackSlider();runLBSim();onHWSlider();onScaleSlider();onModCompareSlider();});
+</script>
+</body>
+</html>
