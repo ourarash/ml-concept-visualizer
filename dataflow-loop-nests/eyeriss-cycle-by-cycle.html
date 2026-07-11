@@ -1,0 +1,553 @@
+<!doctype html>
+<!-- Cycle-accurate Eyeriss Row-Stationary visualizer: trace each clock tick of a 3x3 conv on a 5x5 input. -->
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eyeriss Cycle-Accurate Visualizer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        :root {
+            --c-weight: #16a34a;
+            --c-ifmap: #2563eb;
+            --c-acc: #ca8a04;
+            --c-comb: #ea580c;
+            --c-out: #dc2626;
+        }
+
+        body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+
+        .tile {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-weight: 600;
+            transition: all 0.2s ease;
+        }
+        .tile-w { width: 28px; height: 28px; font-size: 12px; border-radius: 4px;
+                   background:#dcfce7; color:#166534; border:1px solid #86efac; }
+        .tile-i { width: 28px; height: 28px; font-size: 12px; border-radius: 4px;
+                   background:#dbeafe; color:#1e40af; border:1px solid #93c5fd; }
+        .tile-a { width: 36px; height: 32px; font-size: 12px; border-radius: 4px;
+                   background:#fef9c3; color:#854d0e; border:1px solid #fde047; padding: 2px 4px; }
+        .tile-c { width: 36px; height: 32px; font-size: 12px; border-radius: 4px;
+                   background:#ffedd5; color:#9a3412; border:1px solid #fdba74; padding: 2px 4px; }
+        .tile-o { width: 38px; height: 38px; font-size: 13px; border-radius: 6px;
+                   background:#fff; color:#7f1d1d; border:1px dashed #fca5a5; cursor: pointer; }
+        .tile-o.filled { background:#fee2e2; border:1.5px solid #ef4444; color:#7f1d1d; }
+        
+        .tile.is-empty {
+            color: #cbd5e1 !important;
+            background: repeating-linear-gradient(45deg, #f8fafc, #f8fafc 4px, #f1f5f9 4px, #f1f5f9 8px) !important;
+            border: 1px dashed #cbd5e1 !important;
+            font-weight: 300 !important;
+        }
+
+        .pe-box {
+            background: white; border: 1.5px solid #e2e8f0; border-radius: 12px;
+            padding: 10px 12px; transition: all 0.2s ease; position: relative;
+        }
+        .pe-box.pe-active { border-color: #3b82f6; box-shadow: 0 4px 12px rgba(59,130,246,0.1); }
+
+        .matrix-cell {
+            width: 26px; height: 26px; display: inline-flex; align-items: center; justify-content: center;
+            font-family: 'JetBrains Mono', monospace; font-size: 11px; border: 1px solid #e2e8f0;
+            background: white; color:#475569; transition: all 0.2s ease;
+        }
+        .matrix-cell.i-active, .tile-i.i-active { background:#3b82f6 !important; color:white !important; border-color:#1d4ed8 !important; transform: scale(1.1); z-index: 10; box-shadow: 0 0 8px rgba(59,130,246,0.5); }
+        .matrix-cell.f-active, .tile-w.f-active { background:#10b981 !important; color:white !important; border-color:#047857 !important; transform: scale(1.1); z-index: 10; box-shadow: 0 0 8px rgba(16,185,129,0.5); }
+        .tile-a.a-active { outline: 3px solid #ca8a04; outline-offset: 1px; transform: scale(1.15); z-index: 15; box-shadow: 0 0 12px rgba(202,138,4,0.4); }
+        
+        .matrix-cell.o-cell.filled { background:#fee2e2; color:#7f1d1d; border-color:#ef4444; }
+
+        .gantt-cell {
+            min-width: 58px; height: 32px; display:flex; align-items:center; justify-content:center;
+            font-size:9px; font-weight:700; border: 1px solid #f1f5f9; background:#f8fafc; color:#cbd5e1;
+            border-radius: 4px; font-family: 'JetBrains Mono', monospace;
+        }
+        .gantt-cell.gc-mac { background:#dbeafe; color:#1e40af; }
+        .gantt-cell.gc-fwd { background:#fef3c7; color:#854d0e; }
+        .gantt-cell.gc-emit { background:#fee2e2; color:#991b1b; }
+        .gantt-cell.gc-load { background:#dcfce7; color:#166534; }
+        .gantt-cell.gc-route { background:#e0f2fe; color:#075985; }
+        .gantt-cell.gc-current { outline: 2px solid #3b82f6; z-index: 5; background: white; color: #1e293b; }
+
+        .stat-card { background: white; border: 1px solid #e2e8f0; padding: 12px; border-radius: 12px; flex: 1; }
+        .stat-val { font-family: 'JetBrains Mono', monospace; font-size: 18px; font-weight: 800; color: #1e293b; }
+        .stat-lbl { font-size: 10px; text-transform: uppercase; color: #64748b; font-weight: 700; margin-top: 2px; }
+
+        .glb-bar {
+            position: absolute; left: 8px; right: 8px; top: 6px; height: 36px; border-radius: 8px;
+            display: flex; align-items: center; justify-content: center;
+            font-family: 'JetBrains Mono', monospace; font-size: 12px; font-weight: 700;
+            transition: opacity 0.2s ease; pointer-events: none; z-index: 5;
+        }
+        .glb-bar.glb-w { background:#dcfce7; color:#166534; border: 2px solid #22c55e; }
+        .glb-bar.glb-i { background:#dbeafe; color:#1e40af; border: 2px solid #3b82f6; }
+
+        .arrow-load-w { stroke: #16a34a; stroke-width: 3; fill: none; stroke-dasharray: 6 3; animation: flow 0.5s linear infinite; }
+        .arrow-load-i { stroke: #2563eb; stroke-width: 3; fill: none; stroke-dasharray: 6 3; animation: flow 0.5s linear infinite; }
+        @keyframes flow { to { stroke-dashoffset: -18; } }
+
+        .badge { display:inline-block; padding: 1px 6px; border-radius: 9999px; font-size: 10px; font-weight: 700; }
+        .badge-mac { background:#dbeafe; color:#1e40af; }
+        .badge-fwd { background:#fef3c7; color:#854d0e; }
+        .badge-emit { background:#fee2e2; color:#991b1b; }
+        .badge-loadw { background:#dcfce7; color:#166534; }
+        .badge-loadi { background:#e0f2fe; color:#075985; }
+        .badge-idle { background:#f1f5f9; color:#64748b; }
+
+        .multiplier-led {
+            width: 6px; height: 6px; border-radius: 50%; background: #e2e8f0;
+            position: absolute; top: 10px; right: 10px; transition: background 0.2s;
+        }
+        .multiplier-led.active { background: #ef4444; box-shadow: 0 0 6px #ef4444; }
+    </style>
+</head>
+
+<body class="bg-slate-50 text-slate-800 min-h-screen pb-12">
+
+    <header class="bg-slate-900 text-white">
+        <div class="max-w-7xl mx-auto px-4 md:px-8 py-6 flex items-center justify-between">
+            <div>
+                <h1 class="text-2xl font-bold tracking-tight">Eyeriss Cycle-Accurate Visualizer</h1>
+                <p class="text-slate-400 text-sm mt-1">Tracing <strong>Row-Stationary</strong> (RS) dataflow (Strict 1-Multiplier Mode).</p>
+            </div>
+            <div class="hidden md:flex gap-4">
+                <div class="text-right">
+                    <div class="text-emerald-400 font-mono font-bold text-lg" id="reuse-total">0</div>
+                    <div class="text-[10px] uppercase text-slate-500 font-bold">Total Reuses</div>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 md:px-8 py-6">
+
+        <!-- Controls -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6 mb-6">
+            <section class="lg:col-span-8 bg-white rounded-2xl shadow-sm border border-slate-200 p-4">
+                <div class="flex flex-col gap-4">
+                    <div class="flex items-center justify-between flex-wrap gap-2">
+                        <div class="flex items-center gap-2">
+                            <button id="play-btn" class="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg flex items-center gap-2 transition active:scale-95">
+                                <span id="play-icon">▶</span><span id="play-text">Play</span>
+                            </button>
+                            <button id="prev-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-2 rounded-lg transition">⟨ Step</button>
+                            <button id="next-btn" class="bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold px-3 py-2 rounded-lg transition">Step ⟩</button>
+                            <button id="reset-btn" class="bg-white border border-slate-300 hover:bg-slate-100 text-slate-600 font-medium px-3 py-2 rounded-lg transition">Reset</button>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <button id="jump-transfer" class="text-emerald-700 text-xs font-bold px-3 py-2 rounded-lg bg-emerald-50 border border-emerald-100">Setup Phase</button>
+                            <button id="jump-compute" class="text-blue-700 text-xs font-bold px-3 py-2 rounded-lg bg-blue-50 border border-blue-100">Compute Phase</button>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <input id="scrubber" type="range" min="0" max="21" value="0" step="1" class="flex-1 accent-blue-600" />
+                        <div class="bg-slate-900 text-white font-mono px-4 py-1.5 rounded-md text-sm min-w-[140px] text-center" id="cycle-val">Ready</div>
+                        <select id="speed-select" class="bg-white border border-slate-300 rounded-md px-2 py-1.5 text-sm">
+                            <option value="1500">Slow</option>
+                            <option value="800" selected>Normal</option>
+                            <option value="400">Fast</option>
+                        </select>
+                    </div>
+                </div>
+            </section>
+
+            <section class="lg:col-span-4 grid grid-cols-2 gap-4">
+                <div class="stat-card">
+                    <div class="stat-val" id="stat-glb">0</div>
+                    <div class="stat-lbl">GLB Reads (Costly)</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-val" id="stat-rf">0</div>
+                    <div class="stat-lbl">RF/Wire Reuse (Cheap)</div>
+                </div>
+            </section>
+        </div>
+
+        <section class="grid grid-cols-1 xl:grid-cols-12 gap-6">
+            <aside class="xl:col-span-4 space-y-5">
+                <!-- Status/Narrative -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                    <div class="flex items-center justify-between mb-2">
+                        <div class="text-[10px] uppercase font-bold text-slate-400">Status</div>
+                        <div id="phase-badge" class="badge">...</div>
+                    </div>
+                    <h2 id="phase-title" class="text-base font-bold text-slate-900 mb-1">...</h2>
+                    <p id="phase-text" class="text-sm text-slate-500 leading-relaxed">...</p>
+                </div>
+
+                <!-- Descriptive Legend Card -->
+                <div class="bg-slate-900 text-white rounded-2xl shadow-lg border border-slate-800 p-5">
+                    <h3 class="text-[10px] font-bold uppercase text-slate-400 mb-4 tracking-widest">PE Component Legend</h3>
+                    <div class="grid grid-cols-1 gap-4">
+                        <div class="flex items-start gap-3">
+                            <span class="mt-1 w-12 text-[10px] font-mono text-emerald-400 font-bold uppercase">weight</span>
+                            <div class="flex-1">
+                                <p class="text-[11px] text-slate-100 font-semibold mb-0.5">Filter Weights (Stationary)</p>
+                                <p class="text-[10px] text-slate-400 leading-tight">Stored in the Register File. They stay inside the PE for the whole 1D convolution to save energy.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="mt-1 w-12 text-[10px] font-mono text-blue-400 font-bold uppercase">ifmap</span>
+                            <div class="flex-1">
+                                <p class="text-[11px] text-slate-100 font-semibold mb-0.5">Input Activations</p>
+                                <p class="text-[10px] text-slate-400 leading-tight">Streamed activates from the input feature map. Reused diagonally across PEs.</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="mt-1 w-12 text-[10px] font-mono text-yellow-400 font-bold uppercase">psum</span>
+                            <div class="flex-1">
+                                <p class="text-[11px] text-slate-100 font-semibold mb-0.5">Local Partial Sum</p>
+                                <p class="text-[10px] text-slate-400 leading-tight">Registers for accumulating the 1D convolution result locally (w × i).</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="mt-1 w-12 text-[10px] font-mono text-orange-400 font-bold uppercase">comb</span>
+                            <div class="flex-1">
+                                <p class="text-[11px] text-slate-100 font-semibold mb-0.5">Combined Psum</p>
+                                <p class="text-[10px] text-slate-400 leading-tight">Result of <strong>local psum + psum from PE below</strong>. <em>Note: Bottom row (Row 2) has no "comb" because there is no PE below it.</em></p>
+                            </div>
+                        </div>
+                        <div class="flex items-start gap-3">
+                            <span class="mt-1 w-12 text-[10px] font-mono text-red-400 font-bold uppercase">output</span>
+                            <div class="flex-1">
+                                <p class="text-[11px] text-slate-100 font-semibold mb-0.5">Final Feature Map</p>
+                                <p class="text-[10px] text-slate-400 leading-tight">The fully accumulated vertical sum, ready to be emitted to Global Buffer.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Matrices -->
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                    <div class="flex flex-wrap gap-6">
+                        <div>
+                            <h3 class="text-[10px] font-bold uppercase text-slate-400 mb-2">Filter</h3>
+                            <div id="filter-grid" class="grid grid-cols-3 gap-1"></div>
+                        </div>
+                        <div>
+                            <h3 class="text-[10px] font-bold uppercase text-slate-400 mb-2">Ofmap</h3>
+                            <div id="output-grid" class="grid grid-cols-3 gap-1"></div>
+                        </div>
+                    </div>
+                    <div class="mt-6">
+                        <h3 class="text-[10px] font-bold uppercase text-slate-400 mb-2">Ifmap Matrix</h3>
+                        <div id="ifmap-rows" class="space-y-1"></div>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- PE Grid -->
+            <div class="xl:col-span-8 space-y-6">
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-6 relative">
+                    <div class="pe-grid-wrap relative overflow-x-auto" id="pe-grid-wrap" style="padding-top: 60px; min-height: 520px;">
+                        <div id="glb-bar" class="glb-bar" style="opacity:0;">
+                            <span id="glb-bar-text"></span>
+                        </div>
+                        <svg id="arrow-svg" width="100%" height="100%" class="absolute inset-0 pointer-events-none" preserveAspectRatio="none"></svg>
+                        <div id="pe-grid" class="grid grid-cols-3 gap-x-12 gap-y-12 relative"></div>
+                    </div>
+                </div>
+
+                <div class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5">
+                    <h3 class="text-[10px] font-bold uppercase text-slate-400 mb-3">Multiplier Trace Log</h3>
+                    <div id="event-log" class="space-y-1 max-h-[160px] overflow-y-auto pr-2 font-mono text-[11px]"></div>
+                </div>
+            </div>
+        </section>
+
+        <section class="bg-white rounded-2xl shadow-sm border border-slate-200 p-5 mt-6 overflow-x-auto">
+            <h3 class="text-[10px] font-bold uppercase text-slate-400 mb-4">Cycle Schedule</h3>
+            <div id="gantt" class="inline-block min-w-full"></div>
+        </section>
+
+    </main>
+
+<script>
+const F = [[1, 0, -1], [2, 0, -2], [1, 0, -1]];
+const I = [[3,1,4,1,5],[9,2,6,5,3],[5,8,9,7,9],[2,3,8,4,6],[2,6,4,3,3]];
+const R = 3, S = 3, H = 5, W = 5, E = 3, FOUT = 3;
+const NUM_W_LOADS = 3, NUM_I_LOADS = 5;
+const NUM_TRANSFER = NUM_W_LOADS + NUM_I_LOADS; 
+
+const MAC_SCHEDULE = [];
+for (let p = 0; p < 3; p++) {
+    for (let k = 0; k < 3; k++) {
+        MAC_SCHEDULE.push({ p, k, t_in: p + k });
+    }
+}
+const NUM_COMPUTE_CYCLES = MAC_SCHEDULE.length + 4; 
+const TOTAL_STAGES = 1 + NUM_TRANSFER + NUM_COMPUTE_CYCLES;
+
+const NARRATIVES = [
+    { title: "Idle State", text: "PE array is empty and initialized.", badge: "IDLE" },
+    { title: "Load Weight Row 0", text: "Global Buffer broadcasting weight row 0.", badge: "LOAD-W" },
+    { title: "Load Weight Row 1", text: "Global Buffer broadcasting weight row 1.", badge: "LOAD-W" },
+    { title: "Load Weight Row 2", text: "Weight broadcast phase complete.", badge: "LOAD-W" },
+    { title: "Route Input Row 0", text: "Broadcasting ifmap row 0 diagonally.", badge: "LOAD-I" },
+    { title: "Route Input Row 1", text: "Multiple PEs share activation broadcast.", badge: "LOAD-I" },
+    { title: "Route Input Row 2", text: "Peak activation reuse cycle.", badge: "LOAD-I" },
+    { title: "Route Input Row 3", text: "Mapping ifmap row 3 to PE mesh.", badge: "LOAD-I" },
+    { title: "Route Input Row 4", text: "Transfer phase finished.", badge: "LOAD-I" },
+    ...Array.from({ length: NUM_COMPUTE_CYCLES }, (_, i) => {
+        if (i < 9) return { title: `Math Cycle ${i}`, text: `Multipliers busy. Updating local psums using stationary weights and streamed ifmaps.`, badge: "MAC" };
+        if (i < 12) return { title: `Accumulation`, text: `Multiplications finished. Partial sums moving vertically to produce combined results.`, badge: "FWD" };
+        return { title: `Emission`, text: `Final vertically accumulated sums emitted to memory.`, badge: "EMIT" };
+    })
+];
+
+function deepCopy(obj) { return JSON.parse(JSON.stringify(obj)); }
+
+function precompute() {
+    const snapshots = [];
+    const local = Array.from({ length: R }, () => Array.from({ length: E }, () => [0, 0, 0]));
+    const localMod = Array.from({ length: R }, () => Array.from({ length: E }, () => [false, false, false]));
+    const combined = Array.from({ length: R }, () => Array.from({ length: E }, () => [null, null, null]));
+    const output = Array.from({ length: E }, () => [null, null, null]);
+    let glb = 0, rf = 0;
+
+    snapshots.push({ stageIdx: 0, phase: 'idle', local: deepCopy(local), localMod: deepCopy(localMod), combined: deepCopy(combined), output: deepCopy(output), tags: Array.from({length:3},()=>Array.from({length:3},()=>[])), arrows: [], glb: 0, rf: 0, log: ["All registers ready."] });
+
+    for (let wr = 0; wr < 3; wr++) {
+        glb += 3;
+        const tags = Array.from({length:3},()=>Array.from({length:3},()=>[]));
+        for (let c=0; c<3; c++) tags[wr][c] = [{type:'LOAD-W'}];
+        snapshots.push({ stageIdx: snapshots.length, phase: 'weight-load', activeWR: wr, local: deepCopy(local), localMod: deepCopy(localMod), combined: deepCopy(combined), output: deepCopy(output), tags, arrows: [], glb, rf, log: [`Weight broadcast: R${wr}`] });
+    }
+    for (let ir = 0; ir < 5; ir++) {
+        glb += 5;
+        const tags = Array.from({length:3},()=>Array.from({length:3},()=>[]));
+        for (let r=0; r<3; r++) for (let c=0; c<3; c++) if (r+c===ir) tags[r][c] = [{type:'LOAD-I'}];
+        snapshots.push({ stageIdx: snapshots.length, phase: 'ifmap-load', activeIR: ir, local: deepCopy(local), localMod: deepCopy(localMod), combined: deepCopy(combined), output: deepCopy(output), tags, arrows: [], glb, rf, log: [`Ifmap broadcast: R${ir}`] });
+    }
+
+    for (let t = 0; t < NUM_COMPUTE_CYCLES; t++) {
+        const tags = Array.from({length:3},()=>Array.from({length:3},()=>[]));
+        const arrows = [], log = [];
+
+        if (t < 9) {
+            const op = MAC_SCHEDULE[t];
+            for (let r=0; r<3; r++) for (let c=0; c<3; c++) {
+                local[r][c][op.p] += F[r][op.k] * I[r+c][op.t_in];
+                localMod[r][c][op.p] = true;
+                rf += 2;
+                tags[r][c].push({ type: 'MAC', p: op.p, k: op.k, t_in: op.t_in, ifmap_row: r+c });
+            }
+            log.push(`Cycle ${t}: Multipliers busy.`);
+        } else {
+            log.push(`Cycle ${t}: Multipliers idle.`);
+        }
+
+        [0, 1, 2].forEach(p => {
+            const finish = (p + 1) * 3 - 1;
+            if (t === finish + 1) {
+                for (let c=0; c<3; c++) {
+                    combined[1][c][p] = local[1][c][p] + local[2][c][p];
+                    arrows.push({ from: [2, c], to: [1, c], val: local[2][c][p], s: p });
+                    tags[2][c].push({ type: 'FWD-OUT' }); tags[1][c].push({ type: 'FWD-IN' });
+                }
+            }
+            if (t === finish + 2) {
+                for (let c=0; c<3; c++) {
+                    combined[0][c][p] = local[0][c][p] + combined[1][c][p];
+                    arrows.push({ from: [1, c], to: [0, c], val: combined[1][c][p], s: p });
+                    tags[1][c].push({ type: 'FWD-OUT' }); tags[0][c].push({ type: 'FWD-IN' });
+                }
+            }
+            if (t === finish + 3) {
+                for (let c=0; c<3; c++) {
+                    output[c][p] = combined[0][c][p];
+                    tags[0][c].push({ type: 'EMIT' });
+                }
+            }
+        });
+        snapshots.push({ stageIdx: snapshots.length, phase: 'compute', t, local: deepCopy(local), localMod: deepCopy(localMod), combined: deepCopy(combined), output: deepCopy(output), tags, arrows, glb, rf, log });
+    }
+    return snapshots;
+}
+const SNAPSHOTS = precompute();
+
+// DOM Init
+const filterSidebar = [];
+const filterGrid = document.getElementById('filter-grid');
+for (let r=0; r<3; r++) { filterSidebar[r] = []; for (let c=0; c<3; c++) { const el = document.createElement('div'); el.className='matrix-cell f-cell'; el.textContent=F[r][c]; filterGrid.appendChild(el); filterSidebar[r][c]=el; } }
+const outputGrid = document.getElementById('output-grid');
+const outCells = [];
+for (let r=0; r<3; r++) { outCells[r] = []; for (let c=0; c<3; c++) { const el = document.createElement('div'); el.className='matrix-cell o-cell tile-o'; el.textContent='·'; outputGrid.appendChild(el); outCells[r][c]=el; } }
+const ifmapSidebar = [];
+const ifmapRowsDiv = document.getElementById('ifmap-rows');
+for (let r=0; r<5; r++) { const row = document.createElement('div'); row.className='flex items-center gap-1'; const lbl = document.createElement('span'); lbl.className='text-[9px] w-4 font-bold text-slate-400'; lbl.textContent=r; row.appendChild(lbl); ifmapSidebar[r]=[]; for (let c=0; c<5; c++) { const el = document.createElement('div'); el.className='matrix-cell i-cell'; el.textContent=I[r][c]; row.appendChild(el); ifmapSidebar[r][c]=el; } ifmapRowsDiv.appendChild(row); }
+const peGrid = document.getElementById('pe-grid');
+const peDOM = [];
+for (let r=0; r<3; r++) { peDOM[r]=[]; for (let c=0; c<3; c++) {
+    const box = document.createElement('div'); box.className='pe-box'; box.id=`pe-${r}-${c}`;
+    box.innerHTML = `
+        <div class="multiplier-led" id="led-${r}-${c}"></div>
+        <div class="text-[8px] font-bold text-slate-300 mb-1">PE(${r},${c})</div>
+        <div class="flex gap-1 mb-1 items-center"><span class="w-10 text-[7px] uppercase font-bold text-emerald-600/70">weight</span>${[0,1,2].map(i=>`<div class="tile tile-w is-empty" data-w="${i}">·</div>`).join('')}</div>
+        <div class="flex gap-1 mb-1 items-center"><span class="w-10 text-[7px] uppercase font-bold text-blue-600/70">ifmap</span>${[0,1,2,3,4].map(i=>`<div class="tile tile-i is-empty" data-i="${i}">·</div>`).join('')}</div>
+        <div class="flex gap-1 mb-1 items-center"><span class="w-10 text-[7px] uppercase font-bold text-yellow-600/70">psum</span>${[0,1,2].map(i=>`<div class="tile tile-a is-empty" data-a="${i}">0</div>`).join('')}</div>
+        ${r<2?`<div class="flex gap-1 mb-1 items-center"><span class="w-10 text-[7px] uppercase font-bold text-orange-600/70">comb</span>${[0,1,2].map(i=>`<div class="tile tile-c is-empty" data-c="${i}">·</div>`).join('')}</div>`:''}
+        ${r===0?`<div class="flex gap-1 mt-1 border-t pt-1 items-center"><span class="w-10 text-[7px] uppercase font-bold text-red-600/70">output</span>${[0,1,2].map(i=>`<div class="tile tile-o is-empty" data-o="${i}">·</div>`).join('')}</div>`:''}
+    `;
+    peGrid.appendChild(box);
+    peDOM[r][c] = { box, w: box.querySelectorAll('[data-w]'), i: box.querySelectorAll('[data-i]'), a: box.querySelectorAll('[data-a]'), c: box.querySelectorAll('[data-c]'), o: box.querySelectorAll('[data-o]'), led: box.querySelector('.multiplier-led') };
+} }
+
+function buildGantt() {
+    const el = document.getElementById('gantt');
+    let h = `<div class="grid" style="grid-template-columns: 80px repeat(${TOTAL_STAGES}, 60px); gap: 2px;"><div></div>`;
+    for(let t=0; t<TOTAL_STAGES; t++) h += `<div class="text-[9px] text-center font-bold text-slate-400">${t===0?'Idle':(t<=8?'L'+(t-1):'C'+(t-9))}</div>`;
+    h += '</div>';
+    for(let r=0; r<3; r++) for(let c=0; c<3; c++) {
+        h += `<div class="grid mt-1" style="grid-template-columns: 80px repeat(${TOTAL_STAGES}, 60px); gap: 2px;"><div class="text-[9px] font-bold text-slate-500">PE(${r},${c})</div>`;
+        for(let t=0; t<TOTAL_STAGES; t++) {
+            const types = SNAPSHOTS[t].tags[r][c].map(x=>x.type);
+            let lbl = '·', cls = 'gantt-cell';
+            if (types.includes('LOAD-W')) { lbl='WT-LD'; cls+=' gc-load'; }
+            else if (types.includes('LOAD-I')) { lbl='IN-LD'; cls+=' gc-route'; }
+            else if (types.includes('EMIT')) { lbl='EMIT'; cls+=' gc-emit'; }
+            else if (types.includes('MAC')) { lbl='MAC'; cls+=' gc-mac'; }
+            else if (types.includes('FWD-OUT') || types.includes('FWD-IN')) { lbl='FWD'; cls+=' gc-fwd'; }
+            h += `<div id="gantt-${r}-${c}-${t}" class="${cls}">${lbl}</div>`;
+        }
+        h += '</div>';
+    }
+    el.innerHTML = h;
+}
+buildGantt();
+
+function render(idx) {
+    const snap = SNAPSHOTS[idx];
+    document.getElementById('cycle-val').textContent = idx===0?'Ready':(idx<=8?`Transfer ${idx-1}`:(idx<=17?`Math Cycle ${idx-9}`:`Drain Cycle ${idx-18}`));
+    document.getElementById('scrubber').value = idx;
+    document.getElementById('stat-glb').textContent = snap.glb;
+    document.getElementById('stat-rf').textContent = snap.rf;
+    document.getElementById('reuse-total').textContent = Math.max(0, snap.rf - snap.glb);
+
+    const narr = NARRATIVES[idx];
+    document.getElementById('phase-title').textContent = narr.title;
+    document.getElementById('phase-text').textContent = narr.text;
+    const b = document.getElementById('phase-badge');
+    b.textContent = narr.badge; b.className = `badge badge-${narr.badge.toLowerCase().replace('-','')}`;
+
+    const g = document.getElementById('glb-bar'); const gt = document.getElementById('glb-bar-text');
+    if (idx===0) g.style.opacity = '0';
+    else if (idx<=3) { g.style.opacity = '1'; g.className = 'glb-bar glb-w'; gt.textContent = `📤 BROADCAST: Weight Row ${idx-1}`; }
+    else if (idx<=8) { g.style.opacity = '1'; g.className = 'glb-bar glb-i'; gt.textContent = `📤 DIAGONAL ROUTE: Ifmap Row ${idx-4}`; }
+    else g.style.opacity = '0';
+
+    ifmapSidebar.forEach(r => r.forEach(c => c.classList.remove('i-active')));
+    filterSidebar.forEach(r => r.forEach(c => c.classList.remove('f-active')));
+
+    for (let r=0; r<3; r++) for (let c=0; c<3; c++) {
+        const dom = peDOM[r][c], tags = snap.tags[r][c];
+        const wLoaded = idx>0 && (idx-1)>=r, iLoaded = idx>0 && (idx-1)>=(3+r+c);
+        const mac = tags.find(t=>t.type==='MAC');
+
+        dom.led.classList.toggle('active', !!mac);
+        dom.w.forEach((tile, i) => { 
+            tile.textContent = wLoaded ? F[r][i] : '·'; 
+            tile.classList.toggle('is-empty', !wLoaded);
+            const active = mac && mac.k === i;
+            tile.classList.toggle('f-active', !!active);
+            if (active) filterSidebar[r][i].classList.add('f-active');
+        });
+        dom.i.forEach((tile, i) => { 
+            tile.textContent = iLoaded ? I[r+c][i] : '·'; 
+            tile.classList.toggle('is-empty', !iLoaded); 
+            const active = mac && mac.t_in === i;
+            tile.classList.toggle('i-active', !!active);
+            if (active) ifmapSidebar[mac.ifmap_row][mac.t_in].classList.add('i-active');
+        });
+        dom.a.forEach((tile, i) => { 
+            tile.textContent = snap.local[r][c][i]; 
+            const active = mac && mac.p === i;
+            tile.classList.toggle('a-active', !!active);
+            tile.classList.toggle('is-empty', !snap.localMod[r][c][i]); 
+        });
+        if (dom.c) dom.c.forEach((tile, i) => { 
+            tile.textContent = snap.combined[r][c][i] === null ? '·' : snap.combined[r][c][i]; 
+            tile.classList.toggle('is-empty', snap.combined[r][c][i] === null); 
+        });
+        if (dom.o) dom.o.forEach((tile, i) => {
+            const filled = snap.output[c][i] !== null;
+            tile.textContent = filled ? snap.output[c][i] : '·';
+            tile.classList.toggle('is-empty', !filled);
+            tile.classList.toggle('filled', filled);
+        });
+        dom.box.classList.toggle('pe-active', tags.length > 0);
+    }
+
+    for (let r=0; r<3; r++) for (let c=0; c<3; c++) {
+        const v = snap.output[r][c];
+        outCells[r][c].textContent = v === null ? '·' : v;
+        outCells[r][c].classList.toggle('filled', v !== null);
+    }
+    document.getElementById('event-log').innerHTML = snap.log.map(l => `<div>${l}</div>`).join('');
+    document.querySelectorAll('.gc-current').forEach(e => e.classList.remove('gc-current'));
+    for (let r=0; r<3; r++) for (let c=0; c<3; c++) {
+        const cell = document.getElementById(`gantt-${r}-${c}-${idx}`);
+        if(cell) cell.classList.add('gc-current');
+    }
+    drawArrows(snap);
+}
+
+function drawArrows(snap) {
+    const svg = document.getElementById('arrow-svg'), wrap = document.getElementById('pe-grid-wrap'), rect = wrap.getBoundingClientRect();
+    svg.setAttribute('viewBox', `0 0 ${rect.width} ${rect.height}`);
+    svg.innerHTML = `<defs><marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/></marker></defs>`;
+    if (snap.phase === 'weight-load') {
+        const r = snap.activeWR;
+        for (let c=0; c<3; c++) {
+            const d = document.getElementById(`pe-${r}-${c}`).getBoundingClientRect();
+            const x = d.left + d.width/2 - rect.left;
+            const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            l.setAttribute('x1', x); l.setAttribute('y1', 40); l.setAttribute('x2', x); l.setAttribute('y2', d.top-rect.top-5);
+            l.setAttribute('class', 'arrow-load-w'); svg.appendChild(l);
+        }
+    } else if (snap.phase === 'ifmap-load') {
+        const ir = snap.activeIR;
+        for (let r=0; r<3; r++) for (let c=0; c<3; c++) if (r+c === ir) {
+            const d = document.getElementById(`pe-${r}-${c}`).getBoundingClientRect();
+            const x = d.left + d.width/2 - rect.left;
+            const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            l.setAttribute('x1', x); l.setAttribute('y1', 40); l.setAttribute('x2', x); l.setAttribute('y2', d.top-rect.top-5);
+            l.setAttribute('class', 'arrow-load-i'); svg.appendChild(l);
+        }
+    }
+    if (snap.arrows) {
+        snap.arrows.forEach(a => {
+            const f = document.getElementById(`pe-${a.from[0]}-${a.from[1]}`).getBoundingClientRect();
+            const t = document.getElementById(`pe-${a.to[0]}-${a.to[1]}`).getBoundingClientRect();
+            const x = f.left + f.width/2 - rect.left;
+            const l = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            l.setAttribute('x1', x); l.setAttribute('y1', f.top-rect.top); l.setAttribute('x2', x); l.setAttribute('y2', t.bottom-rect.top);
+            l.setAttribute('stroke', '#f59e0b'); l.setAttribute('stroke-width', '2'); l.setAttribute('marker-end', 'url(#head)');
+            svg.appendChild(l);
+        });
+    }
+}
+
+let stage = 0, playing = false, timer = null;
+function update(v) { stage = Math.max(0, Math.min(TOTAL_STAGES - 1, v)); render(stage); }
+function stop() { playing = false; clearInterval(timer); document.getElementById('play-text').textContent = 'Play'; }
+function play() { playing = true; timer = setInterval(() => { if (stage < TOTAL_STAGES - 1) update(stage+1); else stop(); }, document.getElementById('speed-select').value); document.getElementById('play-text').textContent = 'Pause'; }
+
+document.getElementById('play-btn').onclick = () => playing ? stop() : play();
+document.getElementById('next-btn').onclick = () => { stop(); update(stage+1); };
+document.getElementById('prev-btn').onclick = () => { stop(); update(stage-1); };
+document.getElementById('reset-btn').onclick = () => { stop(); update(0); };
+document.getElementById('jump-transfer').onclick = () => { stop(); update(1); };
+document.getElementById('jump-compute').onclick = () => { stop(); update(9); };
+document.getElementById('scrubber').oninput = (e) => { stop(); update(parseInt(e.target.value)); };
+
+window.onload = () => render(0);
+window.onresize = () => render(stage);
+</script>
+</body>
+</html>
